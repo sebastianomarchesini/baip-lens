@@ -13,7 +13,7 @@ body:
     attributes:
       label: Version
       description: Output of `baip-lens version`
-      placeholder: baip-lens 0.1.0 (node 22.x, linux)
+      placeholder: baip-lens 0.2.0 (node 22.x, linux)
     validations:
       required: true
   - type: dropdown

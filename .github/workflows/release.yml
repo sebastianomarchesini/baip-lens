@@ -1,13 +1,13 @@
 name: Release
 
-# Runs when a version tag is pushed, for example `git tag v0.1.0 && git push origin v0.1.0`.
+# Runs when a version tag is pushed, for example `git tag v0.2.0 && git push origin v0.2.0`.
 # Publishes the `baip-lens` package to npm with provenance and creates the GitHub release
 # from the matching CHANGELOG.md section.
 #
 # npm authentication, in order of preference:
 #   1. Trusted publishing (no token): on npmjs.com open the baip-lens package →
 #      Settings → Trusted publisher → GitHub Actions, and enter
-#      owner `sebastianomarchesini`, repository `BAIP-Lens`, workflow `release.yml`
+#      owner `sebastianomarchesini`, repository `baip-lens`, workflow `release.yml`
 #      and environment `npm`.
 #   2. Fallback: a granular access token with publish permission for baip-lens
 #      (bypass 2FA) stored as the repository secret NPM_TOKEN.
