@@ -90,7 +90,7 @@ describe('analyze: which rules run', () => {
   it('reanalyze() of a project snapshot keeps the project collector and omits CF rules', () => {
     const snapshot: Snapshot = {
       schemaVersion: SNAPSHOT_SCHEMA_VERSION,
-      tool: { name: 'btp-lens', version: '0.0.0' },
+      tool: { name: 'baip-lens', version: '0.0.0' },
       scannedAt: NOW,
       scope: { orgs: [], projects: ['acme'] },
       options: { deep: false, probeRoutes: false },

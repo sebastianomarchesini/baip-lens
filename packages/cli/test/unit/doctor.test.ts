@@ -14,13 +14,13 @@ function jwt(expSeconds: number): string {
 }
 
 async function cfHome(config: object): Promise<string> {
-  const home = await mkdtemp(join(tmpdir(), 'btp-lens-doctor-'));
+  const home = await mkdtemp(join(tmpdir(), 'baip-lens-doctor-'));
   await mkdir(join(home, '.cf'));
   await writeFile(join(home, '.cf', 'config.json'), JSON.stringify(config));
   return home;
 }
 
-describe('btp-lens doctor', () => {
+describe('baip-lens doctor', () => {
   it('passes on a healthy setup and says so in one line per check', async () => {
     const home = await cfHome({
       Target: 'https://api.cf.example.org',
@@ -78,7 +78,7 @@ describe('btp-lens doctor', () => {
   });
 
   it('explains a proxy 403 and never tells people to run doctor again', async () => {
-    const home = await mkdtemp(join(tmpdir(), 'btp-lens-doctor-'));
+    const home = await mkdtemp(join(tmpdir(), 'baip-lens-doctor-'));
     const fake = new FakeFetch().on('GET', 'api.cf.example.org/', () =>
       jsonResponse({ errors: [] }, 403),
     );
@@ -93,11 +93,11 @@ describe('btp-lens doctor', () => {
     const text = formatDoctor(checks);
     expect(text).toContain('FAIL Cloud Foundry API');
     expect(text).toContain('proxy or firewall');
-    expect(text).not.toMatch(/Run `btp-lens doctor`/);
+    expect(text).not.toMatch(/Run `baip-lens doctor`/);
   });
 
   it('recognises TLS interception hidden behind "fetch failed" and fits proxy advice to Node', async () => {
-    const home = await mkdtemp(join(tmpdir(), 'btp-lens-doctor-'));
+    const home = await mkdtemp(join(tmpdir(), 'baip-lens-doctor-'));
     const failWith = (message: string, code: string) =>
       new FakeFetch().on('GET', 'api.cf.example.org/', () => {
         throw new TypeError('fetch failed', { cause: Object.assign(new Error(message), { code }) });
@@ -127,7 +127,7 @@ describe('btp-lens doctor', () => {
   });
 
   it('treats a missing cf CLI login as fine, because guided mode signs in itself', async () => {
-    const home = await mkdtemp(join(tmpdir(), 'btp-lens-doctor-'));
+    const home = await mkdtemp(join(tmpdir(), 'baip-lens-doctor-'));
     const checks = await runDoctor({ env: { CF_HOME: home }, cwd: home, nodeVersion: '24.0.0' });
     expect(checks.find((c) => c.name === 'cf CLI login')?.ok).toBe(true);
     expect(checks.find((c) => c.name === 'Cloud Foundry API')?.detail).toContain('Not tested');

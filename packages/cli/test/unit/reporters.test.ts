@@ -22,7 +22,7 @@ async function acmeReport() {
     deep: false,
     probeRoutes: true,
     concurrency: 5,
-    env: { BTP_LENS_ACCESS_TOKEN: ACME.token },
+    env: { BAIP_LENS_ACCESS_TOKEN: ACME.token },
     fetch: acmeFetch().fetch,
     now: () => ACME.now,
   });
@@ -68,7 +68,7 @@ function projectReport() {
   const analysis = analyze(raw, NOW, [PROJECT_COLLECTOR], [rule]);
   const snapshot: Snapshot = {
     schemaVersion: SNAPSHOT_SCHEMA_VERSION,
-    tool: { name: 'btp-lens', version: '0.0.0' },
+    tool: { name: 'baip-lens', version: '0.0.0' },
     scannedAt: NOW,
     scope: { orgs: [], projects: ['acme-incidents'] },
     options: { deep: false, probeRoutes: false },
@@ -162,7 +162,7 @@ describe('SARIF report', () => {
     };
     expect(sarif.version).toBe('2.1.0');
     const run = sarif.runs[0];
-    expect(run?.tool.driver.name).toBe('btp-lens');
+    expect(run?.tool.driver.name).toBe('baip-lens');
     expect(run?.tool.driver.rules.map((r) => r.id)).toContain('APP_NO_RECENT_DEPLOY');
     const legacy = run?.results.find((r) =>
       r.locations[0]?.physicalLocation.artifactLocation.uri.endsWith('/legacy-reporting'),
@@ -176,7 +176,7 @@ describe('SARIF report', () => {
     expect(legacy?.locations[0]?.physicalLocation.artifactLocation.uri).toBe(
       'cf/acme-prod/prod/legacy-reporting',
     );
-    expect(legacy?.partialFingerprints['btpLensFinding/v1']).toMatch(/^[0-9a-f]{64}$/);
+    expect(legacy?.partialFingerprints['baipLensFinding/v1']).toMatch(/^[0-9a-f]{64}$/);
   });
 
   it('keeps the 0.1 fingerprint for CF findings and tags rules with their OWASP categories', async () => {
@@ -193,7 +193,7 @@ describe('SARIF report', () => {
       .update(`APP_NO_RECENT_DEPLOY:${result.properties.appGuid}`)
       .digest('hex');
     expect(result.partialFingerprints).toEqual({
-      'btpLensFinding/v1': expected,
+      'baipLensFinding/v1': expected,
       primaryLocationLineHash: expected,
     });
     expect(run.tool.driver.rules[0]?.properties.tags).toEqual([
@@ -222,10 +222,10 @@ describe('SARIF report', () => {
     expect(second?.locations[0]?.physicalLocation).toEqual({
       artifactLocation: { uri: 'srv/services.cds', uriBaseId: 'PROJECTROOT' },
     });
-    expect(first?.partialFingerprints['btpLensFinding/v1']).not.toBe(
-      second?.partialFingerprints['btpLensFinding/v1'],
+    expect(first?.partialFingerprints['baipLensFinding/v1']).not.toBe(
+      second?.partialFingerprints['baipLensFinding/v1'],
     );
-    expect(first?.partialFingerprints['btpLensFinding/v1']).toBe(
+    expect(first?.partialFingerprints['baipLensFinding/v1']).toBe(
       createHash('sha256')
         .update('TEST_RULE:project:acme-incidents:srv/services.cds:AdminService')
         .digest('hex'),
@@ -288,7 +288,7 @@ describe('HTML report', () => {
     expect(html).not.toContain(DATA_PLACEHOLDER);
     expect(html).not.toContain('</script><script>alert(1)');
     expect(html).toContain('\\u003c/script\\u003e');
-    const json = /<script type="application\/json" id="btp-lens-data">(.*?)<\/script>/s.exec(
+    const json = /<script type="application\/json" id="baip-lens-data">(.*?)<\/script>/s.exec(
       html,
     )?.[1];
     const embedded = JSON.parse(json ?? 'null') as {
@@ -308,10 +308,10 @@ describe('HTML report', () => {
   it('accepts a placeholder that a formatter wrapped over several lines', async () => {
     const data = await acmeReport();
     const wrapped =
-      '<body>\n    <script type="application/json" id="btp-lens-data">\n      <!--BTP_LENS_DATA-->\n    </script>\n</body>';
+      '<body>\n    <script type="application/json" id="baip-lens-data">\n      <!--BAIP_LENS_DATA-->\n    </script>\n</body>';
     const html = renderHtml(data, wrapped);
-    expect(html).not.toContain('BTP_LENS_DATA');
-    expect(html).toMatch(/<script type="application\/json" id="btp-lens-data">\{.*\}<\/script>/s);
+    expect(html).not.toContain('BAIP_LENS_DATA');
+    expect(html).toMatch(/<script type="application\/json" id="baip-lens-data">\{.*\}<\/script>/s);
   });
 
   it('escapes JS line separators', () => {

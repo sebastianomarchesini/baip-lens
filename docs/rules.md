@@ -1,6 +1,6 @@
 # Rules
 
-Every finding has a stable rule id, a severity, the evidence that triggered it, a concrete remediation and reference links. Rules are pure functions of the collected data. They use the **scan time** as "now", so `btp-lens report --from snapshot.json` gives the same result offline. The data behind each rule, and its limits, are recorded in [data-sources.md](data-sources.md).
+Every finding has a stable rule id, a severity, the evidence that triggered it, a concrete remediation and reference links. Rules are pure functions of the collected data. They use the **scan time** as "now", so `baip-lens report --from snapshot.json` gives the same result offline. The data behind each rule, and its limits, are recorded in [data-sources.md](data-sources.md).
 
 Every rule carries one or more [OWASP Top 10 (2025)](https://owasp.org/Top10/2025/) categories. They appear as `owasp/<id>` tags in the SARIF output and next to the rule in the HTML report.
 
@@ -29,7 +29,7 @@ Every rule carries one or more [OWASP Top 10 (2025)](https://owasp.org/Top10/202
 | [`SEED_DATA_SENSITIVE`](#seed_data_sensitive) | implemented | A04 | high | none (local files) |
 | [`UI5_BOOTSTRAP_EXTERNAL`](#ui5_bootstrap_external) | implemented | A08 | low / medium | none (local files) |
 
-The first group reads a Cloud Foundry org (`btp-lens scan`); the second reads a local CAP or MTA project directory (`btp-lens project --path <dir>`, see [Project rules](#project-rules)). For planned rules, the severity logic and the OWASP category below are the design, and they are confirmed or adjusted when the rule is implemented.
+The first group reads a Cloud Foundry org (`baip-lens scan`); the second reads a local CAP or MTA project directory (`baip-lens project --path <dir>`, see [Project rules](#project-rules)). For planned rules, the severity logic and the OWASP category below are the design, and they are confirmed or adjusted when the rule is implemented.
 
 ## Criticality
 
@@ -55,7 +55,7 @@ A scan records every rule it considered in `checks[]`, next to the collectors:
 - A rule is recorded as **skipped** (`dependency_skipped`) when its collector was part of the scan but did not run, for example after a 403 or a collector error. The reader then knows what was not looked at; "no findings" is never the same as "not checked".
 - Otherwise the rule is recorded as `ran`, with or without findings.
 
-`btp-lens report --from` re-runs the rules on a snapshot and applies the same two conditions to the checks stored in it, so a snapshot from a Cloud Foundry scan never gains project rules by being reanalysed, and the reverse.
+`baip-lens report --from` re-runs the rules on a snapshot and applies the same two conditions to the checks stored in it, so a snapshot from a Cloud Foundry scan never gains project rules by being reanalysed, and the reverse.
 
 ## Risk score
 
@@ -94,7 +94,7 @@ Apps are ranked by a weighted sum of their findings: critical 100, high 25, medi
 
 ## DEP_KNOWN_CVE
 
-**A dependency in the SBOM has a known vulnerability.** The SBOM is built locally with `btp-lens sbom` from `package-lock.json`, `pom.xml` or `mta.yaml`.
+**A dependency in the SBOM has a known vulnerability.** The SBOM is built locally with `baip-lens sbom` from `package-lock.json`, `pom.xml` or `mta.yaml`.
 
 - **Data:** OSV.dev `POST /v1/querybatch`, then `GET /v1/vulns/{id}` for severity.
 - **Severity:** from the highest CVSS base score.
@@ -181,9 +181,9 @@ Apps are ranked by a weighted sum of their findings: critical 100, high 25, medi
 
 ## Project rules
 
-`btp-lens project --path <dir>` scans a local CAP or MTA project: it reads an allow-list of project files (configuration, descriptors, CDS models, seed CSV headers and HTML pages) from the file system, with no network access, no child processes and no `git` call, and applies the thirteen rules below. What is read, what is never read and the parser limits are in [data-sources.md](data-sources.md#8-local-project-files-btp-lens-project); what is kept from the files is in [privacy.md](privacy.md#project-scans).
+`baip-lens project --path <dir>` scans a local CAP or MTA project: it reads an allow-list of project files (configuration, descriptors, CDS models, seed CSV headers and HTML pages) from the file system, with no network access, no child processes and no `git` call, and applies the thirteen rules below. What is read, what is never read and the parser limits are in [data-sources.md](data-sources.md#8-local-project-files-baip-lens-project); what is kept from the files is in [privacy.md](privacy.md#project-scans).
 
-The rules translate the OWASP Top 10 (2025) patterns of the public SAP TechEd 2026 workshop **XP261 "From Code to Compliance"** (<https://github.com/SAP-samples/teched2026-XP261>, Apache-2.0) into deterministic, evidence-backed checks: no AI, no code execution, no exploitation, the same result on every run and offline with `report --from`. BTP Lens is an independent open-source project and is **not affiliated with, endorsed by or sponsored by SAP SE**; the workshop is cited as the source of the patterns and of the criticality matrix, nothing more.
+The rules translate the OWASP Top 10 (2025) patterns of the public SAP TechEd 2026 workshop **XP261 "From Code to Compliance"** (<https://github.com/SAP-samples/teched2026-XP261>, Apache-2.0) into deterministic, evidence-backed checks: no AI, no code execution, no exploitation, the same result on every run and offline with `report --from`. BAIP Lens is an independent open-source project and is **not affiliated with, endorsed by or sponsored by SAP SE**; the workshop is cited as the source of the patterns and of the criticality matrix, nothing more.
 
 Every project finding carries `evidence.subject` (the service, entity, role, scope, route source, file or column it is about), the two matrix inputs, and a `location` (file, and line where the parser knows it) that the SARIF output turns into a code-scanning annotation. Each rule yields one finding per subject per project. Evidence never contains a value copied from the project other than identifiers, counts, booleans and relative file names; the `.cdsrc-private.json`, `.cdsrc.js`, `.env`, `default-env.json`, `*.mtaext` and `CDS_*` sources are never opened, so every rule reflects the committed configuration and says so in its limits. The links in the references are the canonical SAP, CAP and OWASP pages; because `cap.cloud.sap`, `help.sap.com`, `ui5.sap.com` and `owasp.org` do not resolve from the build environment, each section records which GitHub mirror of the page was read to verify it.
 
@@ -426,7 +426,7 @@ The synthetic fixture `packages/cli/test/fixtures/projects/acme-incidents` trigg
 - **Limits / what does not trigger:**
   - An archive that a `.gitignore` pattern matches produces nothing, whether or not the folder is a repository. The rule checks the ignore configuration, not the index: an archive that was committed before the pattern was added is still in the history, yet it counts as ignored and produces no finding, hence `tracked: 'unknown'` on the findings that are emitted. Running `git ls-files '*.mtar'` answers that question.
   - Only `.gitignore` files are read: `.git/info/exclude`, the global `core.excludesFile` and the ignore rules of other version control systems are not, so an archive excluded only there is reported. Conversely, the matcher treats a file inside an ignored directory as ignored even when a deeper pattern re-includes it, which matches git ("It is not possible to re-include a file if a parent directory of that file is excluded").
-  - A root `.gitignore` that exists but does not cover the archive still triggers; the `gitIgnore.present` flag changes nothing. The pattern must come from the project itself: the repository that ships `btp-lens` ignores `*.mtar`, but that does not help a scanned project.
+  - A root `.gitignore` that exists but does not cover the archive still triggers; the `gitIgnore.present` flag changes nothing. The pattern must come from the project itself: the repository that ships `baip-lens` ignores `*.mtar`, but that does not help a scanned project.
   - Archives under skipped directories (for example `dist/` or `target/`) are never seen, and the walk stops after 20 000 entries or 200 archives. Other packaged artifacts (`.zip`, `.jar`, `.war`, `.tgz`) are out of scope: the rule is about the MTA archive, the artifact `mbt build` writes into the project by default.
   - `repository` is the presence of a `.git` entry in the project root or one of its ancestors (a CAP project is often a folder inside a larger repository), and the `.gitignore` files between that repository root and the project root are honoured, so an archive that a parent `.gitignore` excludes, or a project folder that one excludes altogether, produces nothing. A project whose `.git` lives elsewhere (`--git-dir`, `GIT_DIR`) is reported as `repository: false` and therefore `low`; a `.git` directory left by a template clone, or one more than 64 levels up, counts as present or absent accordingly.
   - The `gitignore(5)` manual was verified through the `git/git` GitHub mirror (`Documentation/gitignore.adoc`: "Files already tracked by Git are not affected; see the NOTES below for details", "To stop tracking a file that is currently tracked, use `git rm --cached` to remove the file from the index"); the link is the canonical page it publishes to. The Cloud MTA Build Tool usage page was verified through the `SAP/cloud-mta-build-tool` mirror (`docs/docs/usage.md`: "If this parameter is not provided, the `MTAR` file is saved in the `mta_archives` subfolder of the current folder", default name `<mta_application_ID>_<mta_application_version>.mtar`; `docs/docs/configuration.md`: the default `build-result` is "`<module's folder>`" for every builder but `maven` and `fetcher`, and `ignore` lists "Files and/or subfolders to exclude from the package"); `sap.github.io` does not resolve from the build environment, so the link is the canonical published page. The SAP Help page was verified through the `SAP-docs/btp-cloud-platform` mirror (`docs/30-development/multitarget-applications-in-the-cloud-foundry-environment-d04fc0e.md`, which defines the archive as "Archive containing a deployment descriptor, the module and resource binaries, and configuration files"); `help.sap.com` does not resolve either, so the link is the canonical page that file publishes to. The OWASP link follows the `A03_2025-Software_Supply_Chain_Failures` entry in the OWASP/Top10 `2025/mkdocs.yml`, whose page recommends to "promote artifacts rather than rebuilding for each environment, ensure builds are immutable".

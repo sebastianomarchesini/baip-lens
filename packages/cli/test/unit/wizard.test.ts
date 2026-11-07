@@ -36,7 +36,7 @@ function guidedFetch(): FakeFetch {
     });
 }
 
-const tmp = () => mkdtemp(join(tmpdir(), 'btp-lens-wizard-'));
+const tmp = () => mkdtemp(join(tmpdir(), 'baip-lens-wizard-'));
 
 describe('guided mode', () => {
   it('scans with four questions, pastes the endpoint and signs in with a one-time code', async () => {
@@ -61,19 +61,19 @@ describe('guided mode', () => {
       now: () => ACME.now,
     });
     expect(code).toBe(0);
-    const dir = join(cwd, 'btp-lens-reports', reportDirName(ACME.now));
+    const dir = join(cwd, 'baip-lens-reports', reportDirName(ACME.now));
     expect((await readdir(dir)).sort()).toEqual([
-      'btp-lens-apps.csv',
-      'btp-lens-findings.csv',
-      'btp-lens-report.html',
-      'btp-lens-report.json',
-      'btp-lens-report.sarif',
+      'baip-lens-apps.csv',
+      'baip-lens-findings.csv',
+      'baip-lens-report.html',
+      'baip-lens-report.json',
+      'baip-lens-report.sarif',
       'snapshot-20260929T000000Z.json',
     ]);
     // The passcode page was opened, then the finished report.
     expect(opened).toEqual([
       'https://login.cf.example.org/passcode',
-      join(dir, 'btp-lens-report.html'),
+      join(dir, 'baip-lens-report.html'),
     ]);
     const text = prompter.transcript.join('\n');
     expect(text).toContain('You have access to one org: acme-prod.');
@@ -86,7 +86,7 @@ describe('guided mode', () => {
     expect(snapshot).not.toContain('POISON');
   }, 20_000);
 
-  it('picks a region from the list and uses BTP_LENS_ACCESS_TOKEN silently', async () => {
+  it('picks a region from the list and uses BAIP_LENS_ACCESS_TOKEN silently', async () => {
     const cwd = await tmp();
     const trial = REGIONS.findIndex((r) => r.id === 'us10-001');
     const host = 'api.cf.us10-001.hana.ondemand.com';
@@ -101,14 +101,14 @@ describe('guided mode', () => {
     await expect(
       runWizard({
         prompter,
-        env: { BTP_LENS_ACCESS_TOKEN: 'abc', CF_HOME: cwd },
+        env: { BAIP_LENS_ACCESS_TOKEN: 'abc', CF_HOME: cwd },
         cwd,
         open: null,
         fetch: fake.fetch,
         now: () => ACME.now,
       }),
     ).rejects.toThrow(/no role in any Cloud Foundry org/);
-    expect(prompter.transcript.join('\n')).toContain('Using the token from BTP_LENS_ACCESS_TOKEN');
+    expect(prompter.transcript.join('\n')).toContain('Using the token from BAIP_LENS_ACCESS_TOKEN');
     expect(fake.calls.map((c) => c.url.pathname)).toEqual(['/', '/v3/organizations']);
   });
 
@@ -128,7 +128,7 @@ describe('guided mode', () => {
       await expect(
         runWizard({
           prompter,
-          env: { BTP_LENS_ACCESS_TOKEN: 'abc', CF_HOME: cwd },
+          env: { BAIP_LENS_ACCESS_TOKEN: 'abc', CF_HOME: cwd },
           cwd,
           open: null,
           fetch: fake.fetch,
@@ -152,7 +152,7 @@ describe('guided mode', () => {
     });
     expect(code).toBe(0);
     expect(prompter.transcript.at(-1)).toBe('Cancelled. Nothing was written.');
-    await expect(readdir(join(cwd, 'btp-lens-reports'))).rejects.toThrow();
+    await expect(readdir(join(cwd, 'baip-lens-reports'))).rejects.toThrow();
   });
 
   it('retries a wrong one-time code and never echoes it', async () => {
@@ -200,7 +200,7 @@ describe('explainConnectionError', () => {
       explainConnectionError(new Error('getaddrinfo ENOTFOUND api.cf.example.org'), api),
     ).toMatch(/could not be found/);
     expect(explainConnectionError(new Error('fetch failed'), api)).toMatch(/HTTPS_PROXY/);
-    expect(explainConnectionError(new Error('CF API 500'), api)).toMatch(/btp-lens doctor/);
+    expect(explainConnectionError(new Error('CF API 500'), api)).toMatch(/baip-lens doctor/);
     expect(explainConnectionError(new Error('CF API 403 for https://x/'), api)).toMatch(
       /proxy or firewall/,
     );

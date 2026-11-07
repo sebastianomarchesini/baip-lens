@@ -1,5 +1,5 @@
 /**
- * The egress allow-list: the ONLY place that decides which hosts BTP Lens may
+ * The egress allow-list: the ONLY place that decides which hosts BAIP Lens may
  * contact, with which HTTP methods and paths, and whether credentials may be
  * sent. Every request goes through `EgressPolicy.authorize` before `fetch`
  * runs. See docs/data-sources.md §6.
@@ -76,7 +76,7 @@ function ruleFor(base: URL, rule: Omit<EgressRule, 'host' | 'port'>): EgressRule
 }
 
 /**
- * CF v3 endpoints that return secrets. BTP Lens never needs them: `/env`
+ * CF v3 endpoints that return secrets. BAIP Lens never needs them: `/env`
  * includes VCAP_SERVICES credentials and `/details` is the binding's
  * credentials. Environment variable *names* come from
  * `/environment_variables`, which stays allowed for `--deep`.

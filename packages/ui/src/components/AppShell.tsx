@@ -84,7 +84,7 @@ export function AppShell() {
   // One document title and one page heading per section, and focus moved to the
   // page on navigation: a title change alone is not announced in a single-page app.
   useEffect(() => {
-    document.title = `${section} · BTP Lens report`;
+    document.title = `${section} · BAIP Lens report`;
   }, [section]);
   useEffect(() => {
     if (firstRender.current) {
@@ -110,7 +110,7 @@ export function AppShell() {
       <EmptyState
         name="NoData"
         title="No scan data in this file"
-        subtitle="Create a report with `btp-lens scan`, or from a snapshot with `btp-lens report --from <snapshot.json>`."
+        subtitle="Create a report with `baip-lens scan`, or from a snapshot with `baip-lens report --from <snapshot.json>`."
       />
     );
   } else {
@@ -124,11 +124,11 @@ export function AppShell() {
   return (
     <div className="shell">
       <ShellBar
-        primaryTitle="BTP Lens"
+        primaryTitle="BAIP Lens"
         secondaryTitle={
           data ? `${scopeLabel(data.scope)} · ${formatDateTime(data.scannedAt)}` : undefined
         }
-        logo={<img src={logoUrl} alt="BTP Lens home" width={32} height={32} />}
+        logo={<img src={logoUrl} alt="BAIP Lens home" width={32} height={32} />}
         onLogoClick={() => void navigate('/')}
       >
         <ShellBarItem

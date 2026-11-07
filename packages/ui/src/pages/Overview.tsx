@@ -1,4 +1,4 @@
-import type { ReportData } from '@btp-lens/model';
+import type { ReportData } from '@baip-lens/model';
 import { Card, CardHeader, List, ListItemStandard, MessageStrip } from '@ui5/webcomponents-react';
 import { useNavigate, useOutletContext } from 'react-router';
 import { EmptyState } from '../components/EmptyState';

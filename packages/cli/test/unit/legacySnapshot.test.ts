@@ -5,7 +5,8 @@ import { ReportDataSchema, type Snapshot, SnapshotSchema } from '../../src/model
 import { toReportData } from '../../src/reporters/reportData.js';
 
 /**
- * A snapshot written by btp-lens 0.1.0, frozen (never regenerated). Newer
+ * A snapshot written by btp-lens 0.1.0 (the tool's name before it became BAIP Lens),
+ * frozen (never regenerated). Newer
  * versions must keep reading it: the schema version stays 1, new fields are
  * optional or defaulted, and `report --from` gives the same findings.
  */
@@ -21,6 +22,7 @@ describe('0.1.0 snapshot compatibility', () => {
     expect(snapshot.raw.projects).toEqual([]);
     expect(snapshot.apps.every((app) => app.kind === 'app')).toBe(true);
     expect(snapshot.scope.apiEndpoint).toBe('https://api.cf.example.org/');
+    expect(snapshot.tool.name).toBe('btp-lens');
   });
 
   it('re-analyzes to the same three findings and omits the project rules', () => {

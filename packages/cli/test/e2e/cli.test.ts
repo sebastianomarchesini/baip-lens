@@ -20,7 +20,7 @@ function capture(fake = acmeFetch()): Captured {
     io: {
       stdout: (t) => (out += t),
       stderr: (t) => (err += t),
-      env: { BTP_LENS_ACCESS_TOKEN: ACME.token },
+      env: { BAIP_LENS_ACCESS_TOKEN: ACME.token },
       fetch: fake.fetch,
       now: () => ACME.now,
     },
@@ -29,7 +29,7 @@ function capture(fake = acmeFetch()): Captured {
   };
 }
 
-const tmp = () => mkdtemp(join(tmpdir(), 'btp-lens-cli-'));
+const tmp = () => mkdtemp(join(tmpdir(), 'baip-lens-cli-'));
 const scanArgs = (out: string, ...extra: string[]) => [
   'scan',
   '--api',
@@ -43,22 +43,22 @@ const scanArgs = (out: string, ...extra: string[]) => [
   ...extra,
 ];
 
-describe('btp-lens CLI', () => {
+describe('baip-lens CLI', () => {
   it('scans and writes a snapshot plus the requested reports', async () => {
     const out = await tmp();
     const c = capture();
     expect(await main(scanArgs(out), c.io)).toBe(EXIT.ok);
     expect((await readdir(out)).sort()).toEqual([
-      'btp-lens-apps.csv',
-      'btp-lens-findings.csv',
-      'btp-lens-report.json',
-      'btp-lens-report.sarif',
+      'baip-lens-apps.csv',
+      'baip-lens-findings.csv',
+      'baip-lens-report.json',
+      'baip-lens-report.sarif',
       'snapshot-20260929T000000Z.json',
     ]);
     expect(c.out()).toContain(
       'Scanned 8 app(s) in acme-prod: 3 finding(s) (0 critical, 0 high, 1 medium, 2 low, 0 info)',
     );
-    expect(c.err()).toContain('Credentials: BTP_LENS_ACCESS_TOKEN');
+    expect(c.err()).toContain('Credentials: BAIP_LENS_ACCESS_TOKEN');
     // SEC-22: the sharing warning is printed once per scan.
     expect(c.out().match(/do not commit them/g)).toHaveLength(1);
   });
@@ -71,7 +71,7 @@ describe('btp-lens CLI', () => {
     c.io.fetch = () => Promise.reject(new Error('network must not be used'));
     const args = ['project', '--path', project, '--out', out, '--format', 'json'];
     expect(await main(args, c.io)).toBe(EXIT.ok);
-    const report = JSON.parse(await readFile(join(out, 'btp-lens-report.json'), 'utf8')) as {
+    const report = JSON.parse(await readFile(join(out, 'baip-lens-report.json'), 'utf8')) as {
       summary: { apps: number; projects: number };
       scope: { orgs: string[]; projects?: string[]; apiEndpoint?: string };
       apps: { kind: string; guid: string }[];
@@ -159,7 +159,7 @@ describe('btp-lens CLI', () => {
       noNetwork.io,
     );
     expect(code).toBe(EXIT.findings);
-    const report = JSON.parse(await readFile(join(reportOut, 'btp-lens-report.json'), 'utf8')) as {
+    const report = JSON.parse(await readFile(join(reportOut, 'baip-lens-report.json'), 'utf8')) as {
       findings: unknown[];
     };
     expect(report.findings).toHaveLength(3);
@@ -183,7 +183,7 @@ describe('btp-lens CLI', () => {
     tty.io.isTTY = true;
     tty.io.cwd = await tmp();
     tty.io.open = null;
-    tty.io.env = { CF_HOME: tty.io.cwd, BTP_LENS_ACCESS_TOKEN: ACME.token };
+    tty.io.env = { CF_HOME: tty.io.cwd, BAIP_LENS_ACCESS_TOKEN: ACME.token };
     tty.io.fetch = acmeFetch().on('GET', 'api.cf.example.org/v3/organizations?per_page=5000', () =>
       jsonResponse({
         pagination: { next: null },
@@ -221,7 +221,7 @@ describe('btp-lens CLI', () => {
   it('prints the version', async () => {
     const c = capture();
     expect(await main(['version'], c.io)).toBe(EXIT.ok);
-    expect(c.out()).toBe(`btp-lens ${TOOL_VERSION}\n`);
+    expect(c.out()).toBe(`baip-lens ${TOOL_VERSION}\n`);
     const v = capture();
     expect(await main(['--version'], v.io)).toBe(EXIT.ok);
     expect(v.out()).toContain(TOOL_VERSION);

@@ -9,11 +9,11 @@ import { copyFile, readFile, writeFile } from 'node:fs/promises';
 
 const root = new URL('../../../', import.meta.url);
 const pkg = JSON.parse(await readFile(new URL('../package.json', import.meta.url), 'utf8'));
-const repo = 'https://github.com/sebastianomarchesini/BTP-Lens';
+const repo = 'https://github.com/sebastianomarchesini/BAIP-Lens';
 const ref = `v${pkg.version}`;
 const blob = (path) => `${repo}/blob/${ref}/${path}`;
 const raw = (path) =>
-  `https://raw.githubusercontent.com/sebastianomarchesini/BTP-Lens/${ref}/${path}`;
+  `https://raw.githubusercontent.com/sebastianomarchesini/BAIP-Lens/${ref}/${path}`;
 
 /**
  * Rewrites `![alt](relative)` to raw file URLs and every other `](relative)`

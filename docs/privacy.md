@@ -1,10 +1,10 @@
 # Privacy
 
-BTP Lens runs on your machine and writes files to your disk. This page lists what it reads, what it keeps, and where requests go.
+BAIP Lens runs on your machine and writes files to your disk. This page lists what it reads, what it keeps, and where requests go.
 
 ## Principles
 
-1. **Read-only.** The HTTP client allows only `GET` to the CF API. This is enforced per host by the egress allow-list in `packages/cli/src/net/allowlist.ts`, and unit tests prove it. A project scan (`btp-lens project`) only reads files and makes no request at all.
+1. **Read-only.** The HTTP client allows only `GET` to the CF API. This is enforced per host by the egress allow-list in `packages/cli/src/net/allowlist.ts`, and unit tests prove it. A project scan (`baip-lens project`) only reads files and makes no request at all.
 2. **No data leaves the machine.** The allow-list is the only way out, and redirects are never followed. There is no telemetry.
 3. **No personal data** in any output.
 4. **No secret values** in any output.
@@ -57,7 +57,7 @@ A test scans the snapshot and every report format for planted secrets, emails, J
 
 ## Project scans
 
-`btp-lens project --path <dir>` reads files of a local CAP or MTA project. It makes **no network request at all**, starts no child process and never runs `git`; the only outbound connection of such a scan is none. The allow-list of files it opens, and the files it never opens, are in [data-sources.md §8](data-sources.md#8-local-project-files-btp-lens-project).
+`baip-lens project --path <dir>` reads files of a local CAP or MTA project. It makes **no network request at all**, starts no child process and never runs `git`; the only outbound connection of such a scan is none. The allow-list of files it opens, and the files it never opens, are in [data-sources.md §8](data-sources.md#8-local-project-files-baip-lens-project).
 
 What a project scan keeps:
 
@@ -86,4 +86,4 @@ Usage per user is not collected in v0.1. When it arrives in v0.2, it will be opt
 
 ## Retention
 
-Snapshots and reports are ordinary files in your `--out` folder. Delete them when you no longer need them. BTP Lens keeps no other copy.
+Snapshots and reports are ordinary files in your `--out` folder. Delete them when you no longer need them. BAIP Lens keeps no other copy.

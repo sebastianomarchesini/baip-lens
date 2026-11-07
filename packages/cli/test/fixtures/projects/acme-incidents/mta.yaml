@@ -1,7 +1,7 @@
 _schema-version: '3.1'
 ID: acme-incidents
 version: 1.0.0
-description: Synthetic incident-desk sample (btp-lens test fixture)
+description: Synthetic incident-desk sample (baip-lens test fixture)
 parameters:
   enable-parallel-deployments: true
 build-parameters:

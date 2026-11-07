@@ -64,7 +64,7 @@ export const RawDropletSchema = z.object({
 export type RawDroplet = z.infer<typeof RawDropletSchema>;
 
 /*
- * Local project (`btp-lens project`). Every field is an allow-listed
+ * Local project (`baip-lens project`). Every field is an allow-listed
  * structural fact: identifiers, relative file names, counts and booleans.
  * Never file contents, CSV values, user names, passwords, descriptions,
  * URLs with credentials or absolute paths. Every string has a maximum
@@ -413,7 +413,7 @@ export const RawDataSchema = z.object({
   apps: z.array(RawAppSchema),
   /** Current droplet per app; absent when the droplet collector was skipped. */
   droplets: z.array(RawDropletSchema),
-  /** Local projects (`btp-lens project`); empty for a CF scan and in snapshots written before 0.2. */
+  /** Local projects (`baip-lens project`); empty for a CF scan and in snapshots written before 0.2. */
   projects: z.array(RawProjectSchema).default([]),
 });
 export type RawData = z.infer<typeof RawDataSchema>;

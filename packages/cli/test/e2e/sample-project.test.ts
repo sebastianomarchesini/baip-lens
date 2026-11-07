@@ -14,7 +14,7 @@ import { type MaterializedFixture, materializeFixture } from '../support/project
  *  - test/fixtures/sample-project-snapshot.json feeds `npm run sample`;
  *  - packages/ui/src/test/fixtures/report-project.json is the UI's test data
  *    for a project scan.
- * Regenerate both with `UPDATE_SAMPLE=1 npm test -w btp-lens`.
+ * Regenerate both with `UPDATE_SAMPLE=1 npm test -w baip-lens`.
  */
 const SAMPLE_SNAPSHOT = fileURLToPath(
   new URL('../fixtures/sample-project-snapshot.json', import.meta.url),
@@ -55,10 +55,10 @@ describe('sample project data', () => {
 
     expect(SnapshotSchema.safeParse(JSON.parse(snapshotJson)).success).toBe(true);
     expect(ReportDataSchema.safeParse(JSON.parse(reportJson)).success).toBe(true);
-    expect(await readOrEmpty(SAMPLE_SNAPSHOT), 'run UPDATE_SAMPLE=1 npm test -w btp-lens').toBe(
+    expect(await readOrEmpty(SAMPLE_SNAPSHOT), 'run UPDATE_SAMPLE=1 npm test -w baip-lens').toBe(
       snapshotJson,
     );
-    expect(await readOrEmpty(UI_REPORT), 'run UPDATE_SAMPLE=1 npm test -w btp-lens').toBe(
+    expect(await readOrEmpty(UI_REPORT), 'run UPDATE_SAMPLE=1 npm test -w baip-lens').toBe(
       reportJson,
     );
   });

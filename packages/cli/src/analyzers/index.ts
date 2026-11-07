@@ -218,7 +218,7 @@ export function analyze(
 }
 
 /**
- * Re-runs every rule on a stored snapshot (e.g. after upgrading btp-lens).
+ * Re-runs every rule on a stored snapshot (e.g. after upgrading baip-lens).
  * Collector results are kept; rule results and findings are recomputed.
  */
 export function reanalyze(snapshot: Snapshot): Snapshot {

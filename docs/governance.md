@@ -1,6 +1,6 @@
 # Governance
 
-BTP Lens is an independent open-source project under the Apache License 2.0. This page says who decides what, how to gain that responsibility, and what happens if a maintainer goes quiet. It is deliberately short; it grows when the project does.
+BAIP Lens is an independent open-source project under the Apache License 2.0. This page says who decides what, how to gain that responsibility, and what happens if a maintainer goes quiet. It is deliberately short; it grows when the project does.
 
 ## Roles
 
@@ -37,7 +37,7 @@ Sponsorship (GitHub Sponsors, and Open Collective when invoices are needed) pays
 
 ## Trademarks and naming
 
-"BTP Lens" is the project's name. It does not use SAP's logo, and it states everywhere that it is not affiliated with SAP SE. If a trademark objection is ever raised, the project renames rather than argues (`docs/marketing/campaign.md` §1). Forks are welcome under the licence; please pick a different name so users are not confused.
+"BAIP Lens" is the project's name. It does not use SAP's logo, and it states everywhere that it is not affiliated with SAP SE. If a trademark objection is ever raised, the project renames rather than argues (`docs/marketing/campaign.md` §1). Forks are welcome under the licence; please pick a different name so users are not confused.
 
 ## Changing this document
 

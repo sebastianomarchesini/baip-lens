@@ -1,23 +1,23 @@
 <p align="center">
   <picture>
     <source media="(prefers-color-scheme: dark)" srcset="docs/assets/logo-dark.png">
-    <img src="docs/assets/logo.png" width="420" alt="BTP Lens">
+    <img src="docs/assets/logo.png" width="420" alt="BAIP Lens">
   </picture>
 </p>
 
-# BTP Lens
+# BAIP Lens
 
 **A read-only health and security scanner for Cloud Foundry landscapes on SAP BTP.** Open source under Apache-2.0, free for everyone, built in public, and it runs on your machine.
 
-Point BTP Lens at a Cloud Foundry org. With nothing more than the **Space Auditor** role, it inventories every app, flags stale deployments, and writes an **offline HTML report** plus JSON, CSV and SARIF. Checks for end-of-life runtimes, outdated buildpacks and libraries, known vulnerabilities and risky configuration follow in the next releases.
+Point BAIP Lens at a Cloud Foundry org. With nothing more than the **Space Auditor** role, it inventories every app, flags stale deployments, and writes an **offline HTML report** plus JSON, CSV and SARIF. Checks for end-of-life runtimes, outdated buildpacks and libraries, known vulnerabilities and risky configuration follow in the next releases.
 
 It sends only `GET` requests to the Cloud Foundry API. It contacts no third party except for public version and vulnerability lookups, and it never writes user names, tokens or secret values into its output.
 
-[![CI](https://github.com/sebastianomarchesini/BTP-Lens/actions/workflows/ci.yml/badge.svg)](https://github.com/sebastianomarchesini/BTP-Lens/actions/workflows/ci.yml)
-[![Security](https://github.com/sebastianomarchesini/BTP-Lens/actions/workflows/security.yml/badge.svg)](https://github.com/sebastianomarchesini/BTP-Lens/actions/workflows/security.yml)
+[![CI](https://github.com/sebastianomarchesini/BAIP-Lens/actions/workflows/ci.yml/badge.svg)](https://github.com/sebastianomarchesini/BAIP-Lens/actions/workflows/ci.yml)
+[![Security](https://github.com/sebastianomarchesini/BAIP-Lens/actions/workflows/security.yml/badge.svg)](https://github.com/sebastianomarchesini/BAIP-Lens/actions/workflows/security.yml)
 [![License](https://img.shields.io/badge/license-Apache--2.0-blue)](LICENSE)
 <!-- Add once the Scorecard workflow has run on main:
-[![OpenSSF Scorecard](https://api.scorecard.dev/projects/github.com/sebastianomarchesini/BTP-Lens/badge)](https://scorecard.dev/viewer/?uri=github.com/sebastianomarchesini/BTP-Lens)
+[![OpenSSF Scorecard](https://api.scorecard.dev/projects/github.com/sebastianomarchesini/BAIP-Lens/badge)](https://scorecard.dev/viewer/?uri=github.com/sebastianomarchesini/BAIP-Lens)
 -->
 
 > **Status: 0.1.0, first public release.** It includes guided mode, the app inventory, the `APP_NO_RECENT_DEPLOY` rule, all report formats and the HTML report. The other rules are planned in [docs/rules.md](docs/rules.md) and the [roadmap](docs/roadmap.md). Feedback from real landscapes is very welcome in the issues.
@@ -31,23 +31,23 @@ It sends only `GET` requests to the Cloud Foundry API. It contacts no third part
 You need [Node.js](https://nodejs.org) (the LTS installer, next-next-finish) and a BTP login with the **Space Auditor** role, which is read-only. You do not need the cf CLI.
 
 ```sh
-npx btp-lens
+npx baip-lens
 ```
 
-Guided mode asks four questions: where your landscape is (pick a region or paste the API endpoint from the cockpit), how to sign in (your browser opens your company login and shows a one-time code), which org, and whether to start. The report then opens in your browser. Never used a terminal? Follow the [step-by-step guide with screenshots](docs/getting-started-no-terminal.md). Something not working? `npx btp-lens doctor` checks Node.js, network, certificates, login and the output folder and tells you what to do in one sentence each.
+Guided mode asks four questions: where your landscape is (pick a region or paste the API endpoint from the cockpit), how to sign in (your browser opens your company login and shows a one-time code), which org, and whether to start. The report then opens in your browser. Never used a terminal? Follow the [step-by-step guide with screenshots](docs/getting-started-no-terminal.md). Something not working? `npx baip-lens doctor` checks Node.js, network, certificates, login and the output folder and tells you what to do in one sentence each.
 
 ## Quickstart for developers and CI
 
 ```sh
 cf login -a https://api.cf.eu10.hana.ondemand.com      # any user with Space Auditor
-npx btp-lens scan --api https://api.cf.eu10.hana.ondemand.com --org my-org
-open reports/btp-lens-report.html                      # works offline
+npx baip-lens scan --api https://api.cf.eu10.hana.ondemand.com --org my-org
+open reports/baip-lens-report.html                      # works offline
 ```
 
 ### Project scan (no login needed)
 
 ```sh
-npx btp-lens project --path ./my-cap-project      # reads the project files, contacts nothing
+npx baip-lens project --path ./my-cap-project      # reads the project files, contacts nothing
 ```
 
 This checks a local CAP or MTA project the way a reviewer would: effective `cds` configuration per profile, `mta.yaml`, `xs-security.json`, `xs-app.json`, the CDS model, seed CSV files and the SAPUI5 bootstrap, and writes the same reports with a `file:line` location per finding (also in SARIF, for code scanning). The rules follow the OWASP Top 10 (2025) patterns of the public SAP TechEd 2026 workshop XP261; see [docs/rules.md](docs/rules.md#project-rules).
@@ -55,7 +55,7 @@ This checks a local CAP or MTA project the way a reviewer would: effective `cds`
 To run the latest development version from source (Node.js 22.12 or later):
 
 ```sh
-git clone https://github.com/sebastianomarchesini/BTP-Lens.git && cd BTP-Lens
+git clone https://github.com/sebastianomarchesini/BAIP-Lens.git && cd BAIP-Lens
 npm ci && npm run build
 node packages/cli/dist/cli.js                          # guided mode
 node packages/cli/dist/cli.js scan --api https://api.cf.eu10.hana.ondemand.com --org my-org
@@ -63,32 +63,32 @@ node packages/cli/dist/cli.js scan --api https://api.cf.eu10.hana.ondemand.com -
 
 ### Credentials
 
-BTP Lens uses the first of these that is set:
+BAIP Lens uses the first of these that is set:
 
-1. `BTP_LENS_ACCESS_TOKEN`, for example `BTP_LENS_ACCESS_TOKEN="$(cf oauth-token)"`.
-2. `BTP_LENS_CLIENT_ID` and `BTP_LENS_CLIENT_SECRET`, for an OAuth client with a CF role.
+1. `BAIP_LENS_ACCESS_TOKEN`, for example `BAIP_LENS_ACCESS_TOKEN="$(cf oauth-token)"`.
+2. `BAIP_LENS_CLIENT_ID` and `BAIP_LENS_CLIENT_SECRET`, for an OAuth client with a CF role.
 3. Your cf CLI session (`~/.cf/config.json`, or `$CF_HOME/.cf/config.json`). It must target the same API as `--api`. An expired token is refreshed in memory only, and the file is never written.
 
-Behind a corporate proxy, set `HTTPS_PROXY` and `NODE_USE_ENV_PROXY=1` so that Node.js routes requests through it. That variable exists from Node.js 22.21 and 24.0; older versions ignore it, and `btp-lens doctor` says so.
+Behind a corporate proxy, set `HTTPS_PROXY` and `NODE_USE_ENV_PROXY=1` so that Node.js routes requests through it. That variable exists from Node.js 22.21 and 24.0; older versions ignore it, and `baip-lens doctor` says so.
 
 ## Commands
 
 ```text
-btp-lens                       guided mode (four questions, report opens in the browser)
-btp-lens guided [--no-open]    the same, explicitly
-btp-lens doctor [--api <url>]  checks Node.js, network, certificates, login and output folder
-btp-lens scan   --api <cf api url> --org <name> [--space <name>] [--deep]
+baip-lens                       guided mode (four questions, report opens in the browser)
+baip-lens guided [--no-open]    the same, explicitly
+baip-lens doctor [--api <url>]  checks Node.js, network, certificates, login and output folder
+baip-lens scan   --api <cf api url> --org <name> [--space <name>] [--deep]
                 [--out ./reports] [--format html,json,csv,sarif] [--fail-on <severity>] [--concurrency 5]
-btp-lens project --path <dir> [--out ./reports] [--format html,json,csv,sarif] [--fail-on <severity>] [--quiet]
-btp-lens report --from <snapshot.json> [--format html,json,csv,sarif] [--out ./reports] [--fail-on <severity>]
-btp-lens version
+baip-lens project --path <dir> [--out ./reports] [--format html,json,csv,sarif] [--fail-on <severity>] [--quiet]
+baip-lens report --from <snapshot.json> [--format html,json,csv,sarif] [--out ./reports] [--fail-on <severity>]
+baip-lens version
 ```
 
 - With no arguments on a terminal, guided mode starts; in a script it prints usage and exits 2.
 - `project` scans a local CAP or MTA project folder for the thirteen configuration and model rules in [docs/rules.md](docs/rules.md#project-rules) (mocked authentication in production, unrestricted services, missing audit logging, open approuter routes, seed data with card numbers, and more), each tagged with its OWASP Top 10 (2025) category. It reads files only: no login, no network, no child process, and it never opens `.env`, `.cdsrc-private.json`, `default-env.json`, keys or `*.mtaext` files.
-- Guided mode signs in the way `cf login --sso` does (one-time code from your company login) or with username and password, keeps the session in memory only, and writes to `./btp-lens-reports/<date-time>/`.
+- Guided mode signs in the way `cf login --sso` does (one-time code from your company login) or with username and password, keeps the session in memory only, and writes to `./baip-lens-reports/<date-time>/`.
 - `scan` and `project` write one snapshot (`snapshot-<time>.json`) and the requested reports.
-- `report --from` re-runs every rule on a snapshot **offline**, for example after you upgrade BTP Lens.
+- `report --from` re-runs every rule on a snapshot **offline**, for example after you upgrade BAIP Lens.
 - Exit codes:
   - `0`: no findings at or above `--fail-on` (the default, `none`, never fails).
   - `1`: findings met the threshold.
@@ -103,7 +103,7 @@ The HTML report is a single file. Fonts, themes and data are embedded, it follow
 | App inventory and current droplets (`collect.apps`, `collect.droplets`), rule `APP_NO_RECENT_DEPLOY` | Space Auditor | on |
 | Planned: processes, buildpacks, stacks, routes, binding metadata and the rules built on them | Space Auditor | on, in the next releases |
 | Planned: plain-text secrets in environment variable **names** (`ENV_SECRET_PLAINTEXT`) | Space Developer or Space Supporter | `--deep` only |
-| Project scan (`collect.project` and the thirteen project rules) | none: local files, no login, no network | on, for `btp-lens project` |
+| Project scan (`collect.project` and the thirteen project rules) | none: local files, no login, no network | on, for `baip-lens project` |
 
 The Cloud Foundry list endpoints answer with what your user may see rather than with 403, so a user who can see the org but none of its spaces gets a clear message and exit code 2 instead of an empty report. When a call does return 403, the check is recorded as *skipped: insufficient role* and the scan continues. Details are in [docs/permissions.md](docs/permissions.md).
 
@@ -116,7 +116,7 @@ The Cloud Foundry list endpoints answer with what your user may see rather than 
 
 See [docs/privacy.md](docs/privacy.md), [docs/faq.md](docs/faq.md), [docs/data-sources.md](docs/data-sources.md) and the [security review](docs/security-review.md).
 
-Evaluating BTP Lens for your company? [docs/due-diligence.md](docs/due-diligence.md) answers the questions that managers and security, legal and procurement teams ask before a first run, each with the code, test or document behind it.
+Evaluating BAIP Lens for your company? [docs/due-diligence.md](docs/due-diligence.md) answers the questions that managers and security, legal and procurement teams ask before a first run, each with the code, test or document behind it.
 
 ## Sample report
 
@@ -138,21 +138,21 @@ npm run e2e          # opens the HTML report with networking disabled (Playwrigh
 ```
 
 The repository is an npm workspaces monorepo:
-- `packages/cli` holds the `btp-lens` CLI.
+- `packages/cli` holds the `baip-lens` CLI.
 - `packages/ui` holds the React and UI5 Web Components report.
 - `docs/` holds the verified data sources, rules, permissions and privacy notes.
 
 ## Contributing and community
 
-BTP Lens is built in public. The [roadmap](docs/roadmap.md) and [governance](docs/governance.md) are in the repository, rules can be proposed by anyone with the "Rule proposal" issue template, and [CONTRIBUTING.md](CONTRIBUTING.md) has a 15-minute first contribution and the recipe for adding a rule. Non-developers are welcome: testing guided mode, answering questions in the issues and improving the docs count as much as code. Please read the [Code of Conduct](CODE_OF_CONDUCT.md). Contributions need a signed [Contributor License Agreement](docs/CLA.md). To report a vulnerability, see [SECURITY.md](SECURITY.md).
+BAIP Lens is built in public. The [roadmap](docs/roadmap.md) and [governance](docs/governance.md) are in the repository, rules can be proposed by anyone with the "Rule proposal" issue template, and [CONTRIBUTING.md](CONTRIBUTING.md) has a 15-minute first contribution and the recipe for adding a rule. Non-developers are welcome: testing guided mode, answering questions in the issues and improving the docs count as much as code. Please read the [Code of Conduct](CODE_OF_CONDUCT.md). Contributions need a signed [Contributor License Agreement](docs/CLA.md). To report a vulnerability, see [SECURITY.md](SECURITY.md).
 
 ## Support the project
 
-BTP Lens is free and will stay free. If it saved you an afternoon of clicking, consider [sponsoring](https://github.com/sponsors/sebastianomarchesini). The first goal is a code-signing certificate, so that administrators can run a downloadable executable without warnings. Sponsors are listed in [SPONSORS.md](SPONSORS.md); sponsorship never influences what the tool reports.
+BAIP Lens is free and will stay free. If it saved you an afternoon of clicking, consider [sponsoring](https://github.com/sponsors/sebastianomarchesini). The first goal is a code-signing certificate, so that administrators can run a downloadable executable without warnings. Sponsors are listed in [SPONSORS.md](SPONSORS.md); sponsorship never influences what the tool reports.
 
 ## Not affiliated with SAP
 
-BTP Lens is an independent open-source project. It is **not affiliated with, endorsed by or sponsored by SAP SE** or its affiliates. "SAP", "SAP BTP", "SAPUI5" and "Fiori" are trademarks of SAP SE, used here only to describe compatibility. The report uses the open-source UI5 Web Components (Apache-2.0) for its look and feel, and carries no SAP logo.
+BAIP Lens is an independent open-source project. It is **not affiliated with, endorsed by or sponsored by SAP SE** or its affiliates. "SAP", "SAP BTP", "SAP Business AI Platform", "SAPUI5" and "Fiori" are trademarks of SAP SE, used here only to describe compatibility. The name refers to the SAP Business AI Platform (BAIP), the umbrella SAP announced in 2026 for SAP BTP, which this tool scans. The project was called BTP Lens until November 2026; the old `btp-lens` npm package is deprecated and snapshots it wrote still open with `baip-lens report --from`. The report uses the open-source UI5 Web Components (Apache-2.0) for its look and feel, and carries no SAP logo.
 
 ## License
 

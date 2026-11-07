@@ -12,14 +12,14 @@ import { ABSOLUTE_PATH, expectNoLeaks } from '../support/leak.js';
 
 describe('no secrets or personal data in any output', () => {
   it('keeps poison values out of the snapshot and every report format', async () => {
-    const out = await mkdtemp(join(tmpdir(), 'btp-lens-leak-'));
+    const out = await mkdtemp(join(tmpdir(), 'baip-lens-leak-'));
     const snapshot = await scan({
       apiUrl: ACME.api,
       org: ACME.org,
       deep: false,
       probeRoutes: true,
       concurrency: 5,
-      env: { BTP_LENS_ACCESS_TOKEN: ACME.token },
+      env: { BAIP_LENS_ACCESS_TOKEN: ACME.token },
       fetch: acmeFetch().fetch,
       now: () => ACME.now,
     });

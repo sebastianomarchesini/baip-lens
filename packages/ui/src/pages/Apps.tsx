@@ -1,4 +1,4 @@
-import type { AppInventoryItem, ReportData } from '@btp-lens/model';
+import type { AppInventoryItem, ReportData } from '@baip-lens/model';
 import {
   AnalyticalTable,
   type AnalyticalTableCellInstance,

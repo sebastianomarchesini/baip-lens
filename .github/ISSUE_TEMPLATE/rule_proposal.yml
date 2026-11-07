@@ -5,7 +5,7 @@ body:
   - type: markdown
     attributes:
       value: |
-        Rules are how BTP Lens gets smarter, and the community owns the catalogue. Describe the problem you want to catch;
+        Rules are how BAIP Lens gets smarter, and the community owns the catalogue. Describe the problem you want to catch;
         if you also want to implement it, `CONTRIBUTING.md` has the recipe (one analyzer file, one test, one section in `docs/rules.md`).
         Please do not paste real app names, hostnames or tokens.
   - type: input

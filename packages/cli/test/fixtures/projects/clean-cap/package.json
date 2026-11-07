@@ -1,7 +1,7 @@
 {
   "name": "clean-cap",
   "version": "1.0.0",
-  "description": "Minimal CAP project that follows the recommended practices (btp-lens test fixture)",
+  "description": "Minimal CAP project that follows the recommended practices (baip-lens test fixture)",
   "private": true,
   "dependencies": {
     "@sap/cds": "^9",

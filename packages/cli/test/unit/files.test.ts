@@ -9,7 +9,7 @@ const posix = process.platform !== 'win32';
 
 describe('private output files', () => {
   it.skipIf(!posix)('creates directories 0700 and files 0600', async () => {
-    const base = await mkdtemp(join(tmpdir(), 'btp-lens-files-'));
+    const base = await mkdtemp(join(tmpdir(), 'baip-lens-files-'));
     const dir = join(base, 'nested', 'reports');
     await ensurePrivateDir(dir);
     await writePrivateFile(join(dir, 'report.json'), '{}');
@@ -22,7 +22,7 @@ describe('private output files: symlinks and existing files', () => {
   it.skipIf(!posix)(
     'refuses to write through a symlink and tightens an existing file',
     async () => {
-      const base = await mkdtemp(join(tmpdir(), 'btp-lens-files-'));
+      const base = await mkdtemp(join(tmpdir(), 'baip-lens-files-'));
       const target = join(base, 'target.json');
       await writeFile(target, 'keep', { mode: 0o644 });
       const link = join(base, 'report.json');
@@ -38,7 +38,7 @@ describe('private output files: symlinks and existing files', () => {
     await expect(readSnapshot(join(tmpdir(), 'no-such-dir', 'snapshot.json'))).rejects.toThrow(
       /does not exist/,
     );
-    const base = await mkdtemp(join(tmpdir(), 'btp-lens-json-'));
+    const base = await mkdtemp(join(tmpdir(), 'baip-lens-json-'));
     const path = join(base, 'bad.json');
     await writeFile(path, '{not json');
     await expect(readSnapshot(path)).rejects.toThrow(/not valid JSON/);
@@ -48,7 +48,7 @@ describe('private output files: symlinks and existing files', () => {
 
 describe('readSnapshot limits', () => {
   it('refuses a snapshot above the size cap without parsing it', async () => {
-    const base = await mkdtemp(join(tmpdir(), 'btp-lens-big-'));
+    const base = await mkdtemp(join(tmpdir(), 'baip-lens-big-'));
     const path = join(base, 'huge.json');
     // A sparse file: the size is what matters, not the content.
     const handle = await import('node:fs/promises').then((fs) => fs.open(path, 'w'));
@@ -58,7 +58,7 @@ describe('readSnapshot limits', () => {
   });
 
   it('rejects unknown schema versions with a clear message', async () => {
-    const base = await mkdtemp(join(tmpdir(), 'btp-lens-ver-'));
+    const base = await mkdtemp(join(tmpdir(), 'baip-lens-ver-'));
     const path = join(base, 'old.json');
     await writeFile(path, JSON.stringify({ schemaVersion: 0 }));
     await expect(readSnapshot(path)).rejects.toThrow(/schema version 0/);

@@ -1,7 +1,7 @@
 {
   "name": "acme-incidents",
   "version": "1.0.0",
-  "description": "Synthetic incident-desk sample used as a btp-lens test fixture",
+  "description": "Synthetic incident-desk sample used as a baip-lens test fixture",
   "author": "Jane Poison <jane.poison@example.com>",
   "repository": "https://POISON_repo_token@github.com/acme/acme-incidents.git",
   "private": true,

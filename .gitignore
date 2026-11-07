@@ -19,7 +19,7 @@ packages/cli/NOTICE
 *.pfx
 .cf/
 *.mtar
-btp-lens-reports/
+baip-lens-reports/
 snapshot-*.json
 # The frozen 0.1.0 snapshot is a test fixture, not a scan artefact
 !packages/cli/test/fixtures/legacy/snapshot-0.1.0.json

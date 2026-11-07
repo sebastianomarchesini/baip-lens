@@ -12,7 +12,7 @@ function client(fake: FakeFetch, extra: Partial<ConstructorParameters<typeof Htt
   policy.add(cfApiRule(api));
   return new HttpClient({
     policy,
-    userAgent: 'btp-lens/test',
+    userAgent: 'baip-lens/test',
     fetch: fake.fetch,
     sleep: noSleep,
     random: () => 0.5,
@@ -65,7 +65,7 @@ describe('HttpClient', () => {
     expect(res.status).toBe(302);
     expect(fake.calls).toHaveLength(1);
     expect(fake.calls[0]?.redirect).toBe('manual');
-    expect(fake.calls[0]?.headers['user-agent']).toBe('btp-lens/test');
+    expect(fake.calls[0]?.headers['user-agent']).toBe('baip-lens/test');
   });
 
   it('retries 503 with backoff and then succeeds', async () => {

@@ -4,12 +4,12 @@ import { expect, test } from '@playwright/test';
 import { isolate } from './isolate.js';
 
 /**
- * The report of a project scan (`btp-lens project`) must open from disk with
+ * The report of a project scan (`baip-lens project`) must open from disk with
  * no network access, like the Cloud Foundry one. `npm run sample` writes it
  * from the acme-incidents fixture snapshot with the real CLI and template.
  */
 const REPORT = pathToFileURL(
-  resolve(import.meta.dirname, '../reports/sample-project/btp-lens-report.html'),
+  resolve(import.meta.dirname, '../reports/sample-project/baip-lens-report.html'),
 ).href;
 
 test('the project report works from disk with networking disabled', async ({ page, context }) => {
@@ -19,7 +19,7 @@ test('the project report works from disk with networking disabled', async ({ pag
   const kpis = page.getByRole('region', { name: 'Key figures' });
   await expect(kpis.locator('ui5-card[accessible-name="Projects scanned: 1"]')).toBeVisible();
   await expect(page.getByText('Top risks')).toBeVisible();
-  await expect(page).toHaveTitle('Overview · BTP Lens report');
+  await expect(page).toHaveTitle('Overview · BAIP Lens report');
   await expect(
     page.getByRole('heading', { level: 1, name: 'Overview · acme-incidents' }),
   ).toBeAttached();

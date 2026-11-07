@@ -1,8 +1,8 @@
-# BTP Lens: go-to-market and sponsorship plan
+# BAIP Lens: go-to-market and sponsorship plan
 
-**Working name:** BTP Lens. **One line:** *The free, read-only health check for your SAP BTP Cloud Foundry landscape. One command, five minutes, nothing leaves your machine.*
+**Working name:** BAIP Lens. **One line:** *The free, read-only health check for your SAP BTP Cloud Foundry landscape. One command, five minutes, nothing leaves your machine.*
 
-**This is an open-source project, and the plan is written as one.** The goal is not "customers" but a community that uses, trusts, improves and eventually co-maintains BTP Lens. Marketing here means three things, in this order: (1) getting the project **used and contributed to**, (2) getting it **seen** by the people who need it, and (3) getting it **funded** enough to stay maintained, without ever selling access to a feature or a finding. §0 sets the rules; everything else follows from them. Everything here assumes v0.1.0 ships with guided mode (`docs/ease-of-use.md`) and the security posture in `docs/security-review.md`, because both are the story.
+**This is an open-source project, and the plan is written as one.** The goal is not "customers" but a community that uses, trusts, improves and eventually co-maintains BAIP Lens. Marketing here means three things, in this order: (1) getting the project **used and contributed to**, (2) getting it **seen** by the people who need it, and (3) getting it **funded** enough to stay maintained, without ever selling access to a feature or a finding. §0 sets the rules; everything else follows from them. Everything here assumes v0.1.0 ships with guided mode (`docs/ease-of-use.md`) and the security posture in `docs/security-review.md`, because both are the story.
 
 Dates are relative to **L = the day v0.1.0 is on npm**. Updated 2026-09-30; the calendar below assumes L in the second half of October 2026, which lines up with the SAP community's autumn events (Devtoberfest, TechEd season, SAP Inside Tracks). If L slips, shift the calendar, not the sequence.
 
@@ -13,10 +13,10 @@ Dates are relative to **L = the day v0.1.0 is on npm**. Updated 2026-09-30; the 
 | Read-only, GET-only, allow-listed | **Shipped** (slice 1) and re-reviewed; credential endpoints now refused even for GET | `packages/cli/src/net/allowlist.ts`, `docs/security-review.md` |
 | Report cannot phone home | **Shipped**: CSP `connect-src 'none'` in the HTML, Playwright test with networking disabled | `e2e/offline-report.spec.ts` |
 | Five minutes, no flags, for administrators | **Shipped on the development branch**: guided mode, `doctor`, "Start here" panel, no-terminal guide, FAQ | `docs/ease-of-use.md` §8 |
-| Nine CF rules | **1 of 9** (`APP_NO_RECENT_DEPLOY`); the rest are the next slices. **Thirteen project rules shipped on `main`** after 0.1.0 (`btp-lens project`, OWASP Top 10 2025 tags; see `CHANGELOG.md`) | `docs/rules.md` |
+| Nine CF rules | **1 of 9** (`APP_NO_RECENT_DEPLOY`); the rest are the next slices. **Thirteen project rules shipped on `main`** after 0.1.0 (`baip-lens project`, OWASP Top 10 2025 tags; see `CHANGELOG.md`) | `docs/rules.md` |
 | Public sample report | Workflow ready (`.github/workflows/pages.yml`); needs Pages enabled once | landing page in `docs/marketing/landing.html` |
 | Sponsor button | `FUNDING.yml` and `SPONSORS.md` ready; needs GitHub Sponsors enrolment | — |
-| npm name | **Still unclaimed** on 2026-09-30. Reserve before the first public post. | `npm view btp-lens` |
+| npm name | **Still unclaimed** on 2026-09-30. Reserve before the first public post. | `npm view baip-lens` |
 
 Every public claim must match the "Shipped" rows. Until the remaining rules land, launch copy says "checks in v0.1 include …" only for what exists, and lists the rest as "coming in the next releases".
 
@@ -44,7 +44,7 @@ The word "open source" appears in the first sentence of every launch post, and t
 
 "We have 40, 400 or 4,000 apps on BTP Cloud Foundry across dozens of subaccounts. Nobody can say which ones run an end-of-life Node.js or Java, which are on a deprecated stack, which have not been deployed in a year, or which ship a library with a known CVE. Finding out means clicking through the cockpit space by space, or writing scripts against the CF API that nobody trusts to be read-only."
 
-### What BTP Lens is
+### What BAIP Lens is
 
 - A **CLI** you run on your laptop or in CI with your own credentials. It calls the CF API with **GET only**, enforced in the HTTP client and proven by a test.
 - Works with **Space Auditor**, the read-only role. Anything needing more is off by default.
@@ -67,14 +67,14 @@ The word "open source" appears in the first sentence of every launch post, and t
 | They say | We say |
 |---|---|
 | "I will not run an unknown tool with production credentials." | Read-only role, GET-only client with a test, allow-list in one file, open source, Scorecard and CodeQL public. Run it on trial first; run `report --redact` to share results. |
-| "SAP already has this." | The cockpit shows one space at a time and has no EOL, CVE or idle logic. Cloud ALM and the Alert Notification service monitor operations, not dependency and runtime age. BTP Lens is the missing landscape-wide inventory and it complements them. |
+| "SAP already has this." | The cockpit shows one space at a time and has no EOL, CVE or idle logic. Cloud ALM and the Alert Notification service monitor operations, not dependency and runtime age. BAIP Lens is the missing landscape-wide inventory and it complements them. |
 | "I can script the CF API myself." | You can; the value is the rules, the EOL and CVE data joined in, the report, and the fact that it is maintained. Your script is welcome as a contribution. |
 | "Is this an SAP product?" | No. Independent open-source project; the README says so. |
 | "What does it cost?" | Nothing. If it saves you a week, sponsor it (§6). |
 
 ### Naming and trademark risk
 
-"SAP" never appears in the package, CLI or logo (`CLAUDE.md` constraint 6), and the README carries the non-affiliation notice. "BTP" on its own is descriptive of the platform, and we use it descriptively, but a trademark objection is not impossible. Mitigation: keep the notice everywhere, never use SAP's logo shapes or wordmark (the mark is a cloud and a magnifier in a blue-to-teal gradient; its blues sit near SAP's palette, so the non-affiliation notice stays next to it wherever it appears), reserve a fallback package name (`cf-lens` or `landscape-lens`) at the same time as `btp-lens`, and decide in advance that we rename rather than argue.
+"SAP" never appears in the package, CLI or logo (`CLAUDE.md` constraint 6), and the README carries the non-affiliation notice. "BTP" on its own is descriptive of the platform, and we use it descriptively, but a trademark objection is not impossible. Mitigation: keep the notice everywhere, never use SAP's logo shapes or wordmark (the mark is a cloud and a magnifier in a blue-to-teal gradient; its blues sit near SAP's palette, so the non-affiliation notice stays next to it wherever it appears), reserve a fallback package name (`cf-lens` or `landscape-lens`) at the same time as `baip-lens`, and decide in advance that we rename rather than argue.
 
 ---
 
@@ -121,9 +121,9 @@ Keep an **evidence log** (`docs/marketing/evidence-log.md`, started; keep it pri
 ### Phase 0: Pre-launch (now → L−1)
 
 0. **Finish the product story first**: the remaining v0.1 rules, `report --redact` (needed so testers can share screenshots), and the three usability sessions. Marketing before that burns the one launch a project gets.
-1. **Reserve the names today**: `btp-lens` on npm (placeholder 0.0.1, see security review §3), the fallback name, a GitHub Discussions space, and the social handles you intend to use.
+1. **Reserve the names today**: `baip-lens` on npm (placeholder 0.0.1, see security review §3), the fallback name, a GitHub Discussions space, and the social handles you intend to use.
 1a. **Make the repository contributor-ready** (done on the development branch): `CODE_OF_CONDUCT.md`, a `CONTRIBUTING.md` with a 15-minute first contribution and the recipe for adding a rule, `docs/roadmap.md`, `docs/governance.md`, the "Rule proposal" issue template. Then seed **ten `good first issue` items** from `docs/roadmap.md` §"Good first issues", each with the file to touch and the test to add, and enable Discussions with categories "Q&A", "Show your report (redacted)", "Rule ideas".
-1b. **Enable GitHub Pages** (Settings → Pages → Source: GitHub Actions) so `pages.yml` publishes the landing page and the sample report at `https://sebastianomarchesini.github.io/BTP-Lens/`.
+1b. **Enable GitHub Pages** (Settings → Pages → Source: GitHub Actions) so `pages.yml` publishes the landing page and the sample report at `https://sebastianomarchesini.github.io/BAIP-Lens/`.
 2. **Assets** (§5): logo, social card, demo GIF, sample report on GitHub Pages.
 3. **README** rewritten from `docs/marketing/readme-draft.md`: pitch, `npx` first, permissions table, privacy statement, screenshot, non-affiliation notice, sponsor section.
 4. **Seed testers**: 10 people from the Champions and Mentors network plus 3 non-developers (for the usability sessions in `ease-of-use.md` §7). Ask each for one sentence of feedback you may quote and one redacted screenshot.
@@ -176,8 +176,8 @@ One piece per week, alternating channels, always with a redacted real screenshot
 | Logo | Our own mark, no SAP logo shapes or SAP wordmark; 512 px PNG; works in Horizon light and dark | **Done:** cloud-and-magnifier mark. App icon `docs/assets/icon.png` (512 px, also the report ShellBar logo and favicon), horizontal logo `docs/assets/logo.png` with a dark-background variant `docs/assets/logo-dark.png`. A vector (SVG) master is still to do |
 | Social card | 1280×640, logo, one line, "read-only · offline · open source" | **Done:** `docs/assets/social-card.svg` (source) and `docs/assets/social-card.png` (for LinkedIn and X, which do not accept SVG) |
 | Demo GIF | 20 s, guided mode → report opens, on a trial account, redacted names | Terminal recording (asciinema → GIF) |
-| Sample report | The fixture-generated HTML on GitHub Pages: `https://sebastianomarchesini.github.io/BTP-Lens/sample-report.html` | **Done:** `.github/workflows/pages.yml` + `docs/marketing/landing.html`; owner enables Pages once |
-| Landing page | One screen: tagline, `npx btp-lens`, four proof cards, links, non-affiliation | **Done:** `docs/marketing/landing.html` |
+| Sample report | The fixture-generated HTML on GitHub Pages: `https://sebastianomarchesini.github.io/BAIP-Lens/sample-report.html` | **Done:** `.github/workflows/pages.yml` + `docs/marketing/landing.html`; owner enables Pages once |
+| Landing page | One screen: tagline, `npx baip-lens`, four proof cards, links, non-affiliation | **Done:** `docs/marketing/landing.html` |
 | Screenshots | Overview, Apps table, one finding card; light and dark | From the sample report |
 | Badges | npm version, license, CI, OpenSSF Scorecard, "read-only: GET-only tested" | README |
 | Slide deck | 12 slides for a 20-minute talk (`launch-kit.md` §9) | Maintainer |
@@ -219,7 +219,7 @@ Use **GitHub Sponsors** first (no fees for the project, visible on the repositor
 
 ### Sponsor pitch, in one paragraph (e-mail draft in `launch-kit.md` §8)
 
-"BTP Lens is the independent, read-only landscape scanner your consultants and your clients' platform teams already use for assessments. We are funding a code-signing certificate and one maintainer day a week so it stays trustworthy and current. A Landscape sponsorship puts your logo in front of every reader of the README and the yearly report and gives you a quarterly say on the roadmap. It never influences what the tool reports."
+"BAIP Lens is the independent, read-only landscape scanner your consultants and your clients' platform teams already use for assessments. We are funding a code-signing certificate and one maintainer day a week so it stays trustworthy and current. A Landscape sponsorship puts your logo in front of every reader of the README and the yearly report and gives you a quarterly say on the roadmap. It never influences what the tool reports."
 
 ---
 
@@ -262,7 +262,7 @@ Rules 6–9 continue the series in weeks 13–20.
 | Item | Cost | Needed by |
 |---|---|---|
 | Logo and social card | USD 0–300 | L−14 |
-| Domain (optional, e.g. `btplens.dev`) | ~USD 15/year | L−14 |
+| Domain (optional, e.g. `baiplens.dev`) | ~USD 15/year | L−14 |
 | Code-signing certificate (Windows EV or OV + Apple Developer ID) | USD 200–400/year + USD 99/year | v0.2 |
 | Everything else | USD 0 | — |
 

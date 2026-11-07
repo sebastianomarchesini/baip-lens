@@ -55,7 +55,7 @@ function exitCodeFor(data: ReportData, failOn: FailOn): number {
   return data.findings.some((f) => meetsThreshold(f.severity, threshold)) ? EXIT.findings : EXIT.ok;
 }
 
-/** A snapshot written by `btp-lens project`: no org, one or more local projects. */
+/** A snapshot written by `baip-lens project`: no org, one or more local projects. */
 function isProjectScan(data: ReportData): boolean {
   return data.scope.orgs.length === 0 && (data.scope.projects?.length ?? 0) > 0;
 }
@@ -168,7 +168,7 @@ async function runDoctorCommand(io: CliIo, options: Record<string, unknown>): Pr
 }
 
 const GUIDED_HINT =
-  'No arguments: guided mode starts when a person is at the terminal. In scripts, use `btp-lens scan --api <url> --org <name>`.\n';
+  'No arguments: guided mode starts when a person is at the terminal. In scripts, use `baip-lens scan --api <url> --org <name>`.\n';
 
 function buildProgram(io: CliIo, setExit: (code: number) => void): Command {
   const program = new Command()
@@ -219,7 +219,7 @@ function buildProgram(io: CliIo, setExit: (code: number) => void): Command {
     .description('re-analyze a snapshot offline and write reports')
     .requiredOption(
       '--from <snapshot>',
-      'snapshot JSON written by `btp-lens scan` or `btp-lens project`',
+      'snapshot JSON written by `baip-lens scan` or `baip-lens project`',
     )
     .option('--format <list>', 'report formats: html,json,csv,sarif', DEFAULT_FORMATS)
     .option('--out <dir>', 'output directory', './reports')
@@ -230,7 +230,7 @@ function buildProgram(io: CliIo, setExit: (code: number) => void): Command {
 
   program
     .command('guided')
-    .description('answer four questions and get a report (what `btp-lens` with no arguments does)')
+    .description('answer four questions and get a report (what `baip-lens` with no arguments does)')
     .option('--no-open', 'do not open the report in the browser')
     .action(async (options: { open: boolean }) => {
       if (!io.prompter && !isInteractive(io)) {
@@ -287,7 +287,7 @@ export async function main(argv: string[], rawIo: CliIo): Promise<number> {
     }
     const message = error instanceof Error ? error.message : String(error);
     io.stderr(`${TOOL_NAME}: ${message}\n`);
-    if (io.env.BTP_LENS_DEBUG && error instanceof Error && error.stack)
+    if (io.env.BAIP_LENS_DEBUG && error instanceof Error && error.stack)
       io.stderr(`${error.stack}\n`);
     return EXIT.error;
   }

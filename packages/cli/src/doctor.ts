@@ -92,7 +92,7 @@ async function checkCfSession(o: DoctorOptions, api: URL | undefined): Promise<D
       name,
       ok: false,
       detail: `${path} could not be read`,
-      fix: 'Run `cf login` again, or use guided mode (`npx btp-lens`) which does not need the cf CLI.',
+      fix: 'Run `cf login` again, or use guided mode (`npx baip-lens`) which does not need the cf CLI.',
     };
   }
   if (!config || (!config.AccessToken && !config.RefreshToken)) {
@@ -121,7 +121,7 @@ async function checkCfSession(o: DoctorOptions, api: URL | undefined): Promise<D
         : 'cf CLI login has expired',
       ...(config.RefreshToken
         ? {}
-        : { fix: 'Run `cf login` again, or use guided mode (`npx btp-lens`).' }),
+        : { fix: 'Run `cf login` again, or use guided mode (`npx baip-lens`).' }),
     };
   }
   const hours = exp === undefined ? undefined : Math.max(0, Math.round((exp - now) / 3_600_000));
@@ -136,7 +136,7 @@ async function checkWritable(cwd: string): Promise<DoctorCheck> {
   const name = 'Output folder';
   try {
     await access(cwd, constants.W_OK);
-    const probe = await mkdtemp(join(cwd, '.btp-lens-doctor-'));
+    const probe = await mkdtemp(join(cwd, '.baip-lens-doctor-'));
     await rm(probe, { recursive: true, force: true });
     return { name, ok: true, detail: `${cwd} is writable` };
   } catch {

@@ -13,7 +13,7 @@ import { deployArtifactInRepo } from './deployArtifactInRepo.js';
 import { seedDataSensitive } from './seedDataSensitive.js';
 import { ui5BootstrapExternal } from './ui5BootstrapExternal.js';
 
-/** Rules for local projects (`btp-lens project`), in report order (docs/rules.md). */
+/** Rules for local projects (`baip-lens project`), in report order (docs/rules.md). */
 export const PROJECT_ANALYZERS: readonly Analyzer[] = [
   capMockedAuthInProd,
   capMockedUserPassword,

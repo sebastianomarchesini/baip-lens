@@ -1,6 +1,6 @@
 import { readFileSync } from 'node:fs';
 
-export const TOOL_NAME = 'btp-lens';
+export const TOOL_NAME = 'baip-lens';
 
 /** Reads the version from packages/cli/package.json (works from src and dist). */
 function readVersion(): string {

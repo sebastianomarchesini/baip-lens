@@ -1,4 +1,4 @@
-# Security review: BTP Lens
+# Security review: BAIP Lens
 
 Two parts. **Part 1** (2026-09-29) is the design and repository review written before any code existed. **Part 2** (2026-09-30) is the code review of slice 1 against Part 1's checklist, with what was fixed in the same change and what stays open. Read Part 2 first if you want the current state.
 
@@ -24,11 +24,11 @@ Verdicts: **✅ verified** (present in code and covered by a test), **🔧 fixed
 | SEC-17 terminal escape injection through app, org and space names | 🔧 | same filter; test with an OSC title-setting sequence in an org name |
 | SEC-06 no token, config path or operator name in outputs | ✅ | strict zod schemas for `raw`, `apps`, `findings`; `leak.test.ts` plants poison values and scans all six output files for them, e-mails, JWTs, bearer tokens and credential URLs |
 | SEC-07 JWT `exp` read locally, nothing else trusted | ✅ | `jwtExpiryMs` reads `exp` only; malformed → refresh |
-| SEC-05 no secret as a CLI flag; `_FILE` variant | ✅ / ⏳ | No flag exists. `BTP_LENS_CLIENT_SECRET_FILE` is not implemented yet (v0.2, CI use case) |
+| SEC-05 no secret as a CLI flag; `_FILE` variant | ✅ / ⏳ | No flag exists. `BAIP_LENS_CLIENT_SECRET_FILE` is not implemented yet (v0.2, CI use case) |
 | `/v3/apps/:guid/env` and binding `details` refused even for GET | 🔧 | `cfApiRule` gained a `deny` pattern (also `parameters`, `credentials`), tested raw and percent-decoded; `/environment_variables` stays allowed for `--deep` |
 | SEC-08 route probe SSRF guards | ⏳ | The probe is not implemented yet (`--no-probe-routes` exists but no collector reads routes). The §2.2 requirements apply unchanged when it lands; the flag should be documented as "reserved" until then |
 | SEC-10 OSV disclosure, `--no-osv`, `--osv-exclude` | ⏳ | OSV client not implemented yet |
-| SEC-11 fixed `User-Agent` | ✅ | `btp-lens/<version>`, no OS or Node details |
+| SEC-11 fixed `User-Agent` | ✅ | `baip-lens/<version>`, no OS or Node details |
 | SEC-12 caps on `Retry-After` and body size | ✅ | 120 s cap; 64 MB default body cap, streamed and cut off; `httpClient.test.ts` |
 | SEC-15 HTML injection | ✅ / 🔧 | JSON embedded with `\u003c`/`\u003e`/`\u0026`/U+2028/U+2029 escaping (`reporters/html.ts`); no `dangerouslySetInnerHTML` anywhere; evidence rendered as text. **Fixed now:** a Content Security Policy in the built report (`default-src 'none'; script-src 'sha256-…'; connect-src 'none'; base-uri 'none'`) and an http(s)-only guard on reference links. `e2e/offline-report.spec.ts` asserts the policy and that an injected inline script does not run |
 | SEC-16 CSV formula injection | ✅ | `csvCell` prefixes `= + - @ TAB CR` with `'`; `reporters.test.ts` |
@@ -50,7 +50,7 @@ Verdicts: **✅ verified** (present in code and covered by a test), **🔧 fixed
 | Id | Sev | Finding | Status |
 |---|---|---|---|
 | **SEC-24** | Medium | Guided mode introduces two new credential inputs (one-time passcode, password). Risk: echo to the terminal, reuse, or persistence. | 🔧 Input is hidden (`TerminalPrompter` mutes the echo), the grant is sent once and the field cleared from memory (`UaaSessionTokenProvider`), the session lives in memory only, and tests assert the code never appears in the transcript or the snapshot. The grant matches `cf login --sso` exactly (data-sources §1.1) |
-| **SEC-25** | Low | Opening the report and the passcode page uses an OS opener. Risk: shell injection through the path. | 🔧 `spawn` with an argument array, never a shell string; both paths are built by BTP Lens, not from CF data |
+| **SEC-25** | Low | Opening the report and the passcode page uses an OS opener. Risk: shell injection through the path. | 🔧 `spawn` with an argument array, never a shell string; both paths are built by BAIP Lens, not from CF data |
 | **SEC-26** | Low | `--no-probe-routes` and the `probeRoutes` snapshot option exist but nothing probes yet; a reader could believe the guard is active. | ⏳ Document as reserved until the collector lands |
 | **SEC-27** | Info | `HttpNetworkError` embeds the undici cause message. Today these are safe (`fetch failed`, `ENOTFOUND`); the redaction filter now covers the case where a future cause carries a URL with credentials. | ✅ covered by SEC-04 fix |
 
@@ -61,7 +61,7 @@ Verdicts: **✅ verified** (present in code and covered by a test), **🔧 fixed
 | Branch protection on `main` | **Still none** (`protected: false` for all three branches). Owner action §6.2 stands |
 | Collaborators | owner only |
 | Open pull requests | none; PR #1 and #2 merged |
-| npm `btp-lens` | **Still unclaimed** (`npm view` → 404). Reserve it before any public post |
+| npm `baip-lens` | **Still unclaimed** (`npm view` → 404). Reserve it before any public post |
 | Pinned action SHAs (`security.yml`) | all seven match the upstream tags (`git ls-remote`) |
 | Secrets in the new commits | none; `gitleaks` runs on push |
 
@@ -71,7 +71,7 @@ Verdicts: **✅ verified** (present in code and covered by a test), **🔧 fixed
 - [ ] SEC-10 OSV disclosure and flags when the OSV client lands
 - [ ] SEC-19 SBOM parsing guards when `sbom` lands
 - [ ] SEC-23 `report --redact`
-- [ ] SEC-05 `BTP_LENS_CLIENT_SECRET_FILE`
+- [ ] SEC-05 `BAIP_LENS_CLIENT_SECRET_FILE`
 - [ ] Fixture linter test; `npm pack --dry-run` in CI; release workflow with provenance (SC-01, SC-04)
 - [ ] Owner: protect `main`, enable secret scanning + push protection, reserve the npm name, enable Pages and Sponsors
 
@@ -91,7 +91,7 @@ Severity scale: **High** = could expose a customer credential or run attacker-co
 
 | Asset | Where it lives | Who wants it |
 |---|---|---|
-| CF/UAA bearer token and refresh token | `~/.cf/config.json`, process memory, `BTP_LENS_CLIENT_SECRET` | Anyone who can read logs, crash output, reports, or a proxied request |
+| CF/UAA bearer token and refresh token | `~/.cf/config.json`, process memory, `BAIP_LENS_CLIENT_SECRET` | Anyone who can read logs, crash output, reports, or a proxied request |
 | The landscape picture (app names, routes, versions, CVEs, findings) | snapshot JSON, HTML/CSV/SARIF reports, terminal output | Attackers doing reconnaissance; also accidental leaks through screenshots and shared files |
 | Customer-internal package names | SBOM, OSV query bodies | Competitors, attackers targeting private packages |
 | The operator's machine and network | wherever the CLI runs (laptop, CI runner, jump host) | A tenant of the scanned org who controls app names, routes or responses |
@@ -109,11 +109,11 @@ Attacker (A) is the important one: **every string the scanner reads from CF or f
 
 | Id | Sev | Finding | Requirement |
 |---|---|---|---|
-| **SEC-01** | High | `docs/data-sources.md` §1.1 lists `SSLDisabled` among the cf CLI config fields but does not say what to do with it. The cf CLI honours it (`--skip-ssl-validation`). If BTP Lens honoured it too, a token could be sent over an unverified TLS connection. | Ignore `SSLDisabled`. Never set `rejectUnauthorized: false`, never read `NODE_TLS_REJECT_UNAUTHORIZED`. If the certificate is invalid, exit 2 with "certificate not trusted; add your corporate CA with `NODE_EXTRA_CA_CERTS`". Unit test: the HTTP client has no code path that disables TLS verification (grep the built bundle). |
+| **SEC-01** | High | `docs/data-sources.md` §1.1 lists `SSLDisabled` among the cf CLI config fields but does not say what to do with it. The cf CLI honours it (`--skip-ssl-validation`). If BAIP Lens honoured it too, a token could be sent over an unverified TLS connection. | Ignore `SSLDisabled`. Never set `rejectUnauthorized: false`, never read `NODE_TLS_REJECT_UNAUTHORIZED`. If the certificate is invalid, exit 2 with "certificate not trusted; add your corporate CA with `NODE_EXTRA_CA_CERTS`". Unit test: the HTTP client has no code path that disables TLS verification (grep the built bundle). |
 | **SEC-02** | High | The token is attached to requests by the client, but the spec does not bind the token to a host. A bug, or a redirect, could send the CF bearer token to `api.osv.dev`, `endoflife.date`, `ui5.sap.com` or an app route. | Bind credentials to hosts inside the client: `Authorization` is added **only** when the request host equals the `--api` host or the discovered `log_cache` host. Callers cannot pass headers. Unit test: a request to every other allow-listed host is asserted to carry no `Authorization` header. |
 | **SEC-03** | High | Redirects. `fetch` follows redirects by default; a CF API or an app route answering 3xx to another host would move the request (and possibly the token) off the allow-list. `data-sources.md` sets `redirect: 'manual'` for the route probe only. | `redirect: 'manual'` (or `'error'`) for **all** requests. A 3xx from the CF API is recorded as `error` for that check. Unit test with a mocked 302. |
 | **SEC-04** | High | Secrets in error paths. UAA and CF errors are printed to the terminal; stack traces and `--verbose` output can include request objects with headers, and `POST /oauth/token` bodies contain the refresh token or client secret. | A single redaction function wraps every log, error and verbose line: it removes `Authorization` headers, any `bearer …`/`eyJ…` token shape, `refresh_token`, `client_secret` and `password` fields, and the contents of `config.json`. Never log the body of `/oauth/token` requests or responses. Unit test: feed a fake token through each error path and assert the output never contains it. |
-| **SEC-05** | Medium | Client credentials are read from `BTP_LENS_CLIENT_ID` / `BTP_LENS_CLIENT_SECRET` only. A `--client-secret` flag (if ever added) would land in shell history and `ps` output. | Never accept secrets as CLI flags. Add `BTP_LENS_CLIENT_SECRET_FILE` for CI and secret managers. Zero the in-memory copy after the token exchange. |
+| **SEC-05** | Medium | Client credentials are read from `BAIP_LENS_CLIENT_ID` / `BAIP_LENS_CLIENT_SECRET` only. A `--client-secret` flag (if ever added) would land in shell history and `ps` output. | Never accept secrets as CLI flags. Add `BAIP_LENS_CLIENT_SECRET_FILE` for CI and secret managers. Zero the in-memory copy after the token exchange. |
 | **SEC-06** | Medium | The refreshed token is "held in memory" and "never written back". Good. Missing: the snapshot must never contain the token, the config file path, or the operator's user name (`~/.cf/config.json` contains the user's name and GUID). | The snapshot schema is `.strict()` and has no field where a token could land. The privacy test in the definition of done must scan **all** outputs for the JWT shape (`eyJ` + two dots), for `bearer `, for the operator's email/user name from `config.json`, and for `refresh_token`. |
 | **SEC-07** | Low | The JWT `exp` is decoded locally. Fine, as long as nothing else in the payload is trusted. | Decode base64url payload only, read `exp`, treat anything malformed as "expired" and refresh. Never verify or trust `sub`, `scope` etc. locally; the CF API decides. |
 
@@ -124,7 +124,7 @@ Attacker (A) is the important one: **every string the scanner reads from CF or f
 | **SEC-08** | High | **Route probe reaches internal networks.** The UI5 probe GETs `https://<route host>/resources/sap-ui-version.json` for every mapped route. Route hosts are attacker (A) controlled and can be internal domains (`apps.internal`, private DNS names) or names that resolve to private, loopback or link-local addresses. When the scan runs on a CI runner or a jump host this becomes a server-side request forgery primitive: e.g. `169.254.169.254` (cloud metadata) or `10.x` services. | Before connecting, resolve the host and refuse RFC 1918, loopback, link-local (`169.254.0.0/16`, `fe80::/10`), unique-local (`fc00::/7`), multicast and unspecified addresses; refuse `*.internal` and single-label hosts; connect only with `https:`; pin the resolved address for the request to avoid DNS rebinding (resolve once, connect to that IP with the `Host`/SNI set to the name). Cap: one probe per app, 5 s, 256 KB body, `Content-Type` must be JSON. Unit tests for each refused class. |
 | **SEC-09** | Medium | `GET /` discovery returns `links.uaa`, `links.login`, `links.log_cache`. They are trusted because they come over TLS from `--api`, but the spec does not require them to be `https:`. | Validate scheme `https:` for every discovered link; otherwise exit 2. The `next.href` same-origin guard in §1.2 stays. |
 | **SEC-10** | Medium | **Private package names leak to OSV.** `POST api.osv.dev/v1/querybatch` sends `{ecosystem, name, version}` for every SBOM entry, including scoped internal packages such as `@customer/billing-core`. That is customer-internal information leaving the machine, contradicting the "no data leaves the machine" pitch as users will read it. | Document it in `docs/privacy.md` in plain words. Add `--osv-exclude <glob>` (default: none) and `--no-osv`. Print, before the first OSV call, one line: "Sending N package names and versions to api.osv.dev (public packages only is recommended; use --osv-exclude '@yourorg/*')". |
-| **SEC-11** | Low | Third-party services receive a default Node `User-Agent` that reveals the Node version. | Send `User-Agent: btp-lens/<version> (+https://github.com/sebastianomarchesini/BTP-Lens)` to every host and nothing about the OS. |
+| **SEC-11** | Low | Third-party services receive a default Node `User-Agent` that reveals the Node version. | Send `User-Agent: baip-lens/<version> (+https://github.com/sebastianomarchesini/BAIP-Lens)` to every host and nothing about the OS. |
 | **SEC-12** | Low | `Retry-After` is honoured without a cap; a misbehaving server can stall the scan for hours. Unbounded response bodies can exhaust memory. | Cap `Retry-After` at 120 s. Cap every response body (64 MB for CF list pages, 256 KB for probes, 8 MB for OSV, 1 MB for endoflife/UI5/npm) and record `error` when exceeded. |
 | **SEC-13** | Low | `report --from snapshot.json` must be offline, but nothing enforces it. | The allow-list has an "offline" mode that throws `EgressDeniedError` for every host. `report` always runs in that mode. Unit test. |
 | **SEC-14** | Low | Corporate proxies. Not a vulnerability, but users will be tempted to disable TLS checks when a TLS-inspecting proxy is in the way. | Honour `HTTPS_PROXY`/`NO_PROXY` (undici `EnvHttpProxyAgent`) and document `NODE_EXTRA_CA_CERTS`. This removes the main reason people reach for `--skip-ssl-validation`. |
@@ -137,7 +137,7 @@ Attacker (A) is the important one: **every string the scanner reads from CF or f
 | **SEC-16** | High | **CSV injection.** A cell starting with `=`, `+`, `-`, `@`, tab or carriage return is executed as a formula by Excel and LibreOffice (DDE / `=cmd|…`). App names and remediation text end up in the CSV. | In `csv.ts`, prefix such cells with a single quote and escape quotes per RFC 4180 (OWASP CSV injection guidance). Unit test with `=cmd|' /C calc'!A0`. |
 | **SEC-17** | Medium | **Terminal escape injection.** App and route names printed to the console can contain ANSI/OSC escape sequences that hide text, move the cursor, or (in some terminals) set the clipboard or title. | Strip C0/C1 control characters and ESC sequences from every string before it reaches `stdout`/`stderr`. Unit test. |
 | **SEC-18** | Medium | **Path traversal through names.** File names like `snapshot-<org>-<date>.json` or per-app files would let an org/space/app name containing `/`, `\` or `..` write outside `--out`. | Never build file names from CF names. Use `snapshot-<date>-<8 hex of random>.json`. If a user-supplied name is ever used, allow `[A-Za-z0-9._-]` only. |
-| **SEC-19** | Medium | **SBOM inputs.** `btp-lens sbom --path` reads `package-lock.json`, `pom.xml`, `mta.yaml` and `.mtar` (a ZIP). Risks: zip-slip (entry names with `..`), decompression bombs, symlinked entries, XML external entities and entity expansion in `pom.xml`. | Never extract `.mtar` to disk; read entries in memory, reject entry names that normalise outside the root, cap total uncompressed size (e.g. 512 MB) and ratio (100:1). Parse XML with entity processing **off** (`processEntities: false`, no DOCTYPE). Parse YAML with a safe loader only. Cap input file sizes. Unit tests with a crafted zip and a `pom.xml` containing `<!DOCTYPE … <!ENTITY …>>`. |
+| **SEC-19** | Medium | **SBOM inputs.** `baip-lens sbom --path` reads `package-lock.json`, `pom.xml`, `mta.yaml` and `.mtar` (a ZIP). Risks: zip-slip (entry names with `..`), decompression bombs, symlinked entries, XML external entities and entity expansion in `pom.xml`. | Never extract `.mtar` to disk; read entries in memory, reject entry names that normalise outside the root, cap total uncompressed size (e.g. 512 MB) and ratio (100:1). Parse XML with entity processing **off** (`processEntities: false`, no DOCTYPE). Parse YAML with a safe loader only. Cap input file sizes. Unit tests with a crafted zip and a `pom.xml` containing `<!DOCTYPE … <!ENTITY …>>`. |
 | **SEC-20** | Medium | **SARIF and local paths.** SARIF `artifactLocation.uri` and messages may contain absolute local paths of the SBOM source (`/Users/<name>/…` reveals the operator's user name). | Use paths relative to `--path` and `uriBaseId`. Extend the privacy test to fail on `/Users/`, `/home/`, `C:\Users\`. |
 | **SEC-21** | Low | Snapshot input trust. `report --from` parses a JSON file the user may have received from someone else. | Validate with the strict zod schema before use; cap file size (256 MB); do not deep-merge parsed objects with defaults (prototype pollution); reject unknown keys. |
 | **SEC-22** | Low | Report files contain the landscape picture but are written with the default umask, often world-readable on shared hosts. | Create `--out` with mode `0o700` and files with `0o600`. Print once: "Reports contain internal details of your landscape. Do not commit them; add `reports/` to `.gitignore`." |
@@ -171,7 +171,7 @@ Checked with the GitHub API and `git`:
 | Issue templates | Missing | Added, with a "do not paste tokens or `config.json`" warning, because bug reports are the most likely place for a token to leak. |
 | `.gitignore` | Covers build output and `reports/` | Recommend adding (in the development branch, not done here to avoid conflicts): `.env`, `.env.*`, `*.pem`, `*.key`, `.cf/`, `*.mtar`, `snapshot*.json`, `*.sarif`, `.DS_Store`. |
 | Test fixtures | None yet | Add a fixture linter test that fails on e-mail addresses, `eyJ` tokens, `bearer `, real BTP hostnames (`*.hana.ondemand.com`, `*.cfapps.*`) and IP addresses. Fixtures must use `example.com`/`.invalid` hosts and made-up GUIDs. |
-| npm package name `btp-lens` | **Unclaimed** on 2026-09-29 (also `btplens`, `@btp-lens/cli`, `create-btp-lens` are free) | Owner action, **urgent before any marketing post**: publish `btp-lens@0.0.1` as a placeholder that prints "not released yet" so the name cannot be squatted. |
+| npm package name `baip-lens` | **Unclaimed** on 2026-11-07 (also `baiplens`, `@baip-lens/cli`, `create-baip-lens` are free) | Owner action, **urgent before any marketing post**: publish `baip-lens@0.0.1` as a placeholder that prints "not released yet" so the name cannot be squatted. |
 
 ---
 
@@ -203,7 +203,7 @@ Nothing in `CLAUDE.md`, `README.md`, `.gitignore` or under `packages/` was touch
 
 ## 6. Owner actions (cannot be done from a branch)
 
-1. **Reserve `btp-lens` on npm today** (placeholder 0.0.1 with a clear "not released" message). Then set up trusted publishing for the repository.
+1. **Reserve `baip-lens` on npm today** (placeholder 0.0.1 with a clear "not released" message). Then set up trusted publishing for the repository.
 2. GitHub → Settings → Branches: protect `main` (require a PR, require `ci` and `security` checks, block force-push and deletion). Settings → Actions → General: workflow permissions "Read repository contents", and require approval for first-time contributors.
 3. Settings → Code security: enable Dependabot alerts, secret scanning **and push protection**, private vulnerability reporting.
 4. Enable 2FA on GitHub and npm; add a second maintainer only with 2FA.
@@ -218,7 +218,7 @@ Copy this list into the development session. Each line is a test or a grep.
 - [ ] HTTP client refuses every method except GET on the CF API host, and every non-allow-listed host (existing constraint #1), **plus** SEC-02 (token bound to host), SEC-03 (no redirects), SEC-09 (https only), SEC-13 (offline mode for `report`).
 - [ ] No code path disables TLS verification; `SSLDisabled` from `config.json` is ignored (SEC-01).
 - [ ] Redaction wrapper on every log/error/verbose path; token never appears in any output (SEC-04, SEC-06).
-- [ ] No secret accepted as a CLI flag; `BTP_LENS_CLIENT_SECRET_FILE` supported (SEC-05).
+- [ ] No secret accepted as a CLI flag; `BAIP_LENS_CLIENT_SECRET_FILE` supported (SEC-05).
 - [ ] Route probe: private/loopback/link-local/`.internal` refused, https only, DNS pinned, 5 s, 256 KB, JSON only (SEC-08).
 - [ ] OSV: `--no-osv`, `--osv-exclude`, the one-line disclosure before the first call (SEC-10).
 - [ ] Fixed `User-Agent`, capped `Retry-After`, capped body sizes (SEC-11, SEC-12).

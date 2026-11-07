@@ -26,7 +26,7 @@ export const AppInventoryItemSchema = z.object({
   name: z.string(),
   org: z.string(),
   space: z.string(),
-  /** A CF app, or a local project scanned with `btp-lens project`. Missing in 0.1 snapshots. */
+  /** A CF app, or a local project scanned with `baip-lens project`. Missing in 0.1 snapshots. */
   kind: InventoryKindSchema.default('app'),
   /** null for projects. */
   state: z.enum(['STARTED', 'STOPPED']).nullable(),
@@ -60,7 +60,7 @@ export const ScopeSchema = z.object({
   apiEndpoint: z.url().optional(),
   orgs: z.array(z.string()),
   spaces: z.array(z.string()).optional(),
-  /** Ids of the local projects scanned with `btp-lens project`. */
+  /** Ids of the local projects scanned with `baip-lens project`. */
   projects: z.array(z.string()).optional(),
 });
 

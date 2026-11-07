@@ -1,6 +1,6 @@
 import '@ui5/webcomponents-icons/dist/horizontal-bar-chart.js';
 import '@ui5/webcomponents-icons/dist/table-view.js';
-import type { ReportData, Severity } from '@btp-lens/model';
+import type { ReportData, Severity } from '@baip-lens/model';
 import { BarChart } from '@ui5/webcomponents-react-charts';
 import { SegmentedButton, SegmentedButtonItem } from '@ui5/webcomponents-react';
 import { useState } from 'react';

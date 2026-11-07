@@ -1,4 +1,4 @@
-import type { AppInventoryItem, ReportData } from '@btp-lens/model';
+import type { AppInventoryItem, ReportData } from '@baip-lens/model';
 import { describe, expect, it } from 'vitest';
 import sample from '../test/fixtures/report.json';
 import { resolveTheme } from '../ui5/theme';
@@ -19,7 +19,7 @@ function docWith(content: string): Document {
 
 describe('readEmbeddedReport', () => {
   it('returns null while the build placeholder is still in place', () => {
-    expect(readEmbeddedReport(docWith('<!--BTP_LENS_DATA-->'))).toBeNull();
+    expect(readEmbeddedReport(docWith('<!--BAIP_LENS_DATA-->'))).toBeNull();
     expect(readEmbeddedReport(document.implementation.createHTMLDocument('empty'))).toBeNull();
   });
 

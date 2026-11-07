@@ -1,6 +1,6 @@
 # Data sources
 
-This file records every external data source BTP Lens reads, what was **confirmed** against primary documentation, and what could **not** be confirmed and is therefore implemented defensively.
+This file records every external data source BAIP Lens reads, what was **confirmed** against primary documentation, and what could **not** be confirmed and is therefore implemented defensively.
 
 - **Verified on:** 2026-09-29
 - **CF v3 API source of truth:** the Markdown sources of the official docs site (`v3-apidocs.cloudfoundry.org`), read from [`cloudfoundry/cloud_controller_ng` `docs/v3/source`](https://github.com/cloudfoundry/cloud_controller_ng/tree/main/docs/v3/source) at commit `8383175b` (2026-09-28). Defaults were read from `config/cloud_controller.yml` and `middleware/` in the same repository.
@@ -13,26 +13,26 @@ Legend: ✅ confirmed in primary docs or source · 🟡 confirmed second-hand (t
 
 ### 1.1 Authentication ✅
 - Every call sends `Authorization: bearer <token>` (UAA OAuth 2).
-- Discovery: `GET /` (the global root, **no auth required**) returns `links.uaa.href`, `links.login.href` and `links.log_cache.href`. The `log_cache` link is omitted when log cache is not configured, so the code must handle its absence. BTP Lens discovers these endpoints from the root and **never hard-codes** BTP region URLs.
+- Discovery: `GET /` (the global root, **no auth required**) returns `links.uaa.href`, `links.login.href` and `links.log_cache.href`. The `log_cache` link is omitted when log cache is not configured, so the code must handle its absence. BAIP Lens discovers these endpoints from the root and **never hard-codes** BTP region URLs.
 - Token source 1: the cf CLI config at `$CF_HOME/.cf/config.json` (default `~/.cf/config.json`). Confirmed fields from `cloudfoundry/cli` `util/configv3/json_config.go`: `AccessToken` (already prefixed with `bearer `), `RefreshToken`, `Target`, `UaaEndpoint`, `AuthorizationEndpoint`, `UAAOAuthClient` (default `cf`), `UAAOAuthClientSecret`, `SSLDisabled`, `OrganizationFields`, `SpaceFields`.
   - If `AccessToken` has expired (read `exp` from the JWT payload locally, **without** any network call), refresh it with a `POST {UaaEndpoint}/oauth/token` using `grant_type=refresh_token`. This is the only permitted non-GET call. The refreshed token is held in memory and is **never written back** to `config.json`.
   - If `Target` differs from `--api`, fail with exit code 2 and a clear message.
-- Token source 2: client credentials from `BTP_LENS_CLIENT_ID` / `BTP_LENS_CLIENT_SECRET`, sent as a `POST {uaa}/oauth/token` with `grant_type=client_credentials`.
-- Token source 3 (guided mode, verified 2026-09-30 against `cloudfoundry/cli` `main`): what `cf login --sso` does. `command/v7/login_command.go` `authenticateSSO()` prompts for a passcode and calls `Authenticate({"passcode": <code>}, "", GrantTypePassword)`; `api/uaa/auth.go` `Authenticate()` posts `grant_type=password&passcode=<code>` (form-encoded) to `/oauth/token` with HTTP Basic auth of the CLI's OAuth client (`UAAOAuthClient`, default `cf`, and its secret, default empty). The response carries `access_token` and `refresh_token`; later refreshes use `grant_type=refresh_token`. The passcode page is `{login}/passcode` on the login server from `GET /` (`links.login`); the exact prompt text comes from `GET {login}/login` (`prompts.passcode`), which BTP Lens does not need. Username and password use the same grant with `username` and `password` fields. BTP Lens implements this in `UaaSessionTokenProvider`; the passcode or password is sent once and then dropped from memory.
+- Token source 2: client credentials from `BAIP_LENS_CLIENT_ID` / `BAIP_LENS_CLIENT_SECRET`, sent as a `POST {uaa}/oauth/token` with `grant_type=client_credentials`.
+- Token source 3 (guided mode, verified 2026-09-30 against `cloudfoundry/cli` `main`): what `cf login --sso` does. `command/v7/login_command.go` `authenticateSSO()` prompts for a passcode and calls `Authenticate({"passcode": <code>}, "", GrantTypePassword)`; `api/uaa/auth.go` `Authenticate()` posts `grant_type=password&passcode=<code>` (form-encoded) to `/oauth/token` with HTTP Basic auth of the CLI's OAuth client (`UAAOAuthClient`, default `cf`, and its secret, default empty). The response carries `access_token` and `refresh_token`; later refreshes use `grant_type=refresh_token`. The passcode page is `{login}/passcode` on the login server from `GET /` (`links.login`); the exact prompt text comes from `GET {login}/login` (`prompts.passcode`), which BAIP Lens does not need. Username and password use the same grant with `username` and `password` fields. BAIP Lens implements this in `UaaSessionTokenProvider`; the passcode or password is sent once and then dropped from memory.
 - ✅ Region list for the wizard (`packages/cli/src/guided/regions.ts`), verified 2026-10-10 against the source of the SAP help page (`github.com/SAP-docs/btp-cloud-platform`, docs/10-concepts/regions-and-api-endpoints-available-for-the-cloud-foundry-environment-f344a57.md). It includes the extension landscapes (`eu10-002` to `eu10-005`, `us10-001`, `us10-002`, `eu20-001`, `eu20-002`) and the China regions on `platform.sapcloud.cn`. Wherever an API endpoint is accepted (wizard, `--api`), a region id (`eu10-004`), a technical key (`cf-eu10-004`) or the region domain (`us10-001.hana.ondemand.com`) is turned into `https://api.cf.<region>.<domain>`. The list stays a convenience: the wizard verifies the endpoint with `GET /` and a pasted cockpit URL wins.
 - ⚠️ On SAP BTP, a technical user with client credentials needs a UAA client that CF role assignments can target. That setup is platform-specific, so the docs recommend `cf login` with a named user holding **Space Auditor** for v0.1.
 
 ### 1.2 Pagination ✅
 - List responses contain `pagination.{total_results,total_pages,first,last,next,previous}` and `resources[]`.
 - Follow `pagination.next.href` until it is `null`. Never build page URLs by hand.
-- `per_page` is valid from 1 to **5000** on every v3 list endpoint used here. BTP Lens uses `per_page=5000`.
+- `per_page` is valid from 1 to **5000** on every v3 list endpoint used here. BAIP Lens uses `per_page=5000`.
 - `include=space.organization` on `/v3/apps` returns parent spaces and orgs under `included.{spaces,organizations}`, which saves N+1 calls.
 - Security guard: `next.href` must point to the same origin as `--api`. Otherwise stop paging and record an error. This prevents a token leak through a crafted `next` link.
 
 ### 1.3 Errors ✅
 Error body: `{"errors":[{"code":int,"title":"CF-…","detail":"…"}]}`. Code on `code`/`title`, never on `detail`.
 
-| HTTP | Title | BTP Lens behaviour |
+| HTTP | Title | BAIP Lens behaviour |
 |---|---|---|
 | 400 | `CF-BadQueryParameter` (10005) | Tool bug. Record the check as `error`; the scan continues. |
 | 401 | `CF-InvalidAuthToken` (1000) / `CF-NotAuthenticated` (10002) | Refresh once, then abort with exit code 2. |
@@ -94,7 +94,7 @@ All endpoints are **GET**. "SA" = Space Auditor; "SD" = Space Developer.
 | Inventory, droplets, processes, stats, buildpacks, stacks, routes, bindings metadata, audit events | Space Auditor (or Org Auditor for org-level audit events) | on |
 | App usage events | ⚠️ unconfirmed on BTP | on, skips on 403 |
 | `ENV_SECRET_PLAINTEXT` | Space Developer **or Space Supporter** | `--deep` only |
-| `collect.project` and the project rules (§8) | **no CF role**: local files only, no network | on, for `btp-lens project` only |
+| `collect.project` and the project rules (§8) | **no CF role**: local files only, no network | on, for `baip-lens project` only |
 
 > **Least-privilege finding:** Space Supporter can also read `/environment_variables`, and on paper it is a narrower role than Space Developer (it cannot push apps or manage services). However, Space Supporter can restart and scale apps, so it is **not** read-only either. We document both and recommend neither for routine scans.
 
@@ -203,13 +203,13 @@ Any other host, or any other method, throws `EgressDeniedError` before `fetch` r
 - **D1: npm registry allowed.** `registry.npmjs.org` is on the allow-list for GET `/<pkg>` only, restricted to `@sap/cds`, `@sap/approuter`, `@sap/xssec` and `@sap/xsenv`. It is used by `SAP_PKG_OUTDATED` for the current `dist-tags.latest`.
 - **D2: both roles documented for `--deep`.** Space Developer or Space Supporter can read `/environment_variables`. `permissions.md` notes that Supporter is narrower but can still restart and scale apps.
 - **D3: route probe on by default.** One unauthenticated GET per app, 5 s timeout, no redirects. `--no-probe-routes` turns it off.
-- **D4: dedicated repository.** BTP Lens lives at the root of [`sebastianomarchesini/BTP-Lens`](https://github.com/sebastianomarchesini/BTP-Lens) as an npm-workspaces monorepo (`packages/cli`, `packages/ui`).
+- **D4: dedicated repository.** BAIP Lens lives at the root of [`sebastianomarchesini/BAIP-Lens`](https://github.com/sebastianomarchesini/BAIP-Lens) as an npm-workspaces monorepo (`packages/cli`, `packages/ui`).
 
 ---
 
-## 8. Local project files (`btp-lens project`)
+## 8. Local project files (`baip-lens project`)
 
-`btp-lens project --path <dir>` is a second scan target: a local CAP or MTA project directory, read from the file system only. The collector (`packages/cli/src/collectors/project/`) makes **no network request**, starts **no child process** and never runs `git`; a static test (`test/unit/project/noEgress.test.ts`) fails if any file under the collector, the project rules or `src/project.ts` imports `child_process`, `http`, `https`, `net`, `dns` or `worker_threads`, or contains `fetch(` or a dynamic `import(`. The rules are listed in [rules.md](rules.md#project-rules). Verified 2026-10-29 against the sources named below.
+`baip-lens project --path <dir>` is a second scan target: a local CAP or MTA project directory, read from the file system only. The collector (`packages/cli/src/collectors/project/`) makes **no network request**, starts **no child process** and never runs `git`; a static test (`test/unit/project/noEgress.test.ts`) fails if any file under the collector, the project rules or `src/project.ts` imports `child_process`, `http`, `https`, `net`, `dns` or `worker_threads`, or contains `fetch(` or a dynamic `import(`. The rules are listed in [rules.md](rules.md#project-rules). Verified 2026-10-29 against the sources named below.
 
 ### 8.1 The root
 
@@ -248,7 +248,7 @@ Any other host, or any other method, throws `EgressDeniedError` before `fetch` r
 
 Verified from the "Sources for cds.env" table of `node.js/cds-env.md` in the `cap-js/docs` GitHub mirror (`cap.cloud.sap` does not resolve from the build environment), lowest priority first:
 
-| Order | Source | BTP Lens |
+| Order | Source | BAIP Lens |
 | --- | --- | --- |
 | 1 | `@sap/cds` defaults | not needed: `null` means "the default" and every rule treats it as such (production auth defaults to `jwt`) |
 | 2 | `~/.cdsrc.json` | never read (outside the project) |

@@ -10,7 +10,7 @@ import {
 } from '../../../../src/collectors/project/index.js';
 import { ConfigError } from '../../../../src/http/errors.js';
 
-const tmp = () => mkdtemp(join(tmpdir(), 'btp-lens-root-'));
+const tmp = () => mkdtemp(join(tmpdir(), 'baip-lens-root-'));
 
 async function rejection(promise: Promise<unknown>): Promise<Error> {
   try {

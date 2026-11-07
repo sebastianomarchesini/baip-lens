@@ -32,7 +32,7 @@ jobs:
       - name: Assemble the site
         run: |
           mkdir -p site
-          cp reports/sample/btp-lens-report.html site/sample-report.html
+          cp reports/sample/baip-lens-report.html site/sample-report.html
           cp docs/assets/social-card.svg site/social-card.svg
           cp docs/assets/social-card.png site/social-card.png
           cp docs/assets/icon.png site/icon.png

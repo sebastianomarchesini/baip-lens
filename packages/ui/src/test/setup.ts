@@ -36,6 +36,6 @@ if (typeof window.matchMedia !== 'function') {
 afterEach(() => {
   cleanup();
   vi.unstubAllEnvs();
-  document.getElementById('btp-lens-data')?.remove();
+  document.getElementById('baip-lens-data')?.remove();
   window.location.hash = '';
 });

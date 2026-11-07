@@ -9,7 +9,7 @@ export const THEME_MODES: { mode: ThemeMode; label: string; icon: string }[] = [
   { mode: 'dark', label: 'Dark', icon: 'dark-mode' },
 ];
 
-const STORAGE_KEY = 'btp-lens.theme';
+const STORAGE_KEY = 'baip-lens.theme';
 const DARK_QUERY = '(prefers-color-scheme: dark)';
 
 function readStoredMode(): ThemeMode {

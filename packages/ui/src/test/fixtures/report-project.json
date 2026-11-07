@@ -1,7 +1,7 @@
 {
   "schemaVersion": 1,
   "tool": {
-    "name": "btp-lens",
+    "name": "baip-lens",
     "version": "0.1.0"
   },
   "scannedAt": "2026-09-29T00:00:00.000Z",
@@ -672,7 +672,7 @@
       "owasp": [
         "A03:2025"
       ],
-      "helpUri": "https://github.com/sebastianomarchesini/BTP-Lens/blob/main/docs/rules.md#app_no_recent_deploy"
+      "helpUri": "https://github.com/sebastianomarchesini/BAIP-Lens/blob/main/docs/rules.md#app_no_recent_deploy"
     },
     {
       "id": "CAP_MOCKED_AUTH_IN_PROD",
@@ -682,7 +682,7 @@
       "owasp": [
         "A07:2025"
       ],
-      "helpUri": "https://github.com/sebastianomarchesini/BTP-Lens/blob/main/docs/rules.md#cap_mocked_auth_in_prod"
+      "helpUri": "https://github.com/sebastianomarchesini/BAIP-Lens/blob/main/docs/rules.md#cap_mocked_auth_in_prod"
     },
     {
       "id": "CAP_MOCKED_USER_PASSWORD",
@@ -692,7 +692,7 @@
       "owasp": [
         "A07:2025"
       ],
-      "helpUri": "https://github.com/sebastianomarchesini/BTP-Lens/blob/main/docs/rules.md#cap_mocked_user_password"
+      "helpUri": "https://github.com/sebastianomarchesini/BAIP-Lens/blob/main/docs/rules.md#cap_mocked_user_password"
     },
     {
       "id": "CAP_AUDITLOG_MISSING",
@@ -702,7 +702,7 @@
       "owasp": [
         "A09:2025"
       ],
-      "helpUri": "https://github.com/sebastianomarchesini/BTP-Lens/blob/main/docs/rules.md#cap_auditlog_missing"
+      "helpUri": "https://github.com/sebastianomarchesini/BAIP-Lens/blob/main/docs/rules.md#cap_auditlog_missing"
     },
     {
       "id": "CAP_AUDITLOG_NOT_BOUND",
@@ -712,7 +712,7 @@
       "owasp": [
         "A09:2025"
       ],
-      "helpUri": "https://github.com/sebastianomarchesini/BTP-Lens/blob/main/docs/rules.md#cap_auditlog_not_bound"
+      "helpUri": "https://github.com/sebastianomarchesini/BAIP-Lens/blob/main/docs/rules.md#cap_auditlog_not_bound"
     },
     {
       "id": "CAP_PERSONAL_DATA_UNANNOTATED",
@@ -723,7 +723,7 @@
         "A04:2025",
         "A09:2025"
       ],
-      "helpUri": "https://github.com/sebastianomarchesini/BTP-Lens/blob/main/docs/rules.md#cap_personal_data_unannotated"
+      "helpUri": "https://github.com/sebastianomarchesini/BAIP-Lens/blob/main/docs/rules.md#cap_personal_data_unannotated"
     },
     {
       "id": "CAP_SERVICE_NO_RESTRICTION",
@@ -733,7 +733,7 @@
       "owasp": [
         "A01:2025"
       ],
-      "helpUri": "https://github.com/sebastianomarchesini/BTP-Lens/blob/main/docs/rules.md#cap_service_no_restriction"
+      "helpUri": "https://github.com/sebastianomarchesini/BAIP-Lens/blob/main/docs/rules.md#cap_service_no_restriction"
     },
     {
       "id": "CAP_ROLE_NOT_IN_XSUAA",
@@ -744,7 +744,7 @@
         "A01:2025",
         "A07:2025"
       ],
-      "helpUri": "https://github.com/sebastianomarchesini/BTP-Lens/blob/main/docs/rules.md#cap_role_not_in_xsuaa"
+      "helpUri": "https://github.com/sebastianomarchesini/BAIP-Lens/blob/main/docs/rules.md#cap_role_not_in_xsuaa"
     },
     {
       "id": "XSUAA_SCOPE_UNUSED",
@@ -754,7 +754,7 @@
       "owasp": [
         "A02:2025"
       ],
-      "helpUri": "https://github.com/sebastianomarchesini/BTP-Lens/blob/main/docs/rules.md#xsuaa_scope_unused"
+      "helpUri": "https://github.com/sebastianomarchesini/BAIP-Lens/blob/main/docs/rules.md#xsuaa_scope_unused"
     },
     {
       "id": "APPROUTER_ROUTE_NO_AUTH",
@@ -764,7 +764,7 @@
       "owasp": [
         "A07:2025"
       ],
-      "helpUri": "https://github.com/sebastianomarchesini/BTP-Lens/blob/main/docs/rules.md#approuter_route_no_auth"
+      "helpUri": "https://github.com/sebastianomarchesini/BAIP-Lens/blob/main/docs/rules.md#approuter_route_no_auth"
     },
     {
       "id": "APPROUTER_CSRF_DISABLED",
@@ -774,7 +774,7 @@
       "owasp": [
         "A01:2025"
       ],
-      "helpUri": "https://github.com/sebastianomarchesini/BTP-Lens/blob/main/docs/rules.md#approuter_csrf_disabled"
+      "helpUri": "https://github.com/sebastianomarchesini/BAIP-Lens/blob/main/docs/rules.md#approuter_csrf_disabled"
     },
     {
       "id": "DEPLOY_ARTIFACT_IN_REPO",
@@ -784,7 +784,7 @@
       "owasp": [
         "A03:2025"
       ],
-      "helpUri": "https://github.com/sebastianomarchesini/BTP-Lens/blob/main/docs/rules.md#deploy_artifact_in_repo"
+      "helpUri": "https://github.com/sebastianomarchesini/BAIP-Lens/blob/main/docs/rules.md#deploy_artifact_in_repo"
     },
     {
       "id": "SEED_DATA_SENSITIVE",
@@ -794,7 +794,7 @@
       "owasp": [
         "A04:2025"
       ],
-      "helpUri": "https://github.com/sebastianomarchesini/BTP-Lens/blob/main/docs/rules.md#seed_data_sensitive"
+      "helpUri": "https://github.com/sebastianomarchesini/BAIP-Lens/blob/main/docs/rules.md#seed_data_sensitive"
     },
     {
       "id": "UI5_BOOTSTRAP_EXTERNAL",
@@ -804,7 +804,7 @@
       "owasp": [
         "A08:2025"
       ],
-      "helpUri": "https://github.com/sebastianomarchesini/BTP-Lens/blob/main/docs/rules.md#ui5_bootstrap_external"
+      "helpUri": "https://github.com/sebastianomarchesini/BAIP-Lens/blob/main/docs/rules.md#ui5_bootstrap_external"
     }
   ],
   "summary": {

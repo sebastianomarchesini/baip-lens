@@ -1,4 +1,4 @@
-import type { ReportData } from '@btp-lens/model';
+import type { ReportData } from '@baip-lens/model';
 import { formatDate } from './format';
 
 /**
@@ -65,7 +65,7 @@ const inProjects = (n: number) => (n === 1 ? '' : ` in ${n} projects`);
 
 type Scope = ReportData['scope'];
 
-/** A scan of local project files (`btp-lens project`) rather than of a CF org. */
+/** A scan of local project files (`baip-lens project`) rather than of a CF org. */
 export function isProjectScope(scope: Scope): boolean {
   return scope.orgs.length === 0 && (scope.projects?.length ?? 0) > 0;
 }

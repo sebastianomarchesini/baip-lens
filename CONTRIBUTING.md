@@ -1,6 +1,6 @@
 # Contributing
 
-Thanks for helping improve BTP Lens. It is an open-source project in the plain sense: everything is Apache-2.0, the roadmap and governance are public (`docs/roadmap.md`, `docs/governance.md`), and contributions from people who are not developers count just as much as code. Please read the [Code of Conduct](CODE_OF_CONDUCT.md).
+Thanks for helping improve BAIP Lens. It is an open-source project in the plain sense: everything is Apache-2.0, the roadmap and governance are public (`docs/roadmap.md`, `docs/governance.md`), and contributions from people who are not developers count just as much as code. Please read the [Code of Conduct](CODE_OF_CONDUCT.md).
 
 ## Ways to contribute without writing code
 
@@ -60,5 +60,5 @@ npm run e2e          # after `npm run sample`
 ```
 
 - Fixtures are synthetic or anonymized. Never commit real GUIDs, names, hosts or tokens from a customer landscape.
-- When you change a rule or the report data, regenerate the golden samples with `UPDATE_SAMPLE=1 npm test -w btp-lens` and review the diff.
+- When you change a rule or the report data, regenerate the golden samples with `UPDATE_SAMPLE=1 npm test -w baip-lens` and review the diff.
 - Document new rules in `docs/rules.md`: the id, severity logic, evidence and remediation.
