@@ -69,7 +69,7 @@ describe('report UI', () => {
   it('explains when the file holds no scan data', async () => {
     // Outside dev mode there is no sample fallback.
     vi.stubEnv('DEV', false);
-    embed('<!--BTP_LENS_DATA-->');
+    embed('<!--BAIP_LENS_DATA-->');
     renderAt('#/');
     await screen.findByRole('main');
     expect(await screen.findByText(/not affiliated with SAP/)).toBeInTheDocument();

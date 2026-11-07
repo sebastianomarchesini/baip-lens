@@ -1,8 +1,8 @@
-# BTP Lens Individual Contributor License Agreement
+# BAIP Lens Individual Contributor License Agreement
 
 Version 1.0, 2026-10-11. Based on the Apache Software Foundation Individual Contributor License Agreement v2.2, adapted for an independently maintained project.
 
-Thank you for your interest in BTP Lens (the "Project"), maintained by Sebastiano Marchesini (the "Maintainer"). To clarify the intellectual property license granted with contributions from any person or entity, the Project must have a Contributor License Agreement ("CLA") on file that has been agreed to by each contributor. This license is for your protection as a contributor as well as the protection of the Project and its users; it does not change your rights to use your own contributions for any other purpose.
+Thank you for your interest in BAIP Lens (the "Project"), maintained by Sebastiano Marchesini (the "Maintainer"). To clarify the intellectual property license granted with contributions from any person or entity, the Project must have a Contributor License Agreement ("CLA") on file that has been agreed to by each contributor. This license is for your protection as a contributor as well as the protection of the Project and its users; it does not change your rights to use your own contributions for any other purpose.
 
 You accept and agree to the following terms and conditions for your present and future Contributions submitted to the Project. Except for the licenses granted here to the Maintainer and to recipients of software distributed by the Project, you reserve all right, title and interest in and to your Contributions.
 

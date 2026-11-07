@@ -35,7 +35,7 @@ jobs:
       - run: npm run build
       - run: npm test
       - name: Coverage (analyzers must stay above 85% lines)
-        run: npm run coverage -w btp-lens
+        run: npm run coverage -w baip-lens
       - name: Generate sample report from fixtures
         run: npm run sample
       - name: Offline report check (network disabled)

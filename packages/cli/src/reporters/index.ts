@@ -42,19 +42,19 @@ export async function writeReports(
     switch (format) {
       case 'html':
         files.push([
-          'btp-lens-report.html',
+          'baip-lens-report.html',
           renderHtml(data, options.htmlTemplate ?? (await loadReportTemplate())),
         ]);
         break;
       case 'json':
-        files.push(['btp-lens-report.json', renderJson(data)]);
+        files.push(['baip-lens-report.json', renderJson(data)]);
         break;
       case 'csv':
-        files.push(['btp-lens-findings.csv', renderFindingsCsv(data)]);
-        files.push(['btp-lens-apps.csv', renderAppsCsv(data)]);
+        files.push(['baip-lens-findings.csv', renderFindingsCsv(data)]);
+        files.push(['baip-lens-apps.csv', renderAppsCsv(data)]);
         break;
       case 'sarif':
-        files.push(['btp-lens-report.sarif', renderSarif(data)]);
+        files.push(['baip-lens-report.sarif', renderSarif(data)]);
         break;
     }
   }

@@ -11,13 +11,13 @@ Released as 0.1.0 on 2026-10-10:
 - [x] GET-only Cloud Foundry client with an egress allow-list and tests
 - [x] App inventory, current droplets, `APP_NO_RECENT_DEPLOY`
 - [x] JSON, CSV, SARIF and single-file offline HTML report (React + UI5 Web Components, Horizon light and dark, phone width)
-- [x] Guided mode (`btp-lens` with no arguments), `btp-lens doctor`, "Start here" panel
+- [x] Guided mode (`baip-lens` with no arguments), `baip-lens doctor`, "Start here" panel
 - [x] Security review, disclosure policy, CSP-protected report, CI with gitleaks, CodeQL and Scorecard
 
 Moved to the 0.1.x and 0.2 releases:
 
 - [ ] Rules: `RUNTIME_NODE_EOL`, `RUNTIME_JAVA_EOL` (endoflife.date), `BUILDPACK_OUTDATED`, `STACK_DEPRECATED`, `APP_IDLE`, `UI5_OUT_OF_MAINTENANCE`, `SAP_PKG_OUTDATED`, `DEP_KNOWN_CVE` (OSV.dev), `ENV_SECRET_PLAINTEXT` (`--deep`)
-- [ ] `btp-lens sbom` from `package-lock.json`, `pom.xml`, `mta.yaml` and `.mtar`
+- [ ] `baip-lens sbom` from `package-lock.json`, `pom.xml`, `mta.yaml` and `.mtar`
 - [ ] `report --redact` so people can share screenshots
 - [ ] Route probe for the UI5 version with the SSRF guards from the security review
 - [ ] Three usability sessions with non-developers (0.1.0 shipped without them, for developers and platform teams; due before 0.1.1)
@@ -25,7 +25,7 @@ Moved to the 0.1.x and 0.2 releases:
 
 Done since 0.1.0 (unreleased, see the [changelog](../CHANGELOG.md)):
 
-- [x] `btp-lens project --path <dir>`: a read-only scan of a local CAP or MTA project with thirteen rules derived from the OWASP Top 10 (2025) patterns of the SAP TechEd 2026 XP261 workshop, OWASP tags on every rule, a criticality matrix, `file:line` locations in the reports and SARIF
+- [x] `baip-lens project --path <dir>`: a read-only scan of a local CAP or MTA project with thirteen rules derived from the OWASP Top 10 (2025) patterns of the SAP TechEd 2026 XP261 workshop, OWASP tags on every rule, a criticality matrix, `file:line` locations in the reports and SARIF
 - [x] XSUAA scope analysis for the project scan (`CAP_ROLE_NOT_IN_XSUAA`, `XSUAA_SCOPE_UNUSED`); the Cloud Foundry side (bound xsuaa instances) stays in v0.2
 
 ## v0.1.1
@@ -48,11 +48,11 @@ Small items left open by the [pre-release audit](audits/2026-10-11-release-0.1.0
 - `--accept-risks <file>`: a committed list of accepted findings (rule id and subject, with a reason and an expiry) that the project scan and `--fail-on` leave out but still list as accepted
 - `report --compare <older snapshot>`: new, fixed and unchanged findings between two snapshots
 - App detail and Scan info screens in the report; print stylesheet; glossary
-- `BTP_LENS_CLIENT_SECRET_FILE` for CI secret managers
+- `BAIP_LENS_CLIENT_SECRET_FILE` for CI secret managers
 
 ## v0.3
 
-- Server mode: `btp-lens serve` locally, or the same UI on BTP behind an approuter with XSUAA and a small CAP service for snapshots
+- Server mode: `baip-lens serve` locally, or the same UI on BTP behind an approuter with XSUAA and a small CAP service for snapshots
 - Kyma support
 
 ## Later, if the community wants it
@@ -68,8 +68,8 @@ Each of these is scoped to one file, one test and one doc line, and a maintainer
 1. ~~Print a one-line "reports contain internal details, do not commit them" warning after `scan` (SEC-22).~~ Done 2026-10-03.
 2. Add a fixture-linter test that fails on e-mail addresses, JWTs, real BTP hostnames and IP addresses in `packages/cli/test/fixtures`.
 3. ~~Add `npm pack --dry-run` to CI and assert that only `dist`, `README.md`, `LICENSE` and `NOTICE` ship.~~ Done in the release workflow 2026-10-10; still worth adding to `ci.yml`.
-4. `btp-lens doctor`: add the role check (list spaces visible in the target org when a session exists).
-5. Guided mode: remember the last API endpoint and org in `~/.config/btp-lens/last-scan.json` (never the token) and offer "run the same scan again"; add `btp-lens reset`.
+4. `baip-lens doctor`: add the role check (list spaces visible in the target org when a session exists).
+5. Guided mode: remember the last API endpoint and org in `~/.config/baip-lens/last-scan.json` (never the token) and offer "run the same scan again"; add `baip-lens reset`.
 6. Report: a glossary page (org, space, buildpack, droplet, stack, runtime, EOL, SBOM, CVE, one sentence each).
 7. Report: print stylesheet (A4 and Letter, light theme when printing).
 8. Hand-written error message and test for the PowerShell execution-policy failure (`npx.ps1` blocked).

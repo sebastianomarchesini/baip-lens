@@ -1,11 +1,11 @@
 {
-  "name": "btp-lens",
+  "name": "baip-lens",
   "version": "0.1.0",
   "description": "Read-only scanner for Cloud Foundry landscapes on SAP BTP: inventory, runtime health, outdated libraries and security posture.",
   "license": "Apache-2.0",
   "type": "module",
   "bin": {
-    "btp-lens": "dist/cli.js"
+    "baip-lens": "dist/cli.js"
   },
   "files": [
     "dist",
@@ -42,11 +42,11 @@
   },
   "repository": {
     "type": "git",
-    "url": "git+https://github.com/sebastianomarchesini/BTP-Lens.git",
+    "url": "git+https://github.com/sebastianomarchesini/BAIP-Lens.git",
     "directory": "packages/cli"
   },
-  "homepage": "https://github.com/sebastianomarchesini/BTP-Lens#readme",
+  "homepage": "https://github.com/sebastianomarchesini/BAIP-Lens#readme",
   "bugs": {
-    "url": "https://github.com/sebastianomarchesini/BTP-Lens/issues"
+    "url": "https://github.com/sebastianomarchesini/BAIP-Lens/issues"
   }
 }

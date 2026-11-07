@@ -1,4 +1,4 @@
-import type { Finding, ReportData, Severity } from '@btp-lens/model';
+import type { Finding, ReportData, Severity } from '@baip-lens/model';
 import {
   Label,
   Link,

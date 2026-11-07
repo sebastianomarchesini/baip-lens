@@ -1,8 +1,8 @@
 blank_issues_enabled: false
 contact_links:
   - name: Security vulnerability
-    url: https://github.com/sebastianomarchesini/BTP-Lens/security/advisories/new
+    url: https://github.com/sebastianomarchesini/BAIP-Lens/security/advisories/new
     about: Please report security problems privately here, never as a public issue.
   - name: Question or "how do I…"
-    url: https://github.com/sebastianomarchesini/BTP-Lens/issues/new?labels=question&title=Question%3A%20
+    url: https://github.com/sebastianomarchesini/BAIP-Lens/issues/new?labels=question&title=Question%3A%20
     about: Open an issue with the "question" label. Non-developers welcome, no question is too basic.

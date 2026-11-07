@@ -141,7 +141,7 @@ describe('reanalyze', () => {
     const data = raw({ old: 900 });
     const snapshot: Snapshot = {
       schemaVersion: SNAPSHOT_SCHEMA_VERSION,
-      tool: { name: 'btp-lens', version: '0.0.0' },
+      tool: { name: 'baip-lens', version: '0.0.0' },
       scannedAt: NOW,
       scope: { apiEndpoint: 'https://api.cf.example.org/', orgs: ['org'] },
       options: { deep: false, probeRoutes: true },

@@ -100,9 +100,9 @@ async function requestToken(
   throw new CfAuthError(`Token response from ${describeUrl(tokenUrl)} was not understood.`);
 }
 
-/** A token handed in via BTP_LENS_ACCESS_TOKEN (e.g. from `cf oauth-token`). */
+/** A token handed in via BAIP_LENS_ACCESS_TOKEN (e.g. from `cf oauth-token`). */
 export class StaticTokenProvider implements TokenProvider {
-  readonly source = 'BTP_LENS_ACCESS_TOKEN';
+  readonly source = 'BAIP_LENS_ACCESS_TOKEN';
   private rejected = false;
   private readonly token: string;
 
@@ -114,7 +114,7 @@ export class StaticTokenProvider implements TokenProvider {
     if (this.rejected) {
       return Promise.reject(
         new CfAuthError(
-          'The token in BTP_LENS_ACCESS_TOKEN was rejected or has expired. Get a new one with `cf oauth-token`.',
+          'The token in BAIP_LENS_ACCESS_TOKEN was rejected or has expired. Get a new one with `cf oauth-token`.',
         ),
       );
     }
@@ -155,7 +155,7 @@ abstract class RefreshingTokenProvider implements TokenProvider {
   }
 }
 
-/** OAuth client credentials from BTP_LENS_CLIENT_ID / BTP_LENS_CLIENT_SECRET. */
+/** OAuth client credentials from BAIP_LENS_CLIENT_ID / BAIP_LENS_CLIENT_SECRET. */
 export class ClientCredentialsTokenProvider extends RefreshingTokenProvider {
   readonly source = 'client credentials';
 
@@ -213,7 +213,7 @@ export class CfCliTokenProvider extends RefreshingTokenProvider {
 }
 
 /**
- * A session started by BTP Lens itself, in guided mode: a one-time passcode
+ * A session started by BAIP Lens itself, in guided mode: a one-time passcode
  * (`cf login --sso`) or a username and password. The initial grant runs
  * once; afterwards the refresh token keeps the session alive in memory.
  * Nothing is written to disk. Verified against cloudfoundry/cli
@@ -244,7 +244,7 @@ export class UaaSessionTokenProvider extends RefreshingTokenProvider {
       // Passcodes and passwords are used once and then forgotten.
       this.grant = undefined;
     } else {
-      throw new CfAuthError('The session has expired. Run btp-lens again to sign in.');
+      throw new CfAuthError('The session has expired. Run baip-lens again to sign in.');
     }
     // The cf CLI's public client: id "cf", empty secret.
     const res = await requestToken(this.http, this.tokenUrl, CF_PUBLIC_CLIENT_ID, '', form);
@@ -294,18 +294,18 @@ export interface ResolveTokenOptions {
 }
 
 /**
- * Picks credentials in this order: BTP_LENS_ACCESS_TOKEN, then
- * BTP_LENS_CLIENT_ID + BTP_LENS_CLIENT_SECRET, then the cf CLI session.
+ * Picks credentials in this order: BAIP_LENS_ACCESS_TOKEN, then
+ * BAIP_LENS_CLIENT_ID + BAIP_LENS_CLIENT_SECRET, then the cf CLI session.
  */
 export async function resolveTokenProvider(options: ResolveTokenOptions): Promise<TokenProvider> {
   const { env, http, apiUrl, tokenUrl } = options;
   const now = options.now ?? Date.now;
 
-  if (env.BTP_LENS_ACCESS_TOKEN) return new StaticTokenProvider(env.BTP_LENS_ACCESS_TOKEN);
+  if (env.BAIP_LENS_ACCESS_TOKEN) return new StaticTokenProvider(env.BAIP_LENS_ACCESS_TOKEN);
 
-  if (env.BTP_LENS_CLIENT_ID || env.BTP_LENS_CLIENT_SECRET) {
-    if (!env.BTP_LENS_CLIENT_ID || !env.BTP_LENS_CLIENT_SECRET) {
-      throw new ConfigError('Set both BTP_LENS_CLIENT_ID and BTP_LENS_CLIENT_SECRET.');
+  if (env.BAIP_LENS_CLIENT_ID || env.BAIP_LENS_CLIENT_SECRET) {
+    if (!env.BAIP_LENS_CLIENT_ID || !env.BAIP_LENS_CLIENT_SECRET) {
+      throw new ConfigError('Set both BAIP_LENS_CLIENT_ID and BAIP_LENS_CLIENT_SECRET.');
     }
     if (tokenUrl === undefined) {
       throw new ConfigError('The CF API did not advertise a UAA endpoint for client credentials.');
@@ -313,8 +313,8 @@ export async function resolveTokenProvider(options: ResolveTokenOptions): Promis
     return new ClientCredentialsTokenProvider(
       http,
       tokenUrl,
-      env.BTP_LENS_CLIENT_ID,
-      env.BTP_LENS_CLIENT_SECRET,
+      env.BAIP_LENS_CLIENT_ID,
+      env.BAIP_LENS_CLIENT_SECRET,
       now,
     );
   }
@@ -323,7 +323,7 @@ export async function resolveTokenProvider(options: ResolveTokenOptions): Promis
   const config = await readCfCliConfig(path);
   if (config === undefined || (!config.AccessToken && !config.RefreshToken)) {
     throw new ConfigError(
-      `No credentials found. Run \`cf login -a ${apiUrl.origin}\` first, or set BTP_LENS_ACCESS_TOKEN.`,
+      `No credentials found. Run \`cf login -a ${apiUrl.origin}\` first, or set BAIP_LENS_ACCESS_TOKEN.`,
     );
   }
   if (!sameEndpoint(config.Target, apiUrl)) {

@@ -9,7 +9,7 @@ function scanAcme(fake = acmeFetch(), overrides: { deep?: boolean } = {}) {
     deep: overrides.deep ?? false,
     probeRoutes: true,
     concurrency: 5,
-    env: { BTP_LENS_ACCESS_TOKEN: ACME.token },
+    env: { BAIP_LENS_ACCESS_TOKEN: ACME.token },
     fetch: fake.fetch,
     now: () => ACME.now,
   });
@@ -31,7 +31,7 @@ describe('scan against the acme fixture landscape', () => {
         deep: false,
         probeRoutes: true,
         concurrency: 5,
-        env: { BTP_LENS_ACCESS_TOKEN: ACME.token },
+        env: { BAIP_LENS_ACCESS_TOKEN: ACME.token },
         fetch: fake.fetch,
         now: () => ACME.now,
       }),

@@ -14,7 +14,7 @@ import {
   walkProject,
 } from '../../../../src/collectors/project/walk.js';
 
-const tmp = async () => realpath(await mkdtemp(join(tmpdir(), 'btp-lens-walk-')));
+const tmp = async () => realpath(await mkdtemp(join(tmpdir(), 'baip-lens-walk-')));
 
 async function file(root: string, rel: string, content = ''): Promise<void> {
   const abs = join(root, ...rel.split('/'));

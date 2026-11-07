@@ -4,7 +4,7 @@ import type { Finding } from '../model/finding.js';
 import type { Severity } from '../model/severity.js';
 import type { ReportData } from '../model/snapshot.js';
 
-export const PROJECT_URL = 'https://github.com/sebastianomarchesini/BTP-Lens';
+export const PROJECT_URL = 'https://github.com/sebastianomarchesini/BAIP-Lens';
 
 const LEVEL: Record<Severity, 'error' | 'warning' | 'note'> = {
   critical: 'error',
@@ -119,7 +119,7 @@ export function renderSarif(data: ReportData): string {
             },
           ],
           partialFingerprints: {
-            'btpLensFinding/v1': fingerprint(finding),
+            'baipLensFinding/v1': fingerprint(finding),
             primaryLocationLineHash: fingerprint(finding),
           },
           properties: {

@@ -12,8 +12,8 @@ body:
     id: version
     attributes:
       label: Version
-      description: Output of `btp-lens version`
-      placeholder: btp-lens 0.1.0 (node 22.x, linux)
+      description: Output of `baip-lens version`
+      placeholder: baip-lens 0.1.0 (node 22.x, linux)
     validations:
       required: true
   - type: dropdown
@@ -21,8 +21,8 @@ body:
     attributes:
       label: How did you run it?
       options:
-        - npx btp-lens (guided mode, no flags)
-        - btp-lens scan or report with flags
+        - npx baip-lens (guided mode, no flags)
+        - baip-lens scan or report with flags
         - From a clone of the repository
         - Other (say which below)
     validations:

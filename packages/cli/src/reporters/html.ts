@@ -4,11 +4,11 @@ import type { ReportData } from '../model/snapshot.js';
 
 /** The placeholder the UI's report build leaves for the data (packages/ui/index.html). */
 export const DATA_PLACEHOLDER =
-  '<script type="application/json" id="btp-lens-data"><!--BTP_LENS_DATA--></script>';
+  '<script type="application/json" id="baip-lens-data"><!--BAIP_LENS_DATA--></script>';
 
 /** Matches the placeholder however a formatter has wrapped it. */
 const DATA_PLACEHOLDER_PATTERN =
-  /<script type="application\/json" id="btp-lens-data">\s*<!--BTP_LENS_DATA-->\s*<\/script>/g;
+  /<script type="application\/json" id="baip-lens-data">\s*<!--BAIP_LENS_DATA-->\s*<\/script>/g;
 
 /**
  * JSON that is safe inside a <script> element: no "<", ">" or "&" that could
@@ -30,7 +30,7 @@ export function renderHtml(data: ReportData, template: string): string {
       `The HTML report template must contain the data placeholder exactly once (found ${occurrences}).`,
     );
   }
-  const tag = `<script type="application/json" id="btp-lens-data">${scriptSafeJson(data)}</script>`;
+  const tag = `<script type="application/json" id="baip-lens-data">${scriptSafeJson(data)}</script>`;
   // A callback, so "$&" and friends in the data are never interpreted.
   return template.replace(DATA_PLACEHOLDER_PATTERN, () => tag);
 }

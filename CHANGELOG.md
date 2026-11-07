@@ -2,9 +2,13 @@
 
 ## Unreleased
 
+### Changed
+
+- **The project is now BAIP Lens.** The npm package is `baip-lens` (the command is `npx baip-lens`), the UI workspace is `@baip-lens/ui`, the environment variables are `BAIP_LENS_ACCESS_TOKEN`, `BAIP_LENS_CLIENT_ID`, `BAIP_LENS_CLIENT_SECRET`, `BAIP_LENS_DATA` and `BAIP_LENS_DEBUG`, the default output folder is `baip-lens-reports/`, the report file is `baip-lens-report.html`, snapshots record `tool.name` as `baip-lens`, and SARIF fingerprints are keyed `baipLensFinding/v1`. The repository moves to `sebastianomarchesini/BAIP-Lens`. Snapshots written by `btp-lens` 0.1.0 still load with `report --from`. The `btp-lens` package on npm is deprecated and points here. The name follows the SAP Business AI Platform (BAIP), which SAP announced in 2026 as the umbrella for SAP BTP; the tool is still not affiliated with SAP.
+
 ### Added
 
-- **`btp-lens project --path <dir>`:** a second scan target, a local CAP or MTA project directory, read from the file system only (no network, no child process, no `git`). It writes the same snapshot and reports as `scan`, `report --from` works on its snapshots, and `--fail-on` applies. The collector opens an allow-list of files (`package.json`, `.cdsrc.json`, `.cdsrc.yaml`, `mta.yaml`, `xs-security.json`, `xs-app.json`, `*.cds`, seed `*.csv`, `*.html`, and the `.gitignore` files consulted when a `*.mtar` is present; `*.mtar` is only stat'ed) and never opens `.cdsrc-private.json`, `.cdsrc.js`, `default-env.json`, `.env*`, `*.mtaext`, keys, `*.http` or `*.md`; it keeps identifiers, counts and booleans, never file contents, CSV values, mocked user names, passwords or absolute paths ([docs/data-sources.md §8](docs/data-sources.md#8-local-project-files-btp-lens-project), [docs/privacy.md](docs/privacy.md#project-scans)).
+- **`baip-lens project --path <dir>`:** a second scan target, a local CAP or MTA project directory, read from the file system only (no network, no child process, no `git`). It writes the same snapshot and reports as `scan`, `report --from` works on its snapshots, and `--fail-on` applies. The collector opens an allow-list of files (`package.json`, `.cdsrc.json`, `.cdsrc.yaml`, `mta.yaml`, `xs-security.json`, `xs-app.json`, `*.cds`, seed `*.csv`, `*.html`, and the `.gitignore` files consulted when a `*.mtar` is present; `*.mtar` is only stat'ed) and never opens `.cdsrc-private.json`, `.cdsrc.js`, `default-env.json`, `.env*`, `*.mtaext`, keys, `*.http` or `*.md`; it keeps identifiers, counts and booleans, never file contents, CSV values, mocked user names, passwords or absolute paths ([docs/data-sources.md §8](docs/data-sources.md#8-local-project-files-baip-lens-project), [docs/privacy.md](docs/privacy.md#project-scans)).
 - **Thirteen project rules**, derived from the OWASP Top 10 (2025) patterns of the public SAP TechEd 2026 workshop XP261: `CAP_MOCKED_AUTH_IN_PROD`, `CAP_MOCKED_USER_PASSWORD`, `CAP_AUDITLOG_MISSING`, `CAP_AUDITLOG_NOT_BOUND`, `CAP_PERSONAL_DATA_UNANNOTATED`, `CAP_SERVICE_NO_RESTRICTION`, `CAP_ROLE_NOT_IN_XSUAA`, `XSUAA_SCOPE_UNUSED`, `APPROUTER_ROUTE_NO_AUTH`, `APPROUTER_CSRF_DISABLED`, `DEPLOY_ARTIFACT_IN_REPO`, `SEED_DATA_SENSITIVE`, `UI5_BOOTSTRAP_EXTERNAL`. Each is documented in [docs/rules.md](docs/rules.md#project-rules) with its data, trigger, severity, evidence, remediation, verified references and limits.
 - **OWASP Top 10 (2025) tags** on every rule (`owasp` in the rule metadata, `owasp/<id>` tags in SARIF, shown per rule in the HTML report), and a **criticality matrix** (impact × ease of attack → severity, `packages/cli/src/model/criticality.ts`) that the new rules use; findings record the two inputs as `impact` and `easeOfAttack` in their evidence.
 - **Findings with a file location:** project findings carry `location: { file, line? }`; SARIF emits it as a `physicalLocation` with `uriBaseId: PROJECTROOT` (and a region when the line is known), the HTML report shows `file:line` under the finding, and the findings CSV gains `file` and `line` columns.
@@ -33,28 +37,28 @@ First public release. It covers guided mode, the app inventory, the `APP_NO_RECE
 - **Scan:** a user who can see the org but none of its spaces now gets a clear message and exit code 2 instead of an empty report with every check "ran" (the CF list endpoints filter by visibility instead of answering 403). `--org` and `--space` are matched exactly; a comma in a name no longer widens the filter. A `401` on the unauthenticated root call is no longer reported as a rejected token.
 - **Output files:** reports are never written through a symbolic link, an existing report file is tightened to `0600`, and file-system errors are explained in plain words.
 - **Terminal filter:** `Basic` credentials and the cf CLI config field names (`AccessToken`, `RefreshToken`, `UAAOAuthClientSecret`) are redacted too.
-- `--no-probe-routes` is hidden from `--help` and the snapshot records `probeRoutes: false`, because no route probe exists yet. `--fail-on` no longer prints its default twice. `btp-lens guided` in a script (no terminal) prints the usage hint and exits 2 instead of writing escape codes to the pipe.
+- `--no-probe-routes` is hidden from `--help` and the snapshot records `probeRoutes: false`, because no route probe exists yet. `--fail-on` no longer prints its default twice. `baip-lens guided` in a script (no terminal) prints the usage hint and exits 2 instead of writing escape codes to the pipe.
 - **CSV:** the files start with a UTF-8 byte-order mark, so Excel opens non-ASCII org, space and app names correctly, and control characters are dropped from cells.
-- **Report accessibility:** the document title names the section (`Apps · BTP Lens report`), every section has a page heading, and focus moves to the page on navigation so screen readers announce it.
+- **Report accessibility:** the document title names the section (`Apps · BAIP Lens report`), every section has a page heading, and focus moves to the page on navigation so screen readers announce it.
 - **Licenses:** the report and `THIRD_PARTY_LICENSES.md` now carry the Unicode CLDR notice (locale data) and the Preact MIT notice (vendored by UI5 Web Components).
 - **Docs:** README, privacy, FAQ, permissions, data sources, security policy and the landing page describe what 0.1.0 does rather than what is planned; the CLA text now exists (`docs/CLA.md`); links to GitHub Discussions were replaced by issues.
 - **Release workflow:** runs the same gates as CI (coverage, sample report, offline Playwright check); CI also runs on version tags; the README shipped to npm has its links pinned to the release tag.
-- `btp-lens doctor` no longer tells you to run `btp-lens doctor` when the API check fails. A `401`, `403` or `407` from the API root is now explained as a proxy or firewall block, with the fix.
+- `baip-lens doctor` no longer tells you to run `baip-lens doctor` when the API check fails. A `401`, `403` or `407` from the API root is now explained as a proxy or firewall block, with the fix.
 
 ### Added
 
 - **Logo and app icon:** a cloud-and-magnifier mark. It is the report's ShellBar logo and favicon (inlined, so the report stays one offline file), and the README, landing page and social card use it. Light and dark variants of the horizontal logo live in `docs/assets/`.
-- **Guided mode:** `btp-lens` with no arguments asks four questions (region or API endpoint, sign-in, org, confirm) and opens the report. Sign-in works like `cf login --sso` with a one-time code from the company login, or with username and password; the session is held in memory only. Reports go to `./btp-lens-reports/<date-time>/`.
-- **`btp-lens doctor`:** checks Node.js, API reachability, TLS trust, the cf CLI login and the output folder, with a one-sentence fix per failure.
+- **Guided mode:** `baip-lens` with no arguments asks four questions (region or API endpoint, sign-in, org, confirm) and opens the report. Sign-in works like `cf login --sso` with a one-time code from the company login, or with username and password; the session is held in memory only. Reports go to `./baip-lens-reports/<date-time>/`.
+- **`baip-lens doctor`:** checks Node.js, API reachability, TLS trust, the cf CLI login and the output folder, with a one-sentence fix per failure.
 - **"Start here" panel** on the report's Overview: three or four plain-language sentences computed from the scan.
 - **Hardening:** a Content Security Policy in the HTML report (`connect-src 'none'`, hashed scripts); terminal output stripped of escape sequences and token shapes; report folders `0700` and files `0600`; a 256 MB cap on `report --from`; the allow-list refuses the CF endpoints that return credentials even for `GET`; CI actions pinned by commit SHA and installed with `--ignore-scripts`.
 - `scan` and `report` end with a one-line reminder that reports describe your landscape and should not be committed.
 - **Docs for non-developers:** `docs/getting-started-no-terminal.md`, `docs/faq.md`, and text to send to an administrator in `docs/permissions.md`.
-- **`btp-lens scan`:** a read-only scan of one CF org, or one space, that writes a snapshot and reports.
-- **`btp-lens report --from`:** offline re-analysis of a snapshot.
-- **`btp-lens version`**, and exit codes 0, 1 and 2 with `--fail-on`.
+- **`baip-lens scan`:** a read-only scan of one CF org, or one space, that writes a snapshot and reports.
+- **`baip-lens report --from`:** offline re-analysis of a snapshot.
+- **`baip-lens version`**, and exit codes 0, 1 and 2 with `--fail-on`.
 - **HTTP layer:** an egress allow-list with per-host methods and paths; a GET-only CF client with same-origin pagination; retry with backoff; `Retry-After` and `X-RateLimit-*` handling; and a concurrency limit.
-- **Credentials:** the cf CLI session (refreshed in memory), `BTP_LENS_ACCESS_TOKEN`, or client credentials.
+- **Credentials:** the cf CLI session (refreshed in memory), `BAIP_LENS_ACCESS_TOKEN`, or client credentials.
 - **Collectors:** orgs, spaces, apps and current droplets. A 403 skips the check without failing the scan.
 - **Rule `APP_NO_RECENT_DEPLOY`.**
 - **Reports:** JSON, CSV (with formula-injection guard), SARIF 2.1.0, and a single-file offline HTML report. The HTML report uses React and UI5 Web Components for React with the Horizon light and dark themes. It has Overview, Apps and Findings screens and embeds the third-party licenses.

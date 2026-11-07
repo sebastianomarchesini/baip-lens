@@ -1,9 +1,9 @@
-import type { OwaspCategory } from '@btp-lens/model';
+import type { OwaspCategory } from '@baip-lens/model';
 
 /**
  * OWASP Top 10 (2025) titles by id. Duplicated from the CLI model
  * (packages/cli/src/model/owasp.ts) because the UI may import only types
- * from it: `@btp-lens/model` is a TypeScript paths alias that Vite does not
+ * from it: `@baip-lens/model` is a TypeScript paths alias that Vite does not
  * resolve. `owasp.test.ts` keeps the two copies in step.
  */
 export const OWASP_2025: Readonly<Record<OwaspCategory, string>> = {

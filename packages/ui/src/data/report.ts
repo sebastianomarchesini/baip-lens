@@ -1,7 +1,7 @@
-import type { ReportData } from '@btp-lens/model';
+import type { ReportData } from '@baip-lens/model';
 import { useQuery } from '@tanstack/react-query';
 
-export const DATA_ELEMENT_ID = 'btp-lens-data';
+export const DATA_ELEMENT_ID = 'baip-lens-data';
 
 function isReportData(value: unknown): value is ReportData {
   if (typeof value !== 'object' || value === null) return false;
@@ -26,7 +26,7 @@ export function readEmbeddedReport(doc: Document = document): ReportData | null 
   if (!text.startsWith('{')) return null;
   const data: unknown = JSON.parse(text);
   if (!isReportData(data)) {
-    throw new Error('The report data was written by an incompatible version of btp-lens.');
+    throw new Error('The report data was written by an incompatible version of baip-lens.');
   }
   return data;
 }

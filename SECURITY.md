@@ -1,15 +1,15 @@
 # Security policy
 
-BTP Lens is a read-only scanner that runs with a customer's Cloud Foundry credentials and produces reports about their landscape. We treat anything that could expose a token, send data to an unexpected host, or execute attacker-controlled content from a report as a security bug.
+BAIP Lens is a read-only scanner that runs with a customer's Cloud Foundry credentials and produces reports about their landscape. We treat anything that could expose a token, send data to an unexpected host, or execute attacker-controlled content from a report as a security bug.
 
 ## Reporting a vulnerability
 
 **Please do not open a public issue for security problems.**
 
-1. Use GitHub's private reporting: [Report a vulnerability](https://github.com/sebastianomarchesini/BTP-Lens/security/advisories/new).
-2. If that is not possible, e-mail the maintainer listed on the GitHub profile with the subject `BTP Lens security`.
+1. Use GitHub's private reporting: [Report a vulnerability](https://github.com/sebastianomarchesini/BAIP-Lens/security/advisories/new).
+2. If that is not possible, e-mail the maintainer listed on the GitHub profile with the subject `BAIP Lens security`.
 
-Include the version (`btp-lens version`), the command you ran with any secrets removed, and what you observed. **Never paste tokens, `~/.cf/config.json`, service keys or environment variable values.** If a report accidentally contains a secret, we will delete it and ask you to rotate the credential.
+Include the version (`baip-lens version`), the command you ran with any secrets removed, and what you observed. **Never paste tokens, `~/.cf/config.json`, service keys or environment variable values.** If a report accidentally contains a secret, we will delete it and ask you to rotate the credential.
 
 ## What to expect
 
@@ -28,7 +28,7 @@ These properties are security guarantees. Anything that breaks one is in scope:
 - **Inert outputs:** the HTML report makes no network request when opened, data from the scanned landscape cannot inject script into it, and CSV and SARIF outputs cannot execute formulas or code in the tools that open them.
 - **Safe parsing** of snapshots now, and of project files in the `sbom` command once it ships: no path traversal, zip-slip, XML entity expansion or unbounded decompression.
 
-Also in scope: the `btp-lens` npm package and this repository's code and workflows.
+Also in scope: the `baip-lens` npm package and this repository's code and workflows.
 
 Out of scope:
 

@@ -1,4 +1,4 @@
-import type { ReportData } from '@btp-lens/model';
+import type { ReportData } from '@baip-lens/model';
 import { describe, expect, it } from 'vitest';
 import projectSample from '../test/fixtures/report-project.json';
 import sample from '../test/fixtures/report.json';

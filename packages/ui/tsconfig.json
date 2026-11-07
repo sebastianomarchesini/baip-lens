@@ -14,7 +14,7 @@
     "noEmit": true,
     "types": ["vite/client"],
     "paths": {
-      "@btp-lens/model": ["../cli/src/model/index.ts"]
+      "@baip-lens/model": ["../cli/src/model/index.ts"]
     }
   },
   "include": ["src", "vite.config.ts", "vitest.config.ts"]

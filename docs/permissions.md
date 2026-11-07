@@ -1,6 +1,6 @@
 # Permissions
 
-BTP Lens follows least privilege. Every check declares which Cloud Foundry roles are enough to run it, and any one of the listed roles works. The roles come from the Cloud Controller v3 docs (see [data-sources.md](data-sources.md) §2).
+BAIP Lens follows least privilege. Every check declares which Cloud Foundry roles are enough to run it, and any one of the listed roles works. The roles come from the Cloud Controller v3 docs (see [data-sources.md](data-sources.md) §2).
 
 ## Recommended setup
 
@@ -14,9 +14,9 @@ Space Auditor can read apps, droplets, processes, routes and service binding *me
 
 ## Asking for the role
 
-Most people who want to run BTP Lens cannot grant themselves a role. Copy this to your administrator (the person who manages your subaccount or Cloud Foundry org):
+Most people who want to run BAIP Lens cannot grant themselves a role. Copy this to your administrator (the person who manages your subaccount or Cloud Foundry org):
 
-> Hi, could you give my user **<your e-mail>** the **Space Auditor** role on the spaces **<space names>** in the Cloud Foundry org **<org name>**? Space Auditor is read-only: it lets me see apps and their settings, but not change anything, read credentials or restart anything. I need it to run a read-only health report (BTP Lens, an open-source tool, https://github.com/sebastianomarchesini/BTP-Lens). Thank you!
+> Hi, could you give my user **<your e-mail>** the **Space Auditor** role on the spaces **<space names>** in the Cloud Foundry org **<org name>**? Space Auditor is read-only: it lets me see apps and their settings, but not change anything, read credentials or restart anything. I need it to run a read-only health report (BAIP Lens, an open-source tool, https://github.com/sebastianomarchesini/BAIP-Lens). Thank you!
 
 In the BTP cockpit the administrator does this under **Cloud Foundry Environment → Spaces → <space> → Members → Add Members**, choosing the **Space Auditor** role. With the cf CLI: `cf set-space-role <your e-mail> <org> <space> SpaceAuditor`.
 
@@ -31,9 +31,9 @@ In the BTP cockpit the administrator does this under **Cloud Foundry Environment
 | planned: audit events | `GET /v3/audit_events` | Space Auditor or Org Auditor | on |
 | planned: app usage events | `GET /v3/app_usage_events` | not documented for BTP; skipped on 403 | on |
 | planned: `ENV_SECRET_PLAINTEXT` | `GET /v3/apps/:guid/environment_variables` (names only) | Space Developer or Space Supporter | `--deep` |
-| `collect.project` and the thirteen `rule.CAP_*`, `rule.XSUAA_*`, `rule.APPROUTER_*`, `rule.DEPLOY_*`, `rule.SEED_*`, `rule.UI5_BOOTSTRAP_*` checks | local project files (`btp-lens project --path <dir>`), see [data-sources.md §8](data-sources.md#8-local-project-files-btp-lens-project) | **no CF role**: no login, no network | on, for `project` only |
+| `collect.project` and the thirteen `rule.CAP_*`, `rule.XSUAA_*`, `rule.APPROUTER_*`, `rule.DEPLOY_*`, `rule.SEED_*`, `rule.UI5_BOOTSTRAP_*` checks | local project files (`baip-lens project --path <dir>`), see [data-sources.md §8](data-sources.md#8-local-project-files-baip-lens-project) | **no CF role**: no login, no network | on, for `project` only |
 
-## `btp-lens project`
+## `baip-lens project`
 
 A project scan reads a local CAP or MTA project directory and needs **no Cloud Foundry role and no BTP login**: it makes no network request. It only needs read permission on the project files; a file it cannot read is recorded as unreadable with a reason code, and the scan continues. The output folder (`--out`) is skipped by the file walk, so a report written into the project is never scanned.
 
@@ -45,7 +45,7 @@ Reading environment variables needs **Space Developer** or **Space Supporter**. 
 
 ## When a role is missing
 
-- The v3 **list** endpoints BTP Lens uses (`/v3/spaces`, `/v3/apps`, `/v3/droplets`) do not answer 403 to a user without a space role: they return only what the user may see, which can be nothing. BTP Lens therefore stops with exit code 2 and the text to send to your administrator when the org is visible but none of its spaces is. The number of visible spaces is printed while the scan runs and the spaces are listed in the snapshot (`raw.spaces`).
+- The v3 **list** endpoints BAIP Lens uses (`/v3/spaces`, `/v3/apps`, `/v3/droplets`) do not answer 403 to a user without a space role: they return only what the user may see, which can be nothing. BAIP Lens therefore stops with exit code 2 and the text to send to your administrator when the org is visible but none of its spaces is. The number of visible spaces is printed while the scan runs and the spaces are listed in the snapshot (`raw.spaces`).
 - A call that returns **403** records the check as `skipped` with reason `insufficient role: needs <roles>`, and the scan continues.
 - Rules that depend on a skipped collector are skipped too.
 - Skipped checks appear in every report: on the HTML overview, in the JSON `checks`, and as SARIF notifications. Missing data is therefore never mistaken for "no findings".

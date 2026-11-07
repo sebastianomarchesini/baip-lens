@@ -1,4 +1,4 @@
-import type { Severity } from '@btp-lens/model';
+import type { Severity } from '@baip-lens/model';
 import { ObjectStatus } from '@ui5/webcomponents-react';
 import { SEVERITY_LABEL, SEVERITY_STATE } from '../data/severity';
 

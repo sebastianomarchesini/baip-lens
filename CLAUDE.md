@@ -1,8 +1,8 @@
-# Build prompt: BTP Lens v0.1
+# Build prompt: BAIP Lens v0.1
 
 ## Role and goal
 
-You are a senior TypeScript engineer and SAP BTP specialist. Build **BTP Lens** (working name), a free, open-source, **read-only** CLI that scans an SAP BTP Cloud Foundry landscape. It reports app inventory, usage, runtime health, outdated or vulnerable libraries, and security posture.
+You are a senior TypeScript engineer and SAP BTP specialist. Build **BAIP Lens**, a free, open-source, **read-only** CLI that scans an SAP BTP Cloud Foundry landscape. It reports app inventory, usage, runtime health, outdated or vulnerable libraries, and security posture.
 
 The first milestone is **v0.1**: a working CLI that a stranger can install with `npx`, point at one CF org, and get a useful HTML and JSON report within 5 minutes.
 
@@ -27,7 +27,7 @@ The first milestone is **v0.1**: a working CLI that a stranger can install with 
 - Lint and format: `eslint` and `prettier`
 - SBOM: CycloneDX JSON; CVEs: OSV.dev `/v1/querybatch`
 - Reports: JSON, CSV, SARIF 2.1.0, and an HTML report that is the React UI built as one self-contained file (see UI below)
-- Packaging: npm workspaces monorepo; the CLI package has a `bin` entry, so `npx btp-lens scan` works
+- Packaging: npm workspaces monorepo; the CLI package has a `bin` entry, so `npx baip-lens scan` works
 
 ## UI: React with the SAP Fiori (UI5) look
 
@@ -44,8 +44,8 @@ The UI is **React + TypeScript** using **UI5 Web Components for React** (`@ui5/w
   4. **Findings**: a list grouped by rule, with remediation text and reference links, filterable by severity.
   5. **Scan info**: which checks ran or were skipped and why (missing role), tool version, scan time.
 - One codebase, two build targets:
-  - **Report mode**: `vite-plugin-singlefile` bundles the UI into a single offline HTML file with the snapshot JSON embedded. This is the `btp-lens report --format html` output, and it must open from disk with no network access.
-  - **Server mode** (v0.3): the same UI served by `btp-lens serve` locally, or deployed to BTP behind an approuter with XSUAA, reading snapshots from a small CAP service.
+  - **Report mode**: `vite-plugin-singlefile` bundles the UI into a single offline HTML file with the snapshot JSON embedded. This is the `baip-lens report --format html` output, and it must open from disk with no network access.
+  - **Server mode** (v0.3): the same UI served by `baip-lens serve` locally, or deployed to BTP behind an approuter with XSUAA, reading snapshots from a small CAP service.
 - Branding: use the Fiori look but no SAP logo or SAP name in the ShellBar. The product logo is our own.
 - Licensing check: confirm the licenses of `@ui5/webcomponents-react` and its bundled fonts and icons allow redistribution in a single-file report. Record the result in `NOTICE`.
 - Accessibility: keyboard navigation and screen-reader labels, which UI5 components mostly provide. Don't break them with custom wrappers.
@@ -53,7 +53,7 @@ The UI is **React + TypeScript** using **UI5 Web Components for React** (`@ui5/w
 ## Repository layout
 
 ```
-btp-lens/
+baip-lens/
   packages/ui/              # React + UI5 Web Components for React (Vite)
     src/pages/  Overview.tsx  Apps.tsx  AppDetail.tsx  Findings.tsx  ScanInfo.tsx
     src/data/               # loads embedded snapshot (report mode) or API (server mode)
@@ -105,7 +105,7 @@ interface Snapshot {
 }
 ```
 
-Analyzers must be pure functions of the snapshot's raw data, so they can be unit tested with fixtures and rerun offline with `btp-lens report --from snapshot.json`.
+Analyzers must be pure functions of the snapshot's raw data, so they can be unit tested with fixtures and rerun offline with `baip-lens report --from snapshot.json`.
 
 ## v0.1 rule catalog
 
@@ -126,10 +126,10 @@ Document every rule in `docs/rules.md` with its id, severity logic, evidence and
 ## Commands
 
 ```
-btp-lens scan   --api <cf api url> --org <name> [--space <name>] [--deep] [--out ./reports]
-btp-lens sbom   --path <project dir or .mtar> [--out sbom.json]
-btp-lens report --from <snapshot.json> --format html,json,csv,sarif
-btp-lens version
+baip-lens scan   --api <cf api url> --org <name> [--space <name>] [--deep] [--out ./reports]
+baip-lens sbom   --path <project dir or .mtar> [--out sbom.json]
+baip-lens report --from <snapshot.json> --format html,json,csv,sarif
+baip-lens version
 ```
 
 Exit codes: 0 means no findings at or above `--fail-on` (default: none); 1 means findings met the threshold; 2 means a tool error.
@@ -145,7 +145,7 @@ Exit codes: 0 means no findings at or above `--fail-on` (default: none); 1 means
 
 ## Definition of done for v0.1
 
-- [ ] `npx btp-lens scan` works against a real trial BTP CF org using only Space Auditor
+- [ ] `npx baip-lens scan` works against a real trial BTP CF org using only Space Auditor
 - [ ] All v0.1 rules implemented, documented and unit tested (target over 85% line coverage on analyzers)
 - [ ] A GET-only client test proves no mutating calls are possible
 - [ ] Reports in HTML, JSON, CSV and SARIF generated from one snapshot
@@ -156,5 +156,5 @@ Exit codes: 0 means no findings at or above `--fail-on` (default: none); 1 means
 ## After v0.1 (do not build yet)
 
 - v0.2: opt-in user usage from the SAP Audit Log service (hashed and aggregated), log-cache request metrics, XSUAA scope analysis, GitHub Action
-- v0.3: server mode for the same React UI (`btp-lens serve`, or deployed on BTP with approuter, XSUAA and a small CAP service for snapshots); Kyma support
+- v0.3: server mode for the same React UI (`baip-lens serve`, or deployed on BTP with approuter, XSUAA and a small CAP service for snapshots); Kyma support
 - Later: opt-in anonymous aggregate statistics for a yearly public report

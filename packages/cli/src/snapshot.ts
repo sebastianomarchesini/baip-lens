@@ -38,7 +38,7 @@ export async function readSnapshot(path: string): Promise<Snapshot> {
   const version = (json as { schemaVersion?: unknown } | null)?.schemaVersion;
   if (version !== SNAPSHOT_SCHEMA_VERSION) {
     throw new ConfigError(
-      `Snapshot ${path} has schema version ${String(version)}; this btp-lens reads version ${SNAPSHOT_SCHEMA_VERSION}.`,
+      `Snapshot ${path} has schema version ${String(version)}; this baip-lens reads version ${SNAPSHOT_SCHEMA_VERSION}.`,
     );
   }
   const parsed = SnapshotSchema.safeParse(json);

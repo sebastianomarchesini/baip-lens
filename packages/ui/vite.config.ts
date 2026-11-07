@@ -7,7 +7,7 @@ import { viteSingleFile } from 'vite-plugin-singlefile';
 
 const LICENSES_FILE = 'THIRD_PARTY_LICENSES.md';
 const DATA_PLACEHOLDER =
-  /<script type="application\/json" id="btp-lens-data">\s*<!--BTP_LENS_DATA-->\s*<\/script>/g;
+  /<script type="application\/json" id="baip-lens-data">\s*<!--BAIP_LENS_DATA-->\s*<\/script>/g;
 
 /** Package root of a bundled module id, or undefined for our own code. */
 function packageRoot(id: string): string | undefined {
@@ -85,7 +85,7 @@ function embedLicenses(): Plugin {
   const roots = new Set<string>();
   let outDir = '';
   return {
-    name: 'btp-lens:embed-licenses',
+    name: 'baip-lens:embed-licenses',
     apply: 'build',
     configResolved(config) {
       outDir = resolve(config.root, config.build.outDir);

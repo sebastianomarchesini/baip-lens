@@ -58,7 +58,7 @@ async function addCleanExtras(root: string): Promise<void> {
 }
 
 export async function materializeFixture(name: FixtureName): Promise<MaterializedFixture> {
-  const root = await mkdtemp(join(tmpdir(), `btp-lens-${name}-`));
+  const root = await mkdtemp(join(tmpdir(), `baip-lens-${name}-`));
   await cp(join(FIXTURES, name), root, { recursive: true });
   if (name === 'acme-incidents') await addAcmeExtras(root);
   else await addCleanExtras(root);

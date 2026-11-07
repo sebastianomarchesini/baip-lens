@@ -29,7 +29,7 @@ import { REGIONS } from './regions.js';
 export interface WizardOptions {
   prompter: Prompter;
   env: NodeJS.ProcessEnv;
-  /** Where ./btp-lens-reports is created. */
+  /** Where ./baip-lens-reports is created. */
   cwd: string;
   /** Open the finished report with the OS default browser. */
   open: OpenInBrowser | null;
@@ -40,7 +40,7 @@ export interface WizardOptions {
 const ORG_SCHEMA = z.object({ guid: z.string(), name: z.string() });
 const MAX_ATTEMPTS = 3;
 
-/** ./btp-lens-reports/2026-09-30-1412 */
+/** ./baip-lens-reports/2026-09-30-1412 */
 export function reportDirName(now: Date): string {
   const p = (n: number) => String(n).padStart(2, '0');
   return `${now.getFullYear()}-${p(now.getMonth() + 1)}-${p(now.getDate())}-${p(now.getHours())}${p(now.getMinutes())}`;
@@ -87,7 +87,7 @@ export function explainConnectionError(
   if (/certificate|cert_|self.signed|unable[ _]to[ _]verify|err_tls|altname|ossl/.test(lower)) {
     return (
       `The connection to ${apiUrl.host} is not trusted, which usually means your company inspects HTTPS traffic.\n` +
-      'Ask IT for the company root certificate and set NODE_EXTRA_CA_CERTS to its path. BTP Lens never skips certificate checks.'
+      'Ask IT for the company root certificate and set NODE_EXTRA_CA_CERTS to its path. BAIP Lens never skips certificate checks.'
     );
   }
   if (/enotfound|eai_again|getaddrinfo/.test(lower)) {
@@ -227,9 +227,9 @@ async function stepSignIn(o: WizardOptions, s: Session): Promise<TokenProvider> 
   const { prompter: p } = o;
   p.say('');
   p.say('Step 2 of 4 · Sign in');
-  if (o.env.BTP_LENS_ACCESS_TOKEN) {
-    p.say('Using the token from BTP_LENS_ACCESS_TOKEN.');
-    return new StaticTokenProvider(o.env.BTP_LENS_ACCESS_TOKEN);
+  if (o.env.BAIP_LENS_ACCESS_TOKEN) {
+    p.say('Using the token from BAIP_LENS_ACCESS_TOKEN.');
+    return new StaticTokenProvider(o.env.BAIP_LENS_ACCESS_TOKEN);
   }
   const existing = await existingCfSession(s, o.env);
   const loginBase = loginBaseOf(s.root);
@@ -346,7 +346,7 @@ function plural(n: number, word: string): string {
 }
 
 /**
- * Guided mode: `btp-lens` with no arguments. Four questions, standard
+ * Guided mode: `baip-lens` with no arguments. Four questions, standard
  * (Space Auditor) checks only, report opened in the browser. Returns the
  * process exit code. Findings never make guided mode exit non-zero.
  */
@@ -365,7 +365,7 @@ export async function runWizard(o: WizardOptions): Promise<number> {
     session.cf.setTokenProvider(tokens);
     const org = await stepOrg(o, session);
 
-    const outDir = join(o.cwd, 'btp-lens-reports', reportDirName(now));
+    const outDir = join(o.cwd, 'baip-lens-reports', reportDirName(now));
     p.say('');
     p.say('Step 4 of 4 · Ready');
     p.say(`Standard checks only: they need the Space Auditor role and change nothing.`);

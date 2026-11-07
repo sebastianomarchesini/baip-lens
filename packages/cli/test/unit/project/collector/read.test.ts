@@ -14,7 +14,7 @@ import {
   readProjectFile,
 } from '../../../../src/collectors/project/read.js';
 
-const tmp = async () => realpath(await mkdtemp(join(tmpdir(), 'btp-lens-read-')));
+const tmp = async () => realpath(await mkdtemp(join(tmpdir(), 'baip-lens-read-')));
 
 describe('readProjectFile', () => {
   it('reads a regular file', async () => {

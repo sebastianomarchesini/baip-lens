@@ -56,11 +56,11 @@ vi.mock('../../src/reporters/html.js', async (importOriginal) => {
 const NOW = new Date('2026-09-29T00:00:00.000Z');
 const SNAPSHOT_FILE = 'snapshot-20260929T000000Z.json';
 const REPORT_FILES = [
-  'btp-lens-apps.csv',
-  'btp-lens-findings.csv',
-  'btp-lens-report.html',
-  'btp-lens-report.json',
-  'btp-lens-report.sarif',
+  'baip-lens-apps.csv',
+  'baip-lens-findings.csv',
+  'baip-lens-report.html',
+  'baip-lens-report.json',
+  'baip-lens-report.sarif',
 ];
 
 interface Captured {
@@ -85,7 +85,7 @@ function capture(): Captured {
   };
 }
 
-const tmp = () => mkdtemp(join(tmpdir(), 'btp-lens-project-out-'));
+const tmp = () => mkdtemp(join(tmpdir(), 'baip-lens-project-out-'));
 
 /** Terminal output without the `Wrote:` block, whose lines are the output paths. */
 function terminalText(c: Captured, out: string): string {
@@ -136,7 +136,7 @@ function expectCleanOutputs(
   expectNoLeaks({ ...texts, terminal }, forbidden, [ABSOLUTE_PATH]);
 }
 
-describe('btp-lens project on the acme-incidents fixture', () => {
+describe('baip-lens project on the acme-incidents fixture', () => {
   let fixture: MaterializedFixture;
   let out: string;
   let c: Captured;
@@ -262,7 +262,7 @@ describe('btp-lens project on the acme-incidents fixture', () => {
   });
 
   it('(8) counts one project and no app', () => {
-    const report = JSON.parse(texts['btp-lens-report.json']!) as {
+    const report = JSON.parse(texts['baip-lens-report.json']!) as {
       summary: { projects: number; apps: number };
     };
     expect(report.summary.projects).toBe(1);
@@ -342,8 +342,8 @@ describe('btp-lens project on the acme-incidents fixture', () => {
     const d = capture();
     const args = ['report', '--from', join(out, SNAPSHOT_FILE), '--out', again, '--format', 'json'];
     expect(await main(args, d.io)).toBe(EXIT.ok);
-    const first = JSON.parse(texts['btp-lens-report.json']!) as { findings: unknown };
-    const second = JSON.parse(await readFile(join(again, 'btp-lens-report.json'), 'utf8')) as {
+    const first = JSON.parse(texts['baip-lens-report.json']!) as { findings: unknown };
+    const second = JSON.parse(await readFile(join(again, 'baip-lens-report.json'), 'utf8')) as {
       findings: unknown;
     };
     expect(second.findings).toEqual(first.findings);
@@ -439,7 +439,7 @@ describe('btp-lens project on the acme-incidents fixture', () => {
   });
 });
 
-describe('btp-lens project on the clean-cap fixture', () => {
+describe('baip-lens project on the clean-cap fixture', () => {
   it('(12) finds nothing and leaks nothing', async () => {
     const fixture = await materializeFixture('clean-cap');
     try {
@@ -457,12 +457,12 @@ describe('btp-lens project on the clean-cap fixture', () => {
   });
 });
 
-describe('btp-lens project root errors', () => {
+describe('baip-lens project root errors', () => {
   it('(13) exits 2 and echoes the --path the user gave, never its real path', async () => {
-    const dir = await mkdtemp(join(tmpdir(), 'btp-lens-project-roots-'));
+    const dir = await mkdtemp(join(tmpdir(), 'baip-lens-project-roots-'));
     // The directory link targets a second temp directory with its own unique name, so
     // that its real path is not a prefix of the --path the error legitimately echoes.
-    const real = await mkdtemp(join(tmpdir(), 'btp-lens-project-real-'));
+    const real = await mkdtemp(join(tmpdir(), 'baip-lens-project-real-'));
     await writeFile(join(dir, 'real-file.txt'), 'x');
     await symlink(join(dir, 'real-file.txt'), join(dir, 'file-link'));
     await symlink(real, join(dir, 'dir-link'));

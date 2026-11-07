@@ -13,7 +13,7 @@ import { ACME, acmeFetch } from '../support/acme.js';
  *  - test/fixtures/sample-snapshot.json feeds `npm run sample` (the real CLI
  *    and the real HTML template, in CI);
  *  - packages/ui/src/test/fixtures/report.json is the UI's dev and test data.
- * Regenerate both with `UPDATE_SAMPLE=1 npm test -w btp-lens`.
+ * Regenerate both with `UPDATE_SAMPLE=1 npm test -w baip-lens`.
  */
 const SAMPLE_SNAPSHOT = fileURLToPath(new URL('../fixtures/sample-snapshot.json', import.meta.url));
 const UI_REPORT = fileURLToPath(
@@ -36,7 +36,7 @@ describe('sample data', () => {
       deep: false,
       probeRoutes: true,
       concurrency: 5,
-      env: { BTP_LENS_ACCESS_TOKEN: ACME.token },
+      env: { BAIP_LENS_ACCESS_TOKEN: ACME.token },
       fetch: acmeFetch().fetch,
       now: () => ACME.now,
     });
@@ -55,10 +55,10 @@ describe('sample data', () => {
 
     expect(SnapshotSchema.safeParse(JSON.parse(snapshotJson)).success).toBe(true);
     expect(ReportDataSchema.safeParse(JSON.parse(reportJson)).success).toBe(true);
-    expect(await readOrEmpty(SAMPLE_SNAPSHOT), 'run UPDATE_SAMPLE=1 npm test -w btp-lens').toBe(
+    expect(await readOrEmpty(SAMPLE_SNAPSHOT), 'run UPDATE_SAMPLE=1 npm test -w baip-lens').toBe(
       snapshotJson,
     );
-    expect(await readOrEmpty(UI_REPORT), 'run UPDATE_SAMPLE=1 npm test -w btp-lens').toBe(
+    expect(await readOrEmpty(UI_REPORT), 'run UPDATE_SAMPLE=1 npm test -w baip-lens').toBe(
       reportJson,
     );
   });

@@ -5,7 +5,7 @@ import { pathToFileURL } from 'node:url';
 import { chromium } from '@playwright/test';
 
 const report = pathToFileURL(
-  resolve(import.meta.dirname, '../reports/sample/btp-lens-report.html'),
+  resolve(import.meta.dirname, '../reports/sample/baip-lens-report.html'),
 ).href;
 const out = (name) => resolve(import.meta.dirname, `../docs/images/${name}.png`);
 

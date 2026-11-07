@@ -9,7 +9,7 @@ try {
   await stat(source);
 } catch {
   console.error(
-    'Missing packages/ui/dist-report/index.html. Run `npm run build -w @btp-lens/ui` first.',
+    'Missing packages/ui/dist-report/index.html. Run `npm run build -w @baip-lens/ui` first.',
   );
   process.exit(1);
 }

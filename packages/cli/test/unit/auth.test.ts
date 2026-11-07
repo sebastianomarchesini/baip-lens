@@ -32,7 +32,7 @@ function http(fake: FakeFetch): HttpClient {
 }
 
 async function cfHomeWith(config: object): Promise<string> {
-  const home = await mkdtemp(join(tmpdir(), 'btp-lens-cf-'));
+  const home = await mkdtemp(join(tmpdir(), 'baip-lens-cf-'));
   await mkdir(join(home, '.cf'));
   await writeFile(join(home, '.cf', 'config.json'), JSON.stringify(config));
   return home;
@@ -57,9 +57,9 @@ describe('sameEndpoint', () => {
 });
 
 describe('resolveTokenProvider', () => {
-  it('prefers BTP_LENS_ACCESS_TOKEN and strips the bearer prefix', async () => {
+  it('prefers BAIP_LENS_ACCESS_TOKEN and strips the bearer prefix', async () => {
     const provider = await resolveTokenProvider({
-      env: { BTP_LENS_ACCESS_TOKEN: 'bearer abc' },
+      env: { BAIP_LENS_ACCESS_TOKEN: 'bearer abc' },
       http: http(new FakeFetch()),
       apiUrl: api,
       tokenUrl,
@@ -76,7 +76,7 @@ describe('resolveTokenProvider', () => {
       jsonResponse({ access_token: 'cc-token', token_type: 'bearer' }),
     );
     const provider = await resolveTokenProvider({
-      env: { BTP_LENS_CLIENT_ID: 'scanner', BTP_LENS_CLIENT_SECRET: 's3cr3t' },
+      env: { BAIP_LENS_CLIENT_ID: 'scanner', BAIP_LENS_CLIENT_SECRET: 's3cr3t' },
       http: http(fake),
       apiUrl: api,
       tokenUrl,
@@ -92,7 +92,7 @@ describe('resolveTokenProvider', () => {
   it('requires both client id and secret', async () => {
     await expect(
       resolveTokenProvider({
-        env: { BTP_LENS_CLIENT_ID: 'scanner' },
+        env: { BAIP_LENS_CLIENT_ID: 'scanner' },
         http: http(new FakeFetch()),
         apiUrl: api,
         tokenUrl,
@@ -101,7 +101,7 @@ describe('resolveTokenProvider', () => {
   });
 
   it('explains how to log in when there is no cf CLI config', async () => {
-    const home = await mkdtemp(join(tmpdir(), 'btp-lens-empty-'));
+    const home = await mkdtemp(join(tmpdir(), 'baip-lens-empty-'));
     await expect(
       resolveTokenProvider({
         env: { CF_HOME: home },

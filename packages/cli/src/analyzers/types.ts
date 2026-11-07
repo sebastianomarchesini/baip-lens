@@ -22,7 +22,7 @@ export interface Analyzer {
 }
 
 export const RULES_DOC_URL =
-  'https://github.com/sebastianomarchesini/BTP-Lens/blob/main/docs/rules.md';
+  'https://github.com/sebastianomarchesini/BAIP-Lens/blob/main/docs/rules.md';
 
 export function ruleHelpUri(ruleId: string): string {
   return `${RULES_DOC_URL}#${ruleId.toLowerCase()}`;

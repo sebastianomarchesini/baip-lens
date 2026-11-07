@@ -1,4 +1,4 @@
-import type { Severity } from '@btp-lens/model';
+import type { Severity } from '@baip-lens/model';
 
 export const SEVERITY_ORDER: readonly Severity[] = ['critical', 'high', 'medium', 'low', 'info'];
 

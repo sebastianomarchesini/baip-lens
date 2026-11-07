@@ -1,4 +1,4 @@
-import type { AppInventoryItem } from '@btp-lens/model';
+import type { AppInventoryItem } from '@baip-lens/model';
 import { formatDate } from './format';
 
 /** A local project is neither started nor stopped. */

@@ -8,7 +8,7 @@ import { scanProject } from '../../../../src/project.js';
 import { isSafeRelativePath } from '../../../../src/model/paths.js';
 import { RawProjectSchema } from '../../../../src/model/raw.js';
 
-const tmp = async () => realpath(await mkdtemp(join(tmpdir(), 'btp-lens-collect-')));
+const tmp = async () => realpath(await mkdtemp(join(tmpdir(), 'baip-lens-collect-')));
 
 async function file(root: string, rel: string, content: string | Buffer): Promise<void> {
   const abs = join(root, ...rel.split('/'));
