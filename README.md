@@ -20,7 +20,7 @@ It sends only `GET` requests to the Cloud Foundry API. It contacts no third part
 [![OpenSSF Scorecard](https://api.scorecard.dev/projects/github.com/sebastianomarchesini/BAIP-Lens/badge)](https://scorecard.dev/viewer/?uri=github.com/sebastianomarchesini/BAIP-Lens)
 -->
 
-> **Status: 0.1.0, first public release.** It includes guided mode, the app inventory, the `APP_NO_RECENT_DEPLOY` rule, all report formats and the HTML report. The other rules are planned in [docs/rules.md](docs/rules.md) and the [roadmap](docs/roadmap.md). Feedback from real landscapes is very welcome in the issues.
+> **Status: 0.2.0.** The project is now BAIP Lens (npm package `baip-lens`; the former `btp-lens` is deprecated). This release adds `baip-lens project --path <dir>`, a local scan of a CAP or MTA project against thirteen OWASP-tagged rules with no login and no network, next to the Cloud Foundry scan with guided mode, the app inventory, the `APP_NO_RECENT_DEPLOY` rule, all report formats and the HTML report. The other rules are planned in [docs/rules.md](docs/rules.md) and the [roadmap](docs/roadmap.md). Feedback from real landscapes is very welcome in the issues.
 >
 > This first release is aimed at **developers and platform teams**. Guided mode and the no-terminal guide were written for non-developers but have not yet been tested with them in usability sessions; those sessions are planned for 0.1.1. If you are not a developer and try it anyway, every hesitation you report is a contribution.
 
@@ -110,7 +110,7 @@ The Cloud Foundry list endpoints answer with what your user may see rather than 
 ## Privacy
 
 - **Read-only:** the HTTP client refuses any method other than `GET` to the CF API. The only `POST` request goes to the OAuth token endpoint.
-- **No data leaves your machine:** 0.1.0 talks to your CF API and its login server (UAA) and to nothing else. The egress allow-list also names `api.osv.dev`, `endoflife.date`, `ui5.sap.com` and `registry.npmjs.org` for the version and vulnerability rules of the next releases; none of them is contacted yet. There is no telemetry.
+- **No data leaves your machine:** a Cloud Foundry scan talks to your CF API and its login server (UAA) and to nothing else. The egress allow-list also names `api.osv.dev`, `endoflife.date`, `ui5.sap.com` and `registry.npmjs.org` for the version and vulnerability rules of the next releases; none of them is contacted yet. There is no telemetry.
 - **No personal data:** user names, emails and IDs are never written. Audit-event actors are dropped when the events are read.
 - **No secrets:** tokens, environment variable values and service credentials are never printed or stored. Credentials in buildpack URLs are stripped, everything printed to the terminal passes through a redaction filter, and the endpoints that return credentials (`/v3/apps/:guid/env`, binding `details`) are refused by the allow-list even for `GET`.
 
