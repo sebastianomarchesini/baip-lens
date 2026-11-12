@@ -45,7 +45,7 @@
     "url": "git+https://github.com/sebastianomarchesini/baip-lens.git",
     "directory": "packages/cli"
   },
-  "homepage": "https://github.com/sebastianomarchesini/baip-lens#readme",
+  "homepage": "https://baiplens.dev",
   "bugs": {
     "url": "https://github.com/sebastianomarchesini/baip-lens/issues"
   }

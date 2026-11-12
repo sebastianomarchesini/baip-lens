@@ -3,7 +3,8 @@ name: pages
 # Publishes the fixture-generated sample report and a small landing page to
 # GitHub Pages, so that visitors can look at a report before installing
 # anything. Nothing here touches a real landscape. Owner action needed once:
-# Settings → Pages → Source: "GitHub Actions".
+# Settings → Pages → Source: "GitHub Actions", custom domain baiplens.dev (the
+# site/CNAME file below keeps it set across deployments), Enforce HTTPS.
 
 on:
   push:
@@ -38,6 +39,7 @@ jobs:
           cp docs/assets/icon.png site/icon.png
           cp docs/assets/favicon.png site/favicon.png
           cp docs/marketing/landing.html site/index.html
+          echo baiplens.dev > site/CNAME
       - uses: actions/upload-pages-artifact@7b1f4a764d45c48632c6b24a0339c27f5614fb0b # v4.0.0
         with:
           path: site

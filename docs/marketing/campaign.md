@@ -123,7 +123,7 @@ Keep an **evidence log** (`docs/marketing/evidence-log.md`, started; keep it pri
 0. **Finish the product story first**: the remaining v0.1 rules, `report --redact` (needed so testers can share screenshots), and the three usability sessions. Marketing before that burns the one launch a project gets.
 1. **Reserve the names today**: `baip-lens` on npm (placeholder 0.0.1, see security review §3), the fallback name, a GitHub Discussions space, and the social handles you intend to use.
 1a. **Make the repository contributor-ready** (done on the development branch): `CODE_OF_CONDUCT.md`, a `CONTRIBUTING.md` with a 15-minute first contribution and the recipe for adding a rule, `docs/roadmap.md`, `docs/governance.md`, the "Rule proposal" issue template. Then seed **ten `good first issue` items** from `docs/roadmap.md` §"Good first issues", each with the file to touch and the test to add, and enable Discussions with categories "Q&A", "Show your report (redacted)", "Rule ideas".
-1b. **Enable GitHub Pages** (Settings → Pages → Source: GitHub Actions) so `pages.yml` publishes the landing page and the sample report at `https://sebastianomarchesini.github.io/BAIP-Lens/`.
+1b. **Enable GitHub Pages** (Settings → Pages → Source: GitHub Actions) so `pages.yml` publishes the landing page and the sample report at `https://baiplens.dev/` (custom domain on GitHub Pages; `https://sebastianomarchesini.github.io/baip-lens/` redirects there).
 2. **Assets** (§5): logo, social card, demo GIF, sample report on GitHub Pages.
 3. **README** rewritten from `docs/marketing/readme-draft.md`: pitch, `npx` first, permissions table, privacy statement, screenshot, non-affiliation notice, sponsor section.
 4. **Seed testers**: 10 people from the Champions and Mentors network plus 3 non-developers (for the usability sessions in `ease-of-use.md` §7). Ask each for one sentence of feedback you may quote and one redacted screenshot.
@@ -176,7 +176,7 @@ One piece per week, alternating channels, always with a redacted real screenshot
 | Logo | Our own mark, no SAP logo shapes or SAP wordmark; 512 px PNG; works in Horizon light and dark | **Done:** cloud-and-magnifier mark. App icon `docs/assets/icon.png` (512 px, also the report ShellBar logo and favicon), horizontal logo `docs/assets/logo.png` with a dark-background variant `docs/assets/logo-dark.png`. A vector (SVG) master is still to do |
 | Social card | 1280×640, logo, one line, "read-only · offline · open source" | **Done:** `docs/assets/social-card.svg` (source) and `docs/assets/social-card.png` (for LinkedIn and X, which do not accept SVG) |
 | Demo GIF | 20 s, guided mode → report opens, on a trial account, redacted names | Terminal recording (asciinema → GIF) |
-| Sample report | The fixture-generated HTML on GitHub Pages: `https://sebastianomarchesini.github.io/BAIP-Lens/sample-report.html` | **Done:** `.github/workflows/pages.yml` + `docs/marketing/landing.html`; owner enables Pages once |
+| Sample report | The fixture-generated HTML on GitHub Pages: `https://baiplens.dev/sample-report.html` | **Done:** `.github/workflows/pages.yml` + `docs/marketing/landing.html`; owner enables Pages once |
 | Landing page | One screen: tagline, `npx baip-lens`, four proof cards, links, non-affiliation | **Done:** `docs/marketing/landing.html` |
 | Screenshots | Overview, Apps table, one finding card; light and dark | From the sample report |
 | Badges | npm version, license, CI, OpenSSF Scorecard, "read-only: GET-only tested" | README |
@@ -262,7 +262,7 @@ Rules 6–9 continue the series in weeks 13–20.
 | Item | Cost | Needed by |
 |---|---|---|
 | Logo and social card | USD 0–300 | L−14 |
-| Domain (optional, e.g. `baiplens.dev`) | ~USD 15/year | L−14 |
+| Domain `baiplens.dev` (bought 2026-11-08, served by GitHub Pages) | ~USD 15/year | Done |
 | Code-signing certificate (Windows EV or OV + Apple Developer ID) | USD 200–400/year + USD 99/year | v0.2 |
 | Everything else | USD 0 | — |
 

@@ -39,7 +39,7 @@ baip-lens scan --api https://api.cf.eu10.hana.ondemand.com --org my-org --out ./
 baip-lens report --from ./reports/snapshot.json --format html,json,csv,sarif
 ```
 
-[See a sample report](https://sebastianomarchesini.github.io/BAIP-Lens/sample-report.html) generated from test fixtures.
+[See a sample report](https://baiplens.dev/sample-report.html) generated from test fixtures.
 
 ## What it checks
 

@@ -124,7 +124,7 @@ Evaluating BAIP Lens for your company? [docs/due-diligence.md](docs/due-diligenc
 | --- | --- |
 | ![Findings grouped by rule](docs/images/report-findings-dark.png) | ![Apps table](docs/images/report-apps-light.png) |
 
-These screenshots use the synthetic `acme-prod` fixture landscape. Run `npm run sample` to generate the same report in `reports/sample/`.
+These screenshots use the synthetic `acme-prod` fixture landscape. [Open the same report in your browser](https://baiplens.dev/sample-report.html), or run `npm run sample` to generate it in `reports/sample/`. The project site is <https://baiplens.dev>.
 
 ## Development
 
