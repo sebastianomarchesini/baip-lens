@@ -121,8 +121,8 @@ On ownership: the maintainer publishes the project under Apache-2.0. Where a par
 
 Yes. All software can, whoever writes it, and a tool that claims otherwise is not being honest. What matters is how small the exposure is and how fast problems are found and fixed:
 
-- **Small attack surface:** three runtime dependencies (`commander`, `yaml` and `zod`), no server, no listening port, no stored credentials.
-- **Limited worst case:** the token it holds is a read-only one, and the program sends it to your CF API and its log cache only.
+- **Small attack surface:** four runtime dependencies (`commander`, `yaml`, `zod`, and `ssh2`, which only `project --cf` loads), no server, no listening port, no stored credentials.
+- **Limited worst case:** for `scan`, the token it holds is a read-only one (Space Auditor), and the program sends it to your CF API and its log cache only. `project --cf` needs Space Developer and also sends the token to your UAA's authorize endpoint for the one-time SSH code, as `cf ssh-code` does; it still only reads.
 - **Continuous checks:** CodeQL, gitleaks, dependency review and Dependabot run on the repository. `npm audit` reported no known vulnerabilities in the dependency tree on 2026-10-11.
 - **Public threat model and review:** the [security review](security-review.md) lists every item with its status, including the ones still open.
 - **Disclosure policy:** private reporting, acknowledgement within 72 hours, and fixes shipped as patch releases with a GitHub Security Advisory ([SECURITY.md](../SECURITY.md)).

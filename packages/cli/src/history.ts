@@ -151,7 +151,9 @@ export function checkPrevious(
   current: { apiUrl: URL; scannedAt: string },
 ): void {
   const endpoint = previous.scope.apiEndpoint;
-  if (endpoint === undefined) {
+  // A project scan: of a folder (no endpoint), or of a deployed app (`project --cf`:
+  // an endpoint, but no org). A scan of an org always names its org.
+  if (endpoint === undefined || previous.scope.orgs.length === 0) {
     throw new ConfigError(
       'The --previous snapshot is a project scan; it needs a scan of a Cloud Foundry org.',
     );

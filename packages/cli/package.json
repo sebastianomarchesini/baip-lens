@@ -35,11 +35,13 @@
   },
   "dependencies": {
     "commander": "^15.0.0",
+    "ssh2": "^1.17.0",
     "yaml": "^2.9.1",
     "zod": "^4.6.7"
   },
   "devDependencies": {
-    "@types/node": "^22.20.5"
+    "@types/node": "^22.20.5",
+    "@types/ssh2": "^1.15.6"
   },
   "repository": {
     "type": "git",

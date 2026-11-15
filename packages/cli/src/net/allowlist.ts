@@ -130,10 +130,71 @@ export function uaaRule(uaaUrl: URL): EgressRule {
 }
 
 /**
+ * The UAA authorize endpoint, GET only, for `baip-lens project --cf`: it
+ * hands out the one-time SSH code, as `cf ssh-code` asks for it (the cf CLI
+ * sends `GET {uaa}/oauth/authorize?response_type=code&client_id=<ssh client>`
+ * with the access token and reads the code from the redirect it does not
+ * follow). Added to the policy by that command only; `scan` never needs it.
+ */
+export function uaaSshCodeRule(uaaUrl: URL): EgressRule {
+  const prefix = escapeRegExp(basePath(uaaUrl));
+  return ruleFor(uaaUrl, {
+    allow: { GET: new RegExp(`^${prefix}/oauth/authorize$`) },
+    // The CF access token, as `cf ssh-code` sends it; UAA issued it in the first place.
+    credentials: ['bearer'],
+    purpose: 'One-time SSH code for reading a deployed app (UAA, as `cf ssh-code`)',
+  });
+}
+
+/**
+ * The app SSH proxy the CF root advertises in `links.app_ssh`, the only
+ * non-HTTP destination BAIP Lens connects to, and only for
+ * `baip-lens project --cf`. The connection opens the SFTP subsystem and
+ * nothing else (no shell, no command, no port forwarding), and only read
+ * operations are sent on it (`remote/sftp.ts`). The host key must match the
+ * fingerprint published next to the address.
+ */
+export interface SshEndpoint {
+  host: string;
+  port: number;
+  /** The proxy's host key fingerprint, exactly as `links.app_ssh.meta.host_key_fingerprint` gives it. */
+  hostKeyFingerprint: string;
+  purpose: string;
+}
+
+const DNS_NAME =
+  /^(?=.{1,253}$)[a-z0-9](?:[a-z0-9-]{0,61}[a-z0-9])?(?:\.[a-z0-9](?:[a-z0-9-]{0,61}[a-z0-9])?)*$/;
+
+/**
+ * Reads `links.app_ssh.href` (`host:port`, no scheme, as the CF docs and the
+ * cf CLI use it). Null for anything else: a scheme, user info, a path, an IP
+ * literal in brackets, a missing or out-of-range port, or a missing
+ * fingerprint, so that nothing unverifiable is ever dialled.
+ */
+export function sshEndpointFromRoot(
+  href: string | undefined,
+  hostKeyFingerprint: string | undefined,
+): SshEndpoint | null {
+  if (href === undefined || !hostKeyFingerprint) return null;
+  const match = /^([^:/@\s[\]]+):(\d{1,5})$/.exec(href.trim());
+  if (match === null) return null;
+  const host = (match[1] ?? '').toLowerCase();
+  const port = Number(match[2]);
+  if (!DNS_NAME.test(host) || !Number.isInteger(port) || port < 1 || port > 65535) return null;
+  return {
+    host,
+    port,
+    hostKeyFingerprint,
+    purpose: 'App SSH proxy: SFTP read operations on one app instance (`project --cf`)',
+  };
+}
+
+/**
  * Log cache discovered from the CF root (`links.log_cache`, never derived from
- * the API host name): one app's envelopes, GET only. Besides the CF API it is
- * the only host that may receive the CF token, which it needs to ask Cloud
- * Controller whether the caller may read the app (docs/data-sources.md §9.5).
+ * the API host name): one app's envelopes, GET only. Besides the CF API (and,
+ * for `project --cf` only, the UAA authorize endpoint above) it is the only
+ * host that may receive the CF token, which it needs to ask Cloud Controller
+ * whether the caller may read the app (docs/data-sources.md §9.5).
  * `/api/v1/meta`, `/api/v1/info` and the PromQL endpoints are not reachable.
  */
 export function logCacheRule(logCacheUrl: URL): EgressRule {

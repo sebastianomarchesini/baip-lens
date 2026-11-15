@@ -1,6 +1,22 @@
 # Security review: BAIP Lens
 
-Two parts. **Part 1** (2026-09-29) is the design and repository review written before any code existed. **Part 2** (2026-09-30) is the code review of slice 1 against Part 1's checklist, with what was fixed in the same change and what stays open. Read Part 2 first if you want the current state.
+Three parts. **Part 1** (2026-09-29) is the design and repository review written before any code existed. **Part 2** (2026-09-30) is the code review of slice 1 against Part 1's checklist, with what was fixed in the same change and what stays open. **Part 3** (2026-11-15) reviews `project --cf`, the first feature that leaves HTTP. Read Part 2 first if you want the state of the core, then Part 3.
+
+---
+
+# Part 3: `project --cf` (deployed apps over SSH), 2026-11-15
+
+**Scope.** `packages/cli/src/remote/` (role check, one-time code, host key check, SSH session, read-only SFTP wrapper, SFTP project tree), the `ProjectTree` refactor of the project collector, the allow-list additions and the `ssh2` dependency. Design and verified sources: [data-sources.md §10](data-sources.md#10-deployed-apps-baip-lens-project---cf).
+
+| Id | Sev | Concern | Status |
+|---|---|---|---|
+| **SEC-28** | High | SSH can do far more than read (shell, commands, uploads, port forwarding). | 🔧 Only the `sftp` subsystem is requested; the SFTP wrapper is typed against the seven read requests (`SftpReadRequests`) and opens files with `'r'` only; a static test forbids every mutating ssh2 call in `src/remote/`; the end-to-end test runs a real SSH server that records every login, channel and SFTP request and fails on anything but a password login, the `sftp` channel and read requests |
+| **SEC-29** | High | The one-time code is a credential and must only reach the genuine proxy. | 🔧 The host key is checked against `links.app_ssh.meta.host_key_fingerprint` before authentication (cf CLI formats); a missing or unknown fingerprint is refused, unlike the cf CLI; a test proves no login is attempted when the key differs. The code is used once, never retried, never printed (leak test) |
+| **SEC-30** | Medium | SFTP `OPEN` follows links; a link in the app folder could make the scanner read container files such as `/proc/self/environ`. | 🔧 Only `lstat` regular files are listed; a file is read only if `FSTAT` after `OPEN` matches the listed size and time. ⚠️ Residual: a live process swapping a file in that window with the same size and time; the parsers keep names and counts only |
+| **SEC-31** | Medium | A refused SSH login is recorded as `audit.app.ssh-unauthorized`, which security teams alert on. | 🔧 The user's Space Developer role is checked with `GET /v3/roles` before the code is requested; without it the command stops and connects to nothing (tested) |
+| **SEC-32** | Medium | A dropped connection could leave a half-read app that looks clean. | 🔧 Every request times out after 60 s, nothing is sent after the session closes, and a lost session ends the command with exit code 2 without writing a report (tested) |
+| **SEC-33** | Low | Supply chain: `ssh2` brings four packages and an install script that tries `node-gyp` for an optional native crypto add-on (it always exits 0 and falls back to pure JavaScript). | ⏳ Accepted for now: CI installs with `--ignore-scripts` and all tests pass without the add-on; `ssh2` is imported only by `project --cf`. Option for later: bundle `ssh2` into `dist` so that installing BAIP Lens runs no third-party install script |
+| **SEC-34** | Info | The local project collector now reads through `ProjectTree`. | ✅ `LocalProjectTree` keeps `O_NOFOLLOW`, `lstat`-only walk, the same limits and the `.git` lookup; all existing collector tests pass unchanged, and the no-egress guard still covers `collectors/project`, `analyzers/project` and `project.ts` |
 
 ---
 

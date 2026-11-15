@@ -1,13 +1,16 @@
-import { lstat, readdir } from 'node:fs/promises';
-import { basename, dirname, join, relative, sep } from 'node:path';
+import { basename, dirname, relative, sep } from 'node:path';
 import { isSafeRelativePath } from '../../model/paths.js';
+import { LocalProjectTree } from './localTree.js';
+import type { ProjectTree } from './tree.js';
 
 /*
- * The directory walk lists candidate files only. It uses lstat and visits
- * regular files and directories: symlinks, FIFOs, sockets and devices are
- * skipped and never listed. A file is listed only when its name is on the
- * allow-list below; everything else, including the deny-listed names, is
- * invisible to the rest of the collector.
+ * The directory walk lists candidate files only. It goes through a
+ * `ProjectTree` (a local folder or a deployed app's container), whose
+ * listings describe entries as lstat does, and visits regular files and
+ * directories: symlinks, FIFOs, sockets and devices are skipped and never
+ * listed. A file is listed only when its name is on the allow-list below;
+ * everything else, including the deny-listed names, is invisible to the rest
+ * of the collector.
  */
 
 export type FileKind =
@@ -25,7 +28,7 @@ export type FileKind =
 
 export interface WalkedFile {
   kind: FileKind;
-  /** Absolute path, built from the real root without following links. */
+  /** Location in the tree (an absolute path), built from the root without following links. */
   abs: string;
   /** `/`-separated path relative to the root; passes isSafeRelativePath. */
   rel: string;
@@ -34,7 +37,7 @@ export interface WalkedFile {
 }
 
 export interface WalkOptions {
-  /** Absolute, real paths of directories the walk must not enter. */
+  /** Locations of directories the walk must not enter (real paths for a local folder). */
   excludeDirs?: string[];
 }
 
@@ -118,46 +121,59 @@ export function toRelativePath(realRoot: string, abs: string): string | null {
   return isSafeRelativePath(rel) ? rel : null;
 }
 
-export async function walkProject(
-  realRoot: string,
-  options: WalkOptions = {},
-): Promise<WalkResult> {
+/**
+ * A name a listing may never carry: empty, `.`, `..`, or containing `/` or
+ * NUL. A local `readdir` cannot return one; a remote listing could, and it
+ * would otherwise turn into a misleading relative path.
+ */
+function isPlainName(name: string): boolean {
+  return (
+    name !== '' && name !== '.' && name !== '..' && !name.includes('/') && !name.includes('\0')
+  );
+}
+
+/** The parts of a tree the walk needs. */
+export type WalkableTree = Pick<ProjectTree, 'root' | 'join' | 'list'>;
+
+export async function walkTree(tree: WalkableTree, options: WalkOptions = {}): Promise<WalkResult> {
   const exclude = new Set(options.excludeDirs ?? []);
   const files: WalkedFile[] = [];
-  const pending: { abs: string; depth: number }[] = [{ abs: realRoot, depth: 0 }];
+  const pending: { abs: string; rel: string; depth: number }[] = [
+    { abs: tree.root, rel: '', depth: 0 },
+  ];
   let visited = 0;
 
   while (pending.length > 0) {
     const dir = pending.pop();
     if (dir === undefined) break;
-    let names: string[];
-    try {
-      names = (await readdir(dir.abs)).sort();
-    } catch {
-      continue;
-    }
-    for (const name of names) {
+    // One entry more than the budget left, so that reaching the limit is noticed.
+    const entries = await tree.list(dir.abs, MAX_ENTRIES - visited + 1);
+    if (entries === null) continue;
+    for (const entry of entries) {
       if (visited >= MAX_ENTRIES) return { files, truncated: true };
       visited += 1;
-      const abs = join(dir.abs, name);
-      let stats;
-      try {
-        stats = await lstat(abs);
-      } catch {
-        continue;
-      }
-      if (stats.isDirectory()) {
-        if (!shouldSkipDir(name, abs, dir.depth + 1, exclude)) {
-          pending.push({ abs, depth: dir.depth + 1 });
+      if (!isPlainName(entry.name)) continue;
+      const abs = tree.join(dir.abs, entry.name);
+      const rel = dir.rel === '' ? entry.name : `${dir.rel}/${entry.name}`;
+      if (entry.type === 'directory') {
+        if (!shouldSkipDir(entry.name, abs, dir.depth + 1, exclude)) {
+          pending.push({ abs, rel, depth: dir.depth + 1 });
         }
-      } else if (stats.isFile()) {
-        const rel = toRelativePath(realRoot, abs);
-        if (rel === null) continue;
+      } else if (entry.type === 'file') {
+        if (!isSafeRelativePath(rel)) continue;
         const kind = classify(rel);
-        if (kind !== null) files.push({ kind, abs, rel, size: stats.size });
+        if (kind !== null) files.push({ kind, abs, rel, size: entry.size });
       }
     }
   }
   files.sort((a, b) => (a.rel < b.rel ? -1 : a.rel > b.rel ? 1 : 0));
   return { files, truncated: false };
+}
+
+/** Walks a local project folder; `realRoot` is its real path. */
+export async function walkProject(
+  realRoot: string,
+  options: WalkOptions = {},
+): Promise<WalkResult> {
+  return walkTree(new LocalProjectTree(realRoot), options);
 }

@@ -86,6 +86,11 @@ All endpoints are **GET**. "SA" = Space Auditor; "SD" = Space Developer.
 | `auditEvents.ts` | `GET /v3/audit_events?space_guids=…&types=audit.app.start,audit.app.stop,audit.app.restage,audit.app.droplet.create,audit.app.build.staged,audit.app.process.crash,app.crash&created_ats[gt]=<now-31d>&per_page=5000` | `type`, `created_at`, `target.guid` | **Org Auditor** or SA | ✅ | 🔒 Contains `actor.guid`, `actor.name` and `actor.type` (user identity). The collector **drops `actor.*` and `data` at parse time**; the zod schema strips them before anything reaches the snapshot. |
 | `secretsInEnv.ts` (`--deep`) | `GET /v3/apps/:guid/environment_variables` | keys of `var` only | **SD** or Space Supporter | ❌ | Returns **only user-provided env vars**, not `VCAP_SERVICES`. Service bindings are therefore excluded by construction, which is exactly what `ENV_SECRET_PLAINTEXT` needs. Values are discarded in the collector and only keys are kept. ⚠️ Calling it creates an `audit.app.environment_variables.show` audit event in the customer's landscape; this is documented in `privacy.md`. |
 | (not used) | `GET /v3/apps/:guid/env` | — | SD | ❌ | **Deliberately not used**: it returns `VCAP_SERVICES` credentials. |
+| `project --cf` (§10) | `GET /v3/roles?types=space_developer&space_guids=<space>&user_guids=<user>` | `type` | any role | ✅ | "All Roles", filtered to what the user may see; the user's own roles are visible to them. Asked before any SSH attempt, so that a user without Space Developer is stopped before a refused login is recorded. |
+| `project --cf` (§10) | `GET /v3/apps?space_guids=<space>&order_by=name&per_page=5000` | `guid`, `name`, `state`, `lifecycle.type` | any role | ✅ | The app list the user picks from. |
+| `project --cf` (§10) | `GET /v3/apps/:guid/ssh_enabled` | `enabled`, `reason` | SA | ✅ | Permitted: Admin, Admin Read-Only, Global Auditor, Org Manager, Space Auditor, Space Developer, Space Manager, Space Supporter. `reason` is `ssh is disabled globally`, `ssh is disabled for space '<name>'` or `ssh is disabled for app` (`app/presenters/v3/app_ssh_status_presenter.rb`); only the three cases are told apart, the text is never shown. |
+| `project --cf` (§10) | `GET /v3/apps/:guid/processes/web` | `guid` | any role | ✅ | The SSH user is `cf:<process guid>/<index>` (cloudfoundry/cli `actor/v7action/ssh.go`). |
+| `project --cf` (§10) | `GET /v3/processes/:guid/stats` | `index`, `state` | SA (redacted) | ✅ | Only `index` and `state` are read, to pick the lowest `RUNNING` instance; `host` and ports are never read or kept. |
 
 ### 2.1 Role summary (input to `docs/permissions.md`)
 
@@ -95,6 +100,7 @@ All endpoints are **GET**. "SA" = Space Auditor; "SD" = Space Developer.
 | App usage events | ⚠️ unconfirmed on BTP | on, skips on 403 |
 | `ENV_SECRET_PLAINTEXT` | Space Developer **or Space Supporter** | `--deep` only |
 | `collect.project` and the project rules (§8) | **no CF role**: local files only, no network | on, for `baip-lens project` only |
+| `collect.project` with `baip-lens project --cf` (§10) | **Space Developer**: Cloud Foundry allows SSH into an app only to users who may update it (`ProcessModelAccess#update?`, `app.space.has_developer?`); Space Auditor and Space Supporter cannot | on, for `project --cf` only |
 
 > **Least-privilege finding:** Space Supporter can also read `/environment_variables`, and on paper it is a narrower role than Space Developer (it cannot push apps or manage services). However, Space Supporter can restart and scale apps, so it is **not** read-only either. We document both and recommend neither for routine scans.
 
@@ -193,8 +199,10 @@ Mitigation for report mode:
 | `endoflife.date` | GET `/api/v1/products/*` | none | fixed |
 | `ui5.sap.com` | GET `/versionoverview.json` | none | fixed |
 | `registry.npmjs.org` | GET `/@sap%2F{cds,approuter,xssec,xsenv}` only | none | fixed (D1) |
+| `links.uaa` host | GET `/oauth/authorize` only (the one-time SSH code); added by `project --cf` only | the CF token, as `cf ssh-code` sends it | CF root |
+| `links.app_ssh` `host:port` | SSH: password authentication with the one-time code, the SFTP subsystem only, read requests only (§10); `project --cf` only | the one-time SSH code, as the SSH password; never the CF token | CF root |
 
-Every rule lists the kinds of `Authorization` header it may receive (`credentials`): `bearer` for the CF API and the log cache, `basic` for the UAA token endpoint, none for the others. A header of any other kind is refused everywhere. Any other host, any other method, or a credential a host may not receive throws `EgressDeniedError` before `fetch` runs. Unit tests cover each refused combination through the HTTP client, with nothing reaching `fetch`, and a scan test asserts that the CF token went to the CF API and the log cache only.
+Every rule lists the kinds of `Authorization` header it may receive (`credentials`): `bearer` for the CF API and the log cache (and, added by `project --cf` only, the UAA authorize endpoint), `basic` for the UAA token endpoint, none for the others. A header of any other kind is refused everywhere. Any other host, any other method, or a credential a host may not receive throws `EgressDeniedError` before `fetch` runs. Unit tests cover each refused combination through the HTTP client, with nothing reaching `fetch`, and a scan test asserts that the CF token went to the CF API and the log cache only.
 
 ---
 
@@ -315,7 +323,7 @@ Legend as in §1: ✅ confirmed in primary docs or source · 🟡 confirmed seco
 
 ### 9.3 Log Cache: reading an app's envelopes (item 2) ✅
 
-The host comes **only** from `links.log_cache` of `GET /` (§1.1); it is absent when log cache is not deployed. It is the one host besides the CF API that may receive the CF token (§9.7).
+The host comes **only** from `links.log_cache` of `GET /` (§1.1); it is absent when log cache is not deployed. It is the one host besides the CF API that `scan` sends the CF token to (§9.7); `project --cf` also sends it to the UAA authorize endpoint (§10.1).
 
 `GET /api/v1/read/<source-id>` — GET only, bound as `get "/api/v1/read/{source_id=**}"`. For an app the source id is its **GUID** (the API docs also accept an app name or a component name).
 
@@ -494,3 +502,36 @@ The collector therefore reads all pages of one app back to back (inside the 60 s
 5. Whether a websocket's `RTR` envelope is emitted at the upgrade or only when the connection closes, which changes what `lastRequestAt` means for long-lived connections.
 6. Whether SAP's 3.2.17 is unmodified upstream (so the `Store.Meta()` race is present), and when SAP moves to 3.2.18 or later.
 7. The exact bytes of one real SAP BTP `RTR` envelope, for an anonymized fixture: timestamp precision, the tag set, and whether `deprecated_tags` and `instance_id` are populated.
+
+---
+
+## 10. Deployed apps (`baip-lens project --cf`)
+
+`baip-lens project --cf` runs the project collector and rules of §8 on a **deployed app**, reading its files live from a running instance over the platform's SSH proxy, the way `cf ssh` reaches a container, but opening only the SFTP subsystem and sending only read requests. The droplet is never downloaded and nothing is written to disk except the reports. Verified 2026-11-15 against `cloudfoundry/cli` at `5b69b945` (2026-11-12), `cloudfoundry/cloud_controller_ng` at `37a35fa` and `cloudfoundry/diego-ssh` at `c056e57`.
+
+### 10.1 Flow ✅
+
+1. **Login and target.** The API endpoint, token and targeted org and space come from the cf CLI config (`Target`, `AccessToken`, `RefreshToken`, `OrganizationFields.Name`, `SpaceFields.Name`, from `util/configv3/json_config.go`); `--api`, `--org` and `--space` override them, and `BAIP_LENS_ACCESS_TOKEN` works as for `scan`. The target org and space are used only when the config targets the same API.
+2. **Discovery.** `GET /` gives `links.uaa` and `links.app_ssh` (`{"href": "ssh.example.org:2222", "meta": {"host_key_fingerprint": "…", "oauth_client": "ssh-proxy"}}`, `docs/v3/source/includes/api_resources/_root.erb`). An `href` that is not a plain `host:port`, or a missing fingerprint, stops the command: nothing unverifiable is dialled.
+3. **Role check.** The user id is read from the token's `user_id` claim (locally, never sent anywhere); `GET /v3/roles?types=space_developer&space_guids=…&user_guids=…` must return a role, or the command stops before any SSH attempt. A token with `cloud_controller.admin` skips the check; if the list cannot be read, the command goes on and the SSH login decides.
+4. **Picking the app.** `GET /v3/apps?space_guids=…`; for every started buildpack app `GET /v3/apps/:guid/ssh_enabled`. Stopped apps, Docker apps and apps with SSH off are listed as "not readable right now", with the cf command that would change that (`cf start`, `cf enable-ssh` then `cf restart`, `cf allow-space-ssh` for a Space Manager); BAIP Lens never runs them. `--app <name>` skips the question.
+5. **Instance.** `GET /v3/apps/:guid/processes/web`, then `GET /v3/processes/:guid/stats`: the lowest index in state `RUNNING`.
+6. **One-time code.** `GET {links.uaa}/oauth/authorize?response_type=code&client_id=<oauth_client>` with `Authorization: bearer <token>`; UAA answers with a redirect whose `code` query parameter is the passcode (`api/uaa/ssh.go` `GetSSHPasscode`; the cf CLI's UAA connection does not follow redirects, `api/uaa/uaa_connection.go`). The redirect is not followed here either. The code is used once as the SSH password and is never printed or stored. A client-credentials token gets no code, and the command says that a personal `cf login` is needed.
+7. **SSH.** Connect to `links.app_ssh` as `cf:<process guid>/<index>` (the user format the Diego SSH proxy accepts: `authenticators/cf_authenticator.go` `CFUserRegex`) with password authentication only (ssh2 would otherwise try `none` first). The host key is checked before authentication as the cf CLI checks it (`util/clissh/ssh.go` `fingerprintCallback`): the format is told by the length of the published fingerprint (64: SHA-256 hex, 43: SHA-256 unpadded base64, 59: SHA-1 hex with colons, 47: MD5 hex with colons) and compared with the same digest of the received key. Unlike the cf CLI, an empty or unknown fingerprint is refused.
+8. **SFTP.** The only channel opened is the `sftp` subsystem, which the Diego SSH daemon serves with `github.com/pkg/sftp` (`handlers/session_channel_handler.go`). The client sends only `OPENDIR`, `READDIR`, `CLOSE`, `LSTAT`, `OPEN` (flag `r` only), `FSTAT` and `READ` (`packages/cli/src/remote/sftp.ts`, typed against that subset of the ssh2 client; a test with a real SSH server on 127.0.0.1 records every request and fails on anything else).
+9. **Walk and read.** `/home/vcap/app` is walked and read through the same collector as a local folder (§8.2–§8.5): the same allow-list and deny-list, skipped directories, depth and entry limits, 2 MiB per file, 2 000 files, 64 MiB in total, NUL check, parsers and reason codes. The root must hold `package.json`, `mta.yaml`, `mta.yml`, `.cdsrc.json` or `.cdsrc.yaml`. Contents stay in memory until the parsers have reduced them to names and counts; at most eight files are fetched ahead while the walk goes on, within the same budgets. The session is closed at the end.
+
+### 10.2 Differences from a local folder
+
+- ⚠️ **No `O_NOFOLLOW` in SFTP.** `OPEN` follows links on the server. The walk lists only entries whose `lstat` type (READDIR attributes, which pkg/sftp takes from `os.File.Readdir`, lstat semantics) is a regular file, and a file is read only when, once opened, `FSTAT` reports the size and modification time the listing showed; otherwise it is recorded as unreadable. A process inside the container that swaps a file for a link in that window, with the same size and time, could still make BAIP Lens parse another file of the same container; the parsers keep only names and counts.
+- **No repository.** `cf push` never uploads `.git` or `.gitignore` (`DefaultIgnoreLines` in cloudfoundry/cli `actor/sharedaction/resource.go`), so `repository` is `false`, `gitIgnore.present` is usually `false`, and `DEPLOY_ARTIFACT_IN_REPO` can only report an archive pushed with the app.
+- **A lost session stops the scan.** Every request has a 60 s timeout and nothing is sent after the session closes; a dropped connection ends the command with exit code 2 and writes nothing, instead of reporting a half-read app.
+- **Audit trail.** Cloud Foundry records `audit.app.ssh-authorized` (or `audit.app.ssh-unauthorized`) with the user and the instance index for every session (`app/repositories/app_event_repository.rb`, `event_types.rb`). The command says so before it starts.
+
+### 10.3 What a deployed app contains
+
+What the rules can see is what was pushed. A CAP service built with `cds build` usually ships the compiled model (`srv/csn.json`, not read) instead of the `.cds` sources, and an MTA deployment does not put `mta.yaml` or `xs-security.json` into the app, so the CDS-model and security-descriptor rules (`CAP_SERVICE_NO_RESTRICTION`, `CAP_PERSONAL_DATA_UNANNOTATED`, `CAP_ROLE_NOT_IN_XSUAA`, `XSUAA_SCOPE_UNUSED`, …) find less than on the repository. The configuration in `package.json` and `.cdsrc.*` (`CAP_MOCKED_AUTH_IN_PROD`, `CAP_MOCKED_USER_PASSWORD`, `CAP_AUDITLOG_*`), the approuter's `xs-app.json` (`APPROUTER_*`), seed data shipped with a deployer app and HTML pages served by an approuter are read as in a local folder. Java apps and Docker images have none of the marker files and are refused with a message.
+
+### 10.4 Network
+
+SSH does not go through an HTTPS proxy, and company networks often block outbound port 2222. When `links.app_ssh` cannot be reached the command says so and suggests another network or `--path`. The SSH library (`ssh2`, MIT) is loaded only by `project --cf`; every other command runs without it.
