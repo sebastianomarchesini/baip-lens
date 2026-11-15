@@ -74,9 +74,38 @@ export const ReportConfigSchema = CommonSchema.extend({
 });
 export type ReportConfig = z.infer<typeof ReportConfigSchema>;
 
+const CF_ONLY_FLAGS = ['app', 'api', 'org', 'space'] as const;
+
 export const ProjectConfigSchema = CommonSchema.extend({
-  path: z.string().min(1, '--path is required'),
+  /** A local project folder. */
+  path: z.string().min(1, '--path is required').optional(),
+  /** Read a deployed app instead (`--cf`). */
+  cf: z.boolean().default(false),
+  app: z.string().trim().min(1, '--app needs an app name').optional(),
+  api: ApiUrlSchema.optional(),
+  org: z.string().trim().min(1, '--org needs an org name').optional(),
+  space: z.string().trim().min(1, '--space needs a space name').optional(),
   quiet: z.boolean(),
+}).superRefine((value, ctx) => {
+  if (value.cf && value.path !== undefined) {
+    ctx.addIssue({
+      code: 'custom',
+      message: 'Use either --path (a local folder) or --cf (a deployed app), not both.',
+    });
+  }
+  if (!value.cf && value.path === undefined) {
+    ctx.addIssue({
+      code: 'custom',
+      message: "required option '--path <dir>' not specified (or use --cf to read a deployed app)",
+    });
+  }
+  if (!value.cf) {
+    for (const flag of CF_ONLY_FLAGS) {
+      if (value[flag] !== undefined) {
+        ctx.addIssue({ code: 'custom', message: `--${flag} works only together with --cf` });
+      }
+    }
+  }
 });
 export type ProjectConfig = z.infer<typeof ProjectConfigSchema>;
 

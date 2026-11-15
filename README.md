@@ -52,6 +52,15 @@ npx baip-lens project --path ./my-cap-project      # reads the project files, co
 
 This checks a local CAP or MTA project the way a reviewer would: effective `cds` configuration per profile, `mta.yaml`, `xs-security.json`, `xs-app.json`, the CDS model, seed CSV files and the SAPUI5 bootstrap, and writes the same reports with a `file:line` location per finding (also in SARIF, for code scanning). The rules follow the OWASP Top 10 (2025) patterns of the public SAP TechEd 2026 workshop XP261; see [docs/rules.md](docs/rules.md#project-rules).
 
+### Project scan of a deployed app
+
+```sh
+cf login --sso                                     # once; target the org and space of your app
+npx baip-lens project --cf                         # lists the apps there, you pick one
+```
+
+The same project rules, run on what is actually deployed: BAIP Lens reads the app's files live from a running instance over the platform's SSH proxy (the SFTP file channel only, read requests only), nothing is downloaded or changed, and only the reports are written. It needs the **Space Developer** role in the space and SSH turned on for the app; the command says so before it starts, checks your role first, and shows the `cf` command to run for an app it cannot read. Cloud Foundry records the session as an `audit.app.ssh-authorized` event. A deployed CAP service usually ships its compiled model instead of the `.cds` sources, so the CDS-model rules find less there than with `--path` (see [docs/data-sources.md §9](docs/data-sources.md#9-deployed-apps-baip-lens-project---cf)). In scripts, name the app with `--app <name>`.
+
 To run the latest development version from source (Node.js 22.12 or later):
 
 ```sh
@@ -80,12 +89,15 @@ baip-lens doctor [--api <url>]  checks Node.js, network, certificates, login and
 baip-lens scan   --api <cf api url> --org <name> [--space <name>] [--deep]
                 [--out ./reports] [--format html,json,csv,sarif] [--fail-on <severity>] [--concurrency 5]
 baip-lens project --path <dir> [--out ./reports] [--format html,json,csv,sarif] [--fail-on <severity>] [--quiet]
+baip-lens project --cf [--app <name>] [--api <url>] [--org <name>] [--space <name>]
+                [--out ./reports] [--format html,json,csv,sarif] [--fail-on <severity>] [--quiet]
 baip-lens report --from <snapshot.json> [--format html,json,csv,sarif] [--out ./reports] [--fail-on <severity>]
 baip-lens version
 ```
 
 - With no arguments on a terminal, guided mode starts; in a script it prints usage and exits 2.
 - `project` scans a local CAP or MTA project folder for the thirteen configuration and model rules in [docs/rules.md](docs/rules.md#project-rules) (mocked authentication in production, unrestricted services, missing audit logging, open approuter routes, seed data with card numbers, and more), each tagged with its OWASP Top 10 (2025) category. It reads files only: no login, no network, no child process, and it never opens `.env`, `.cdsrc-private.json`, `default-env.json`, keys or `*.mtaext` files.
+- `project --cf` runs the same rules on a deployed app instead of a folder: it takes the API, login, org and space from the cf CLI (`--api`, `--org` and `--space` override them), lists the apps of the space, and reads the one you pick (or name with `--app`) over SSH with read-only SFTP. It needs Space Developer and SSH enabled for the app, and records an audit event in Cloud Foundry.
 - Guided mode signs in the way `cf login --sso` does (one-time code from your company login) or with username and password, keeps the session in memory only, and writes to `./baip-lens-reports/<date-time>/`.
 - `scan` and `project` write one snapshot (`snapshot-<time>.json`) and the requested reports.
 - `report --from` re-runs every rule on a snapshot **offline**, for example after you upgrade BAIP Lens.

@@ -1,5 +1,17 @@
 # Changelog
 
+## Unreleased
+
+### Added
+
+- **`baip-lens project --cf`:** the project rules on a **deployed app**, read live. It reuses the cf CLI login and target, lists the apps of the space (saying why a stopped app, a Docker app or an app with SSH off cannot be read, with the `cf` command that would change it), and reads the app you pick (or name with `--app`) from one running instance over the platform's SSH proxy, as `cf ssh` reaches it: the one-time code from UAA (as `cf ssh-code`), password authentication only, the proxy's host key checked against the fingerprint the CF root publishes (an empty or unknown fingerprint is refused), the SFTP subsystem only (no shell, command or port forwarding), and only listing and read requests, with files opened read-only. The droplet is not downloaded and nothing is written to disk but the reports. The same allow-list, deny-list, limits and parsers as for a local folder apply; a file that changed between listing and reading is refused, and a lost session stops the command with exit code 2. It needs **Space Developer**: the command says so first, checks the user's roles before any SSH attempt, and notes the `audit.app.ssh-authorized` event Cloud Foundry records ([docs/data-sources.md §9](docs/data-sources.md#9-deployed-apps-baip-lens-project---cf), [docs/permissions.md](docs/permissions.md#baip-lens-project---cf)).
+
+### Changed
+
+- The project collector reads through a `ProjectTree` interface (`collectors/project/tree.ts`); a local folder (`localTree.ts`) keeps exactly the previous behaviour, and the deployed app (`remote/sftpTree.ts`) is the second implementation.
+- The CLI depends on `ssh2` (MIT) for `project --cf` only; it is loaded on demand, so every other command runs without it. Its install script tries to build an optional native crypto add-on and falls back to pure JavaScript; CI keeps installing with `--ignore-scripts`, and the tests pass that way.
+- The egress allow-list gains `GET /oauth/authorize` on UAA and the `links.app_ssh` endpoint, both added to the policy by `project --cf` only.
+
 ## 0.2.0 (2026-11-07)
 
 ### Changed

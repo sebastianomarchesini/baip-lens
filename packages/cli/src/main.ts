@@ -13,13 +13,16 @@ import {
 } from './config.js';
 import { formatDoctor, runDoctor } from './doctor.js';
 import { type OpenInBrowser, openInBrowser } from './guided/open.js';
-import { type Prompter, TerminalPrompter } from './guided/prompt.js';
+import { type Prompter, TerminalPrompter, WizardCancelled } from './guided/prompt.js';
 import { runWizard } from './guided/wizard.js';
+import { ConfigError } from './http/errors.js';
 import type { FetchLike } from './http/httpClient.js';
 import { sanitizeOutput } from './io/redact.js';
 import { meetsThreshold } from './model/severity.js';
-import type { ReportData } from './model/snapshot.js';
+import type { ReportData, Snapshot } from './model/snapshot.js';
 import { scanProject } from './project.js';
+import type { SshConnect } from './remote/session.js';
+import { scanApp } from './remote/scanApp.js';
 import { writeReports } from './reporters/index.js';
 import { toReportData } from './reporters/reportData.js';
 import { scan } from './scan.js';
@@ -40,6 +43,8 @@ export interface CliIo {
   open?: OpenInBrowser | null;
   /** Injected in tests. */
   fetch?: FetchLike;
+  /** Injected in tests: no SSH connection to a real app. */
+  sshConnect?: SshConnect;
   /** Injected in tests. */
   now?: () => Date;
 }
@@ -61,7 +66,11 @@ function isProjectScan(data: ReportData): boolean {
 }
 
 function scannedLine(data: ReportData): string {
-  if (isProjectScan(data)) return `Scanned project ${(data.scope.projects ?? []).join(', ')}`;
+  if (isProjectScan(data)) {
+    // `project --cf` read the files through a CF API; `project --path` did not.
+    const what = data.scope.apiEndpoint === undefined ? 'project' : 'deployed app';
+    return `Scanned ${what} ${(data.scope.projects ?? []).join(', ')}`;
+  }
   return `Scanned ${data.summary.apps} app(s) in ${[data.scope.orgs.join(', '), ...(data.scope.spaces ?? [])].join(' / ')}`;
 }
 
@@ -106,14 +115,60 @@ async function runScan(config: ScanConfig, io: CliIo): Promise<number> {
   return exitCodeFor(data, config.failOn);
 }
 
+/** The picker for `project --cf`: scripted in tests, the terminal when a person is there. */
+function appPrompter(io: CliIo): Prompter | undefined {
+  if (io.prompter) return io.prompter;
+  if (!isInteractive(io)) return undefined;
+  return new TerminalPrompter(process.stdin, process.stdout, {
+    // Ctrl+C while connecting or reading: stop now; nothing has been written yet.
+    onInterrupt: () => {
+      io.stdout('\nCancelled.\n');
+      process.exit(130);
+    },
+  });
+}
+
+/** `project --cf`: one deployed app, picked from the cf target space or named with --app. */
+async function scanDeployedApp(
+  config: ProjectConfig,
+  io: CliIo,
+  log: (message: string) => void,
+): Promise<Snapshot> {
+  const prompter = config.app === undefined ? appPrompter(io) : undefined;
+  try {
+    return await scanApp({
+      apiUrl: config.api,
+      org: config.org,
+      space: config.space,
+      app: config.app,
+      env: io.env,
+      prompter,
+      fetch: io.fetch,
+      sshConnect: io.sshConnect,
+      now: io.now,
+      log,
+    });
+  } finally {
+    prompter?.close();
+  }
+}
+
 async function runProject(config: ProjectConfig, io: CliIo): Promise<number> {
   const log = config.quiet ? () => {} : (message: string) => io.stderr(`${message}\n`);
-  const snapshot = await scanProject({
-    path: config.path,
-    outDir: config.out,
-    now: io.now,
-    log,
-  });
+  let snapshot: Snapshot;
+  if (config.cf) {
+    try {
+      snapshot = await scanDeployedApp(config, io, log);
+    } catch (error) {
+      if (!(error instanceof WizardCancelled)) throw error;
+      io.stdout(`${error.message}\n`);
+      return EXIT.ok;
+    }
+  } else {
+    if (config.path === undefined)
+      throw new ConfigError("required option '--path <dir>' not specified");
+    snapshot = await scanProject({ path: config.path, outDir: config.out, now: io.now, log });
+  }
   const snapshotPath = await writeSnapshot(snapshot, config.out);
   const data = toReportData(snapshot);
   const files = await writeReports(data, config.format, config.out);
@@ -201,11 +256,19 @@ function buildProgram(io: CliIo, setExit: (code: number) => void): Command {
 
   program
     .command('project')
-    .description('scan a local CAP or MTA project directory (file reads only, no network)')
-    .requiredOption(
-      '--path <dir>',
-      'project directory (contains package.json, mta.yaml or .cdsrc.json)',
+    .description(
+      'scan a CAP or MTA project: a local folder (--path: file reads only, no network) or a deployed app (--cf: read-only over SSH)',
     )
+    .option('--path <dir>', 'project directory (contains package.json, mta.yaml or .cdsrc.json)')
+    .option(
+      '--cf',
+      'read a deployed app instead: pick it from the apps in your `cf target` space (needs Space Developer)',
+      false,
+    )
+    .option('--app <name>', 'with --cf: the app to read, without asking')
+    .option('--api <url>', 'with --cf: CF API endpoint (default: the cf CLI target)')
+    .option('--org <name>', 'with --cf: org (default: the cf CLI target)')
+    .option('--space <name>', 'with --cf: space (default: the cf CLI target)')
     .option('--out <dir>', 'output directory', './reports')
     .option('--format <list>', 'report formats: html,json,csv,sarif', DEFAULT_FORMATS)
     .option('--fail-on <severity>', FAIL_ON_HELP, 'none')

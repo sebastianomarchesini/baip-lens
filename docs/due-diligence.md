@@ -121,7 +121,7 @@ On ownership: the maintainer publishes the project under Apache-2.0. Where a par
 
 Yes. All software can, whoever writes it, and a tool that claims otherwise is not being honest. What matters is how small the exposure is and how fast problems are found and fixed:
 
-- **Small attack surface:** two runtime dependencies (`commander` and `zod`), no server, no listening port, no stored credentials.
+- **Small attack surface:** four runtime dependencies (`commander`, `yaml`, `zod`, and `ssh2`, which only `project --cf` loads), no server, no listening port, no stored credentials.
 - **Limited worst case:** the token it holds is a read-only one, and the program sends it to your CF API and UAA only.
 - **Continuous checks:** CodeQL, gitleaks, dependency review and Dependabot run on the repository. `npm audit` reported no known vulnerabilities in the dependency tree on 2026-10-11.
 - **Public threat model and review:** the [security review](security-review.md) lists every item with its status, including the ones still open.

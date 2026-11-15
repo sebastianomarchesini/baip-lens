@@ -4,7 +4,7 @@ BAIP Lens runs on your machine and writes files to your disk. This page lists wh
 
 ## Principles
 
-1. **Read-only.** The HTTP client allows only `GET` to the CF API. This is enforced per host by the egress allow-list in `packages/cli/src/net/allowlist.ts`, and unit tests prove it. A project scan (`baip-lens project`) only reads files and makes no request at all.
+1. **Read-only.** The HTTP client allows only `GET` to the CF API. This is enforced per host by the egress allow-list in `packages/cli/src/net/allowlist.ts`, and unit tests prove it. A project scan of a folder (`baip-lens project --path`) only reads files and makes no request at all; a project scan of a deployed app (`--cf`) sends only SFTP read requests over its SSH session.
 2. **No data leaves the machine.** The allow-list is the only way out, and redirects are never followed. There is no telemetry.
 3. **No personal data** in any output.
 4. **No secret values** in any output.
@@ -23,6 +23,8 @@ BAIP Lens runs on your machine and writes files to your disk. This page lists wh
 | `ui5.sap.com` | UI5 maintenance status | a request for `/versionoverview.json` | planned |
 | `registry.npmjs.org` | current `@sap/*` versions | four fixed package names | planned |
 | Your app routes | the UI5 version served | one unauthenticated `GET /resources/sap-ui-version.json` per app, with no redirects; `--no-probe-routes` will turn it off | planned; 0.1.0 makes no request to app routes |
+| Your UAA server (from the CF root) | the one-time SSH code, for `project --cf` only | `GET /oauth/authorize` with your token, as `cf ssh-code` does | `project --cf` |
+| Your app SSH proxy (`links.app_ssh` from the CF root) | the files of the one app you picked, for `project --cf` only | the one-time code as SSH password; then SFTP listing and read requests only | `project --cf` |
 
 Your CF token is sent to the CF API only. The allow-list refuses an `Authorization` header to any other host.
 
@@ -76,9 +78,23 @@ What a project scan never keeps:
 
 The acme-incidents fixture plants a poison value in every one of those places, and `packages/cli/test/e2e/project.test.ts` fails if any of them, an absolute path or the temporary folder name reaches the snapshot, a report or the terminal.
 
+## Deployed-app scans
+
+`baip-lens project --cf` applies the project scan above to a deployed app: the same files are opened (and the same ones never are), the same values are kept, and the same ones never are. The difference is where the files come from: they are read live from one running instance of the app over SSH, with the SFTP file channel and read requests only ([data-sources.md §9](data-sources.md#9-deployed-apps-baip-lens-project---cf)).
+
+- **Nothing is downloaded to disk.** File contents are held in memory until the parsers have reduced them to names and counts; only the snapshot and the reports are written.
+- **The one-time SSH code** is used once as the password and never printed or stored. Your token goes to the CF API and to UAA only, as for `scan`.
+- **The paths are relative** to the app folder (`/home/vcap/app`), as for a local project; the container path is never written to a report.
+- **The app list** shown in the terminal (app names and why some cannot be read) is not written anywhere.
+
 ## Side effects in your landscape
 
-`GET` requests do not change anything. One read is audited by Cloud Foundry: with `--deep`, reading an app's environment variables creates an `audit.app.environment_variables.show` event for that app. Tell your security team before you run `--deep` scans.
+`GET` requests do not change anything. Two kinds of read are audited by Cloud Foundry:
+
+- With `--deep`, reading an app's environment variables creates an `audit.app.environment_variables.show` event for that app.
+- `project --cf` opens an SSH session to the app you pick, which Cloud Foundry records as `audit.app.ssh-authorized` (a refused login as `audit.app.ssh-unauthorized`, which BAIP Lens avoids by checking your role first).
+
+Tell your security team before you run `--deep` or `project --cf` scans.
 
 ## User-level usage (v0.2)
 

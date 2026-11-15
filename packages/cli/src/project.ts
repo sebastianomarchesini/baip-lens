@@ -1,6 +1,6 @@
 import { resolve } from 'node:path';
 import { analyze } from './analyzers/index.js';
-import { CheckRecorder, COLLECTOR_CHECKS } from './checks.js';
+import { type CheckDefinition, CheckRecorder, COLLECTOR_CHECKS } from './checks.js';
 import { collectProject } from './collectors/project/index.js';
 import type { RawData, RawProject } from './model/raw.js';
 import { SNAPSHOT_SCHEMA_VERSION, type Snapshot } from './model/snapshot.js';
@@ -16,20 +16,29 @@ export interface ScanProjectOptions {
   log?: (message: string) => void;
 }
 
+export interface ProjectSnapshotOptions {
+  /** How the files were collected; its id must stay `collect.project`, which the rules require. */
+  check: CheckDefinition;
+  /** The CF API the files were read through (a deployed app); absent for a local folder. */
+  apiEndpoint?: URL;
+  now?: () => Date;
+  log?: (message: string) => void;
+}
+
 /**
- * Scans a local CAP / MTA project directory: file-system reads only, no
- * network, no child processes. The log carries counts and the project id
- * only, never a path or file content.
+ * Runs one project collection and the project rules, and builds the
+ * snapshot. Shared by a local folder and a deployed app; the log carries
+ * counts and the project id only, never a path or file content.
  */
-export async function scanProject(options: ScanProjectOptions): Promise<Snapshot> {
+export async function projectSnapshot(
+  collect: () => Promise<RawProject>,
+  options: ProjectSnapshotOptions,
+): Promise<Snapshot> {
   const log = options.log ?? (() => {});
   const scannedAt = (options.now?.() ?? new Date()).toISOString();
-  const excludeDirs = options.outDir === undefined ? [] : [resolve(options.outDir)];
 
   const recorder = new CheckRecorder({ deep: false }, log);
-  const project: RawProject | undefined = await recorder.run(COLLECTOR_CHECKS.project, () =>
-    collectProject(options.path, { excludeDirs }),
-  );
+  const project: RawProject | undefined = await recorder.run(options.check, collect);
   const projects = project === undefined ? [] : [project];
   if (project !== undefined) {
     log(
@@ -46,11 +55,28 @@ export async function scanProject(options: ScanProjectOptions): Promise<Snapshot
     schemaVersion: SNAPSHOT_SCHEMA_VERSION,
     tool: { name: TOOL_NAME, version: TOOL_VERSION },
     scannedAt,
-    scope: { orgs: [], projects: projects.map((p) => p.id) },
+    scope: {
+      ...(options.apiEndpoint === undefined ? {} : { apiEndpoint: options.apiEndpoint.href }),
+      orgs: [],
+      projects: projects.map((p) => p.id),
+    },
     options: { deep: false, probeRoutes: false },
     checks: [...collectorChecks, ...analysis.ruleChecks],
     raw,
     apps: analysis.apps,
     findings: analysis.findings,
   };
+}
+
+/**
+ * Scans a local CAP / MTA project directory: file-system reads only, no
+ * network, no child processes.
+ */
+export async function scanProject(options: ScanProjectOptions): Promise<Snapshot> {
+  const excludeDirs = options.outDir === undefined ? [] : [resolve(options.outDir)];
+  return projectSnapshot(() => collectProject(options.path, { excludeDirs }), {
+    check: COLLECTOR_CHECKS.project,
+    now: options.now,
+    log: options.log,
+  });
 }

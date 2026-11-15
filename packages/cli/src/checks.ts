@@ -28,6 +28,17 @@ export const COLLECTOR_CHECKS = {
       'Project files (package.json, .cdsrc, mta.yaml, xs-security.json, xs-app.json, *.cds, seed CSV, *.html)',
     roles: [],
   },
+  /**
+   * The same collection from a deployed app (`baip-lens project --cf`). It
+   * keeps the id `collect.project`, which every project rule requires; only
+   * the way the files were read differs.
+   */
+  deployedApp: {
+    id: 'collect.project',
+    title:
+      'Deployed app files read over SSH, read-only SFTP (package.json, .cdsrc, xs-app.json, *.cds, seed CSV, *.html)',
+    roles: ['SpaceDeveloper'],
+  },
 } as const satisfies Record<string, CheckDefinition>;
 
 function roleText(roles: readonly CfRole[]): string {
