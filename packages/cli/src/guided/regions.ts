@@ -84,21 +84,40 @@ export const REGIONS: readonly Region[] = [
   region('ae01', 'UAE (Dubai), SAP Cloud Infrastructure'),
 ];
 
-/** "eu10", "eu10-004" or the technical key "cf-eu10-004". */
-const REGION_ID = /^(?:cf-)?([a-z]{2}\d{2}(?:-\d{3})?)$/i;
+/** "eu10", "eu10-004", "eu10.004" or the technical key "cf-eu10-004". */
+const REGION_ID = /^(?:cf-)?([a-z]{2}\d{2})(?:[-.](\d{3}))?$/i;
 /** "us10-001.hana.ondemand.com" or "cf.us10-001.hana.ondemand.com", without the "api." prefix. */
 const REGION_DOMAIN =
   /^(?:cf\.)?([a-z]{2}\d{2}(?:-\d{3})?)\.(hana\.ondemand\.com|platform\.sapcloud\.cn)$/i;
 
+const clean = (input: string): string => input.trim().replace(/\/+$/, '');
+
 /**
- * Turns what people actually paste into a CF API endpoint: a region id
- * ("eu10-004"), a technical key ("cf-eu10-004") or the region domain
- * ("us10-001.hana.ondemand.com") all become https://api.cf.<region>.<domain>.
- * Anything else is returned unchanged for the URL check to judge.
+ * The region id in what was typed, in the form SAP documents it: "eu10",
+ * "US10.001" and "cf-us10-001" give "eu10", "us10-001" and "us10-001".
+ * Undefined when the input is not a region id (a URL or a domain, say).
+ */
+export function regionIdOf(input: string): string | undefined {
+  const match = REGION_ID.exec(clean(input));
+  if (!match?.[1]) return undefined;
+  return (match[2] ? `${match[1]}-${match[2]}` : match[1]).toLowerCase();
+}
+
+/** The listed region whose API endpoint this is, if any. */
+export function regionForApi(api: URL): Region | undefined {
+  return REGIONS.find((r) => new URL(r.api).host === api.host);
+}
+
+/**
+ * Turns what people actually type or paste into a CF API endpoint: a region
+ * id ("eu10-004", "eu10.004"), a technical key ("cf-eu10-004") or the region
+ * domain ("us10-001.hana.ondemand.com") all become
+ * https://api.cf.<region>.<domain>. Anything else is returned unchanged for
+ * the URL check to judge.
  */
 export function toApiEndpoint(input: string): string {
-  const value = input.trim().replace(/\/+$/, '');
-  const id = REGION_ID.exec(value)?.[1]?.toLowerCase();
+  const value = clean(input);
+  const id = regionIdOf(value);
   if (id) {
     return REGIONS.find((r) => r.id === id)?.api ?? `https://api.cf.${id}.${DEFAULT_DOMAIN}`;
   }
@@ -108,4 +127,19 @@ export function toApiEndpoint(input: string): string {
     return `https://api.cf.${match[1].toLowerCase()}.${match[2].toLowerCase()}`;
   }
   return input;
+}
+
+/** Where the list ends: what to do when a region is missing. */
+export const REGION_NOT_LISTED =
+  'Not listed? Paste the API endpoint from the BTP cockpit (Subaccount → Overview → Cloud Foundry Environment).';
+
+/** The region table that `baip-lens regions` and "list" in guided mode print. */
+export function regionListLines(): string[] {
+  const width = Math.max(...REGIONS.map((r) => r.id.length)) + 2;
+  return [
+    `Cloud Foundry regions on SAP BTP (list verified ${REGIONS_VERIFIED_ON}):`,
+    ...REGIONS.map((r) => `  ${r.id.padEnd(width)}${r.label}`),
+    REGION_NOT_LISTED,
+    `SAP's list: ${REGIONS_HELP_URL}`,
+  ];
 }

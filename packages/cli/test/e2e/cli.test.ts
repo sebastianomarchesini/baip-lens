@@ -4,7 +4,7 @@ import { join } from 'node:path';
 import { describe, expect, it } from 'vitest';
 import { type CliIo, EXIT, main } from '../../src/main.js';
 import { TOOL_VERSION } from '../../src/version.js';
-import { jsonResponse } from '../support/fakeFetch.js';
+import { FakeFetch, jsonResponse } from '../support/fakeFetch.js';
 import { ACME, acmeFetch } from '../support/acme.js';
 
 interface Captured {
@@ -190,7 +190,7 @@ describe('baip-lens CLI', () => {
         resources: [{ guid: ACME.orgGuid, name: ACME.org }],
       }),
     ).fetch;
-    const prompter = new ScriptedPrompter(['1', 'https://api.cf.example.org', 'n']);
+    const prompter = new ScriptedPrompter(['https://api.cf.example.org', 'n']);
     tty.io.prompter = prompter;
     expect(await main([], tty.io)).toBe(EXIT.ok);
     expect(prompter.transcript.join('\n')).toContain('Cancelled. Nothing was written.');
@@ -207,6 +207,16 @@ describe('baip-lens CLI', () => {
     );
     expect(c.err()).not.toContain('\u001b');
     expect(c.err()).toContain('Organization "evil" was not found');
+  });
+
+  it('lists the regions with an example, without any network call', async () => {
+    const fake = new FakeFetch();
+    const c = capture(fake);
+    expect(await main(['regions'], c.io)).toBe(EXIT.ok);
+    expect(c.out()).toMatch(/^ {2}eu10 +Europe \(Frankfurt\), AWS$/m);
+    expect(c.out()).toMatch(/^ {2}us10-001 +US East \(Virginia\), AWS, extension landscape$/m);
+    expect(c.out()).toContain('baip-lens scan --api eu10 --org <name>');
+    expect(fake.calls).toEqual([]);
   });
 
   it('runs doctor against the fixture API', async () => {
