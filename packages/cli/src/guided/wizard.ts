@@ -24,7 +24,7 @@ import { writeSnapshot } from '../snapshot.js';
 import { TOOL_NAME, TOOL_VERSION } from '../version.js';
 import type { OpenInBrowser } from './open.js';
 import { type Prompter, WizardCancelled } from './prompt.js';
-import { REGIONS } from './regions.js';
+import { regionForApi, regionIdOf, regionListLines } from './regions.js';
 
 export interface WizardOptions {
   prompter: Prompter;
@@ -39,6 +39,11 @@ export interface WizardOptions {
 
 const ORG_SCHEMA = z.object({ guid: z.string(), name: z.string() });
 const MAX_ATTEMPTS = 3;
+
+const REGION_EXAMPLES = 'eu10, us10 or us10-001';
+/** What prints the region table at the Step 1 prompt. */
+const LIST_COMMAND = /^(?:list|help|\?)$/i;
+const RETRY_HINT = `Type a region such as ${REGION_EXAMPLES}, paste the API endpoint, or type "list" to see all regions.`;
 
 /** ./baip-lens-reports/2026-09-30-1412 */
 export function reportDirName(now: Date): string {
@@ -133,29 +138,35 @@ async function stepWhere(o: WizardOptions): Promise<Session> {
   const { prompter: p } = o;
   p.say('');
   p.say('Step 1 of 4 · Where is your landscape?');
+  p.say(`Type your region, for example ${REGION_EXAMPLES}, or paste the API endpoint.`);
   p.say(
-    'The "API Endpoint" is shown in the BTP cockpit under Subaccount → Overview → Cloud Foundry Environment.',
+    'Both are shown in the BTP cockpit under Subaccount → Overview → Cloud Foundry Environment.',
   );
-  const choice = await p.choose(
-    'Paste it, or pick your region:',
-    [
-      'Paste the API endpoint, or type a region such as eu10-004',
-      ...REGIONS.map((r) => `${r.id}  ${r.label}`),
-    ],
-    0,
-  );
-  for (let attempt = 0; attempt < MAX_ATTEMPTS; attempt += 1) {
+  p.say('Not sure? Type "list" to see all regions.');
+  let failures = 0;
+  while (failures < MAX_ATTEMPTS) {
+    const value = await p.ask('Region or API endpoint');
+    if (LIST_COMMAND.test(value)) {
+      for (const line of regionListLines()) p.say(line);
+      continue;
+    }
+    if (value === '') {
+      p.say(RETRY_HINT);
+      continue;
+    }
     let apiUrl: URL;
     try {
-      const value =
-        choice === 0
-          ? await p.ask('API endpoint (https://api.cf.…) or region (eu10-004)')
-          : (REGIONS[choice - 1]?.api ?? '');
       apiUrl = parseApiUrl(value);
     } catch (error) {
-      if (error instanceof WizardCancelled) throw error;
       p.say(error instanceof Error ? error.message : String(error));
+      p.say(RETRY_HINT);
+      failures += 1;
       continue;
+    }
+    const known = regionForApi(apiUrl);
+    const typedId = regionIdOf(value);
+    if (typedId && !known) {
+      p.say(`"${typedId}" is not in the region list of ${TOOL_NAME}; trying it anyway.`);
     }
     const policy = new EgressPolicy();
     policy.add(cfApiRule(apiUrl));
@@ -166,7 +177,7 @@ async function stepWhere(o: WizardOptions): Promise<Session> {
       maxRetries: 1,
     });
     const cf = new CfClient(http, apiUrl);
-    p.say(`Checking ${apiUrl.host} …`);
+    p.say(`Checking ${apiUrl.host}${known ? ` (${known.label})` : ''} …`);
     try {
       const root = await cf.root();
       const tokenUrl = trustRootLinks(policy, root);
@@ -174,8 +185,9 @@ async function stepWhere(o: WizardOptions): Promise<Session> {
       return { http, cf, root, tokenUrl, apiUrl };
     } catch (error) {
       p.say(explainConnectionError(error, apiUrl));
-      if (choice !== 0 || !(error instanceof HttpNetworkError))
-        throw new ConfigError('Could not connect.');
+      if (!(error instanceof HttpNetworkError)) throw new ConfigError('Could not connect.');
+      failures += 1;
+      if (failures < MAX_ATTEMPTS) p.say(RETRY_HINT);
     }
   }
   throw new ConfigError('Could not connect after three attempts.');

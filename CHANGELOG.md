@@ -1,5 +1,11 @@
 # Changelog
 
+## Unreleased
+
+### Changed
+
+- **Guided mode, Step 1: type the region instead of picking a number.** The numbered menu of about fifty regions is gone. The prompt shows an example (`eu10`, `us10` or `us10-001`) and takes a region id or the pasted API endpoint; `list` (or `help`, `?`) prints every region and asks again. The check line names the region (`Checking api.cf.eu10.hana.ondemand.com (Europe (Frankfurt), AWS) …`), an id that is not in the list is still tried with a note, and an unreachable address can be retyped up to three times. New command `baip-lens regions` prints the same list. Wherever an endpoint is accepted, `us10.001` now means `us10-001`.
+
 ## 0.2.0 (2026-11-07)
 
 ### Changed
