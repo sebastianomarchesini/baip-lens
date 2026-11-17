@@ -369,7 +369,7 @@ export async function runWizard(o: WizardOptions): Promise<number> {
   try {
     p.say(`${TOOL_NAME} ${TOOL_VERSION} · read-only health check for your Cloud Foundry landscape`);
     p.say(
-      'Nothing is changed in your account, and nothing is sent anywhere except your own CF API.',
+      'Nothing is changed in your account, and nothing is sent outside your own Cloud Foundry landscape.',
     );
     p.say('Press Ctrl+C at any time to stop; nothing is written until the scan starts.');
 

@@ -41,8 +41,8 @@ npx baip-lens
 The first time, `npx` asks whether it may download `baip-lens`. Type `y` and press Enter. Then the guided mode starts:
 
 ```
-baip-lens 0.2.0 · read-only health check for your Cloud Foundry landscape
-Nothing is changed in your account, and nothing is sent anywhere except your own CF API.
+baip-lens 0.3.0 · read-only health check for your Cloud Foundry landscape
+Nothing is changed in your account, and nothing is sent outside your own Cloud Foundry landscape.
 Press Ctrl+C at any time to stop; nothing is written until the scan starts.
 ```
 
@@ -105,7 +105,7 @@ Still stuck? [Open a question](https://github.com/sebastianomarchesini/BAIP-Lens
 ## What BAIP Lens does not do
 
 - It does not change, restart, or deploy anything. It only sends read requests.
-- It does not send your data anywhere. The only servers it contacts are your own Cloud Foundry API and login server, plus three public reference sites for version information. See [privacy.md](privacy.md).
+- It does not send your data anywhere. The only servers it contacts are your own Cloud Foundry API, its login server and its log cache (to see when each app last served a request). See [privacy.md](privacy.md).
 - It does not record who you are. Your name and e-mail never appear in a report.
 
 *BAIP Lens is an independent open-source project, not affiliated with SAP SE.*

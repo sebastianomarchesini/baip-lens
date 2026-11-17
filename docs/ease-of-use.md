@@ -38,7 +38,7 @@ Running `npx baip-lens` with no arguments (or `baip-lens` with no subcommand in 
 
 ```
 BAIP Lens  ·  read-only health check for your Cloud Foundry landscape
-Nothing is changed in your account and nothing is sent anywhere except your CF API.
+Nothing is changed in your account and nothing is sent outside your own Cloud Foundry landscape.
 
 Step 1 of 5 · Where is your landscape?
   Paste the "API Endpoint" from the BTP cockpit (Subaccount → Overview → Cloud Foundry Environment)
