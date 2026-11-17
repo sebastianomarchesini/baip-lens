@@ -17,7 +17,7 @@ BAIP Lens runs on your machine and writes files to your disk. This page lists wh
 | --- | --- | --- | --- |
 | Your CF API (`--api`) | inventory | `GET` only, with your token | 0.1.0 |
 | Your UAA or login server (from the CF root) | sign-in, token refresh or client credentials | `POST /oauth/token` only | 0.1.0 |
-| Your log cache (from the CF root, never guessed from the API host) | when each app last served a request (`APP_IDLE`) | `GET /api/v1/read/<app-guid>` only, with your token, for apps with an HTTP route | unreleased; `--no-traffic-check` turns it off |
+| Your log cache (from the CF root, never guessed from the API host) | when each app last served a request (`APP_IDLE`) | `GET /api/v1/read/<app-guid>` only, with your token, for apps with an HTTP route | 0.3.0; `--no-traffic-check` turns it off |
 | `api.osv.dev` | known vulnerabilities | public package names and versions from your SBOM | planned |
 | `endoflife.date` | runtime end-of-life dates | product names such as `nodejs` | planned |
 | `ui5.sap.com` | UI5 maintenance status | a request for `/versionoverview.json` | planned |

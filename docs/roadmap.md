@@ -2,6 +2,8 @@
 
 Public and revised at every minor release. Ordered, not dated: dates depend on how many people help. Everything here is and stays Apache-2.0; there is no paid tier.
 
+The headings below are milestones, not release numbers: releases 0.2.0 and 0.3.0 shipped the items marked as released under v0.1, and the v0.1.1, v0.2 and v0.3 milestones are still open.
+
 Propose a change by opening an issue. Rules go through the "Rule proposal" template.
 
 ## v0.1
@@ -14,19 +16,24 @@ Released as 0.1.0 on 2026-10-10:
 - [x] Guided mode (`baip-lens` with no arguments), `baip-lens doctor`, "Start here" panel
 - [x] Security review, disclosure policy, CSP-protected report, CI with gitleaks, CodeQL and Scorecard
 
-Moved to the 0.1.x and 0.2 releases:
+Moved to later releases:
 
-- [ ] Rules: `RUNTIME_NODE_EOL`, `RUNTIME_JAVA_EOL` (endoflife.date), `BUILDPACK_OUTDATED`, `STACK_DEPRECATED`, `APP_IDLE` (done: no route, traffic with history across scans, stopped), `UI5_OUT_OF_MAINTENANCE`, `SAP_PKG_OUTDATED`, `DEP_KNOWN_CVE` (OSV.dev), `ENV_SECRET_PLAINTEXT` (`--deep`)
+- [ ] Rules: `RUNTIME_NODE_EOL`, `RUNTIME_JAVA_EOL` (endoflife.date), `BUILDPACK_OUTDATED`, `STACK_DEPRECATED`, `APP_IDLE` (released in 0.3.0), `UI5_OUT_OF_MAINTENANCE`, `SAP_PKG_OUTDATED`, `DEP_KNOWN_CVE` (OSV.dev), `ENV_SECRET_PLAINTEXT` (`--deep`)
 - [ ] `baip-lens sbom` from `package-lock.json`, `pom.xml`, `mta.yaml` and `.mtar`
 - [ ] `report --redact` so people can share screenshots
 - [ ] Route probe for the UI5 version with the SSRF guards from the security review
 - [ ] Three usability sessions with non-developers (0.1.0 shipped without them, for developers and platform teams; due before 0.1.1)
 - [x] npm publish with provenance; GitHub release with changelog (tag-triggered `release.yml`)
 
-Done since 0.1.0 (unreleased, see the [changelog](../CHANGELOG.md)):
+Released as 0.2.0 on 2026-11-07:
 
 - [x] `baip-lens project --path <dir>`: a read-only scan of a local CAP or MTA project with thirteen rules derived from the OWASP Top 10 (2025) patterns of the SAP TechEd 2026 XP261 workshop, OWASP tags on every rule, a criticality matrix, `file:line` locations in the reports and SARIF
-- [x] XSUAA scope analysis for the project scan (`CAP_ROLE_NOT_IN_XSUAA`, `XSUAA_SCOPE_UNUSED`); the Cloud Foundry side (bound xsuaa instances) stays in v0.2
+- [x] XSUAA scope analysis for the project scan (`CAP_ROLE_NOT_IN_XSUAA`, `XSUAA_SCOPE_UNUSED`); the Cloud Foundry side (bound xsuaa instances) is still open, under v0.2 below
+
+Released as 0.3.0 on 2026-11-17 (see the [changelog](../CHANGELOG.md)):
+
+- [x] `APP_IDLE`: started with no route, no request in the router logs that Log Cache holds, or stopped for more than 90 days; history across scans with `scan --previous`
+- [x] Guided mode asks for the region as text, and `baip-lens regions` lists the regions
 
 ## v0.1.1
 
