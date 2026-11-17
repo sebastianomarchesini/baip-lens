@@ -1,5 +1,32 @@
 # Changelog
 
+## Unreleased
+
+### Added
+
+- **`APP_IDLE` history across scans: `scan --previous <snapshot.json>`** carries each app's traffic history forward from an earlier snapshot of the same org, matched by app GUID: the newest request ever seen, when the current run of scans without a request began, and how many scans it has ([docs/rules.md](docs/rules.md#history-across-scans-scan---previous)). From the second scan without a request the finding states the span ("No requests seen across 6 scans over 42 days"); 3 or more scans over 30 days or more raise the confidence to `high`, with severity still `low` (D9). A request in any window ends a run; a scan without one counts only when it read at least `--min-traffic-window`, and a scan that cannot tell leaves the history as it was (D8). An app this scan cannot see (outside `--space`, in a space not visible this time, or when the app inventory could not be read) keeps its history unchanged; only an app missing from a space whose apps were read is dropped. A file that is not a valid snapshot, a project scan, another API endpoint or a snapshot that is not older stops the scan with exit code 2 before any request; another org stops it right after the org lookup. The history is stored in the snapshot (`raw.history`, `options.previousScannedAt`), so `report --from` gives the same result offline, and the report's summary names the earlier scan.
+- **`APP_IDLE`: apps that nothing seems to use**, with three signals ([docs/rules.md](docs/rules.md#app_idle)):
+  - `no_route`: started, a `web` process with instances, and no route at all (`low`, confidence `high`).
+  - `no_traffic`: started, an HTTP route, and no router access log in the window Log Cache held; `low` with confidence `medium` when the droplet and the `web` processes are unchanged for more than 180 days, else `info` with confidence `low`. A window shorter than `--min-traffic-window` (default 12 hours) gives no finding but `unknown`, and every finding names the window it saw.
+  - `stopped`: stopped for more than 90 days (`low`, confidence `high`).
+  - Started workers are never flagged: no `web` process, `web` scaled to 0, or a `web` process with the `process` health check, which Cloud Foundry documents for workers (the legacy `none` counts as `process`, decision D7). Stopped for more than 90 days, a worker is flagged as `stopped` like any app. Apps reachable only over TCP or an internal domain are `unknown` (D6).
+  - When the routes or processes cannot be read, no app is called idle: started apps and apps stopped for more than 90 days are `unknown`, and the traffic check is skipped (`dependency_skipped`). When no Log Cache envelope of an app carries a `source_type` tag (drain metadata turned off), router logs cannot be recognised, so the traffic check is skipped instead of calling every app silent.
+- **Three collectors**, all Space Auditor: `collect.routes` (`GET /v3/routes?space_guids=…&include=domain`, by space so that shared routes count, 50 spaces per request), `collect.processes` (`GET /v3/processes?types=web`) and `collect.traffic`, which reads Log Cache (`GET /api/v1/read/<app-guid>`, host only from the CF root's `links.log_cache`) newest first for apps with an HTTP route, keeps three values per app (`lastRequestAt`, `windowStart`, `envelopesExamined`) and drops the log lines, tags and instance as it reads them.
+- **`scan` options:** `--no-traffic-check`, `--min-traffic-window <hours>` (default 12) and `--traffic-pages <n>` (default 5). They are recorded in the snapshot, so `report --from` gives the same result offline.
+- **Usage per app** in the inventory: `idle`, `active` (with the last request), `unknown` (the rule would judge the app but the data cannot tell) or `not_assessed` (a worker, or stopped recently), with a signal and confidence or a reason code. The HTML report shows it in a new Usage column of the Apps table, where `unknown` has its own icon and never looks like "no finding", and the Idle apps key figure names each signal with its confidence and the number of unknown apps.
+- `docs/data-sources.md`: §9, the verified research behind the traffic evidence (routes, the Log Cache read and meta endpoints, the roles Log Cache accepts, retention); decisions D5 to D9 in §7; and the credential each host may receive in the §6 allow-list table.
+
+### Changed
+
+- **The egress allow-list names the credential each host may receive:** the CF token for the CF API and its log cache only, the OAuth client id and secret (Basic) for the token endpoint only, nothing for the public data sources. The log cache rule allows `GET /api/v1/read/<app-guid>` only; `/api/v1/meta`, `/api/v1/info` and the PromQL endpoints are unreachable.
+- **A check can be skipped with its own reason.** Log Cache answers 404, never 403, for a missing role, an expired token or a failed permission lookup; the traffic check says so instead of the generic "insufficient role". A new skip reason code, `unavailable`, covers a log cache that is absent or does not answer.
+- **Skipped checks are no longer all blamed on the role.** Guided mode and the report's "Start here" summary say a check "could not run with your role" only when a missing role is what stopped it, "was turned off" after `--no-traffic-check`, and "did not run" otherwise, for example when the log cache is down.
+- **Snapshot (schema version unchanged, older snapshots still load):** `raw.routes`, `raw.processes`, `raw.traffic`, `raw.history`, the three traffic options, `options.previousScannedAt` and `usage` on inventory items, all with defaults when missing.
+- **CSV:** the apps file ends with five new trailing columns `usage`, `usage_signal`, `usage_confidence`, `usage_reason`, `usage_last_request_at`; existing columns keep their order.
+- **HTML report:** the Apps table's fixed columns are sized to their content to make room for the Usage column; long buildpack names are cut short with "…" at desktop width.
+- `btp-lens-reports/`, the default output folder before the rename, is git-ignored again.
+- **Reading a snapshot (`report --from`, `scan --previous`):** the 256 MB limit now holds for a pipe too (`--previous <(...)`, `/dev/stdin`), since the bytes are counted as they are read, and a file that is not JSON is reported with its line and column only, never with the start of its content, which could be a secret passed by mistake.
+
 ## 0.2.0 (2026-11-07)
 
 ### Changed

@@ -10,7 +10,11 @@ import { scanProject } from '../../src/project.js';
 import { type Analyzer, ruleHelpUri } from '../../src/analyzers/types.js';
 import { analyze } from '../../src/analyzers/index.js';
 import { projectFinding } from '../../src/analyzers/project/support.js';
-import { SNAPSHOT_SCHEMA_VERSION, type Snapshot } from '../../src/model/snapshot.js';
+import {
+  DEFAULT_SNAPSHOT_OPTIONS,
+  SNAPSHOT_SCHEMA_VERSION,
+  type Snapshot,
+} from '../../src/model/snapshot.js';
 import { ACME, acmeFetch } from '../support/acme.js';
 import { NOW, PROJECT_COLLECTOR, rawData, rawProject } from '../support/project.js';
 import { materializeFixture } from '../support/projectFixture.js';
@@ -71,7 +75,7 @@ function projectReport() {
     tool: { name: 'baip-lens', version: '0.0.0' },
     scannedAt: NOW,
     scope: { orgs: [], projects: ['acme-incidents'] },
-    options: { deep: false, probeRoutes: false },
+    options: { ...DEFAULT_SNAPSHOT_OPTIONS },
     checks: [PROJECT_COLLECTOR, ...analysis.ruleChecks],
     raw,
     apps: analysis.apps,
@@ -112,8 +116,22 @@ describe('CSV reports', () => {
     expect(findings[1]?.endsWith(',A03:2025,,')).toBe(true);
     const apps = renderAppsCsv(data).slice(CSV_BOM.length).trimEnd().split('\r\n');
     expect(apps).toHaveLength(1 + 8);
-    expect(apps[0]?.endsWith(',info,kind')).toBe(true);
-    expect(apps[1]?.endsWith(',app')).toBe(true);
+    expect(
+      apps[0]?.endsWith(
+        ',info,kind,usage,usage_signal,usage_confidence,usage_reason,usage_last_request_at',
+      ),
+    ).toBe(true);
+    // Highest risk first: legacy-reporting, stopped since 2024, so APP_IDLE reports it too.
+    expect(apps[1]?.endsWith(',app,idle,stopped,high,,')).toBe(true);
+    const idle = apps.find((row) => row.includes(',custom-bp-app,'));
+    expect(idle?.endsWith(',app,idle,no_route,high,,')).toBe(true);
+    const active = apps.find((row) => row.includes(',orders-srv,'));
+    expect(active?.endsWith(',app,active,,,,2026-09-28T23:50:00.000Z')).toBe(true);
+    // Unknown and not judged keep their reason, so a spreadsheet never reads them as "no finding".
+    const unknown = apps.find((row) => row.includes(',docs-static,'));
+    expect(unknown?.endsWith(',app,unknown,,,window_too_short,')).toBe(true);
+    const worker = apps.find((row) => row.includes(',docker-worker,'));
+    expect(worker?.endsWith(',app,not_assessed,,,worker_health_check,')).toBe(true);
   });
 
   it('writes OWASP tags, file and line for project findings, and empty CF columns', () => {
@@ -123,7 +141,7 @@ describe('CSV reports', () => {
     expect(findings[2]?.endsWith(',A01:2025 A07:2025,srv/services.cds,')).toBe(true);
     const apps = renderAppsCsv(data).slice(CSV_BOM.length).trimEnd().split('\r\n');
     expect(apps[1]).toBe(
-      'local,project,acme-incidents,project:acme-incidents,,unknown,,,,50,high,0,2,0,0,0,project',
+      'local,project,acme-incidents,project:acme-incidents,,unknown,,,,50,high,0,2,0,0,0,project,,,,,',
     );
   });
 

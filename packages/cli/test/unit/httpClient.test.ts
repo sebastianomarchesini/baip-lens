@@ -1,7 +1,13 @@
 import { describe, expect, it, vi } from 'vitest';
 import { HttpBodyTooLargeError, HttpNetworkError } from '../../src/http/errors.js';
 import { HttpClient } from '../../src/http/httpClient.js';
-import { EgressPolicy, cfApiRule, type HttpMethod } from '../../src/net/allowlist.js';
+import {
+  EgressPolicy,
+  cfApiRule,
+  type HttpMethod,
+  logCacheRule,
+  uaaRule,
+} from '../../src/net/allowlist.js';
 import { EgressDeniedError } from '../../src/net/errors.js';
 import { FakeFetch, jsonResponse, noSleep } from '../support/fakeFetch.js';
 
@@ -44,6 +50,37 @@ describe('HttpClient', () => {
       const smuggled = { url: new URL('/v3/apps', api), method: 'DELETE', body: 'x' };
       await client(fake).get(smuggled);
       expect(fake.calls.map((c) => [c.method, c.body])).toEqual([['GET', undefined]]);
+    });
+
+    it('refuses a credential its host may not receive, before anything is sent', async () => {
+      const fake = new FakeFetch();
+      const policy = new EgressPolicy();
+      policy.add(cfApiRule(api));
+      policy.add(uaaRule(new URL('https://uaa.cf.example.org')));
+      policy.add(logCacheRule(new URL('https://log-cache.cf.example.org')));
+      const http = new HttpClient({ policy, userAgent: 't', fetch: fake.fetch, sleep: noSleep });
+      const secret = 'Basic Y2xpZW50OnNlY3JldA==';
+      const app = 'a99a0000-0000-4000-8000-0000000000aa';
+      const refused: [HttpMethod, string, Record<string, string>][] = [
+        // The CF token goes to the CF API and the log cache only...
+        ['POST', 'https://uaa.cf.example.org/oauth/token', { authorization: 'bearer cf-token' }],
+        ['POST', 'https://api.osv.dev/v1/querybatch', { Authorization: 'Bearer cf-token' }],
+        ['GET', 'https://endoflife.date/api/v1/products/nodejs', { authorization: 'bearer t' }],
+        ['GET', 'https://ui5.sap.com/versionoverview.json', { authorization: 'bearer t' }],
+        // ...the client secret to the token endpoint only...
+        ['GET', 'https://api.cf.example.org/v3/apps', { authorization: secret }],
+        ['GET', `https://log-cache.cf.example.org/api/v1/read/${app}`, { authorization: secret }],
+        // ...and an Authorization header of any other kind nowhere.
+        ['GET', 'https://api.cf.example.org/v3/apps', { authorization: 'Token abc' }],
+        ['GET', `https://log-cache.cf.example.org/api/v1/read/${app}`, { authorization: 'x' }],
+      ];
+      for (const [method, url, headers] of refused) {
+        await expect(
+          http.request({ url: new URL(url), method, headers }),
+          `${method} ${url}`,
+        ).rejects.toThrow(/credentials may not be sent to this host/);
+      }
+      expect(fake.calls).toHaveLength(0);
     });
 
     it('refuses hosts that are not on the allow-list', async () => {

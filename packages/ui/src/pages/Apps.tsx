@@ -11,9 +11,11 @@ import { useMemo, useState } from 'react';
 import { useNavigate, useOutletContext } from 'react-router';
 import { EmptyState } from '../components/EmptyState';
 import { SeverityStatus } from '../components/SeverityStatus';
+import { UsageStatus } from '../components/UsageStatus';
 import { lastDeploySortValue, lastDeployText, stateText } from '../data/inventory';
 import { severityRank } from '../data/severity';
 import { isProjectInventory } from '../data/summary';
+import { usageRank, usageView } from '../data/usage';
 
 type GroupBy = 'none' | 'org' | 'space';
 
@@ -44,6 +46,86 @@ const byRank = (
   b: { original?: Record<string, unknown> },
 ) => rank(a) - rank(b);
 
+const usageOf = (row: { original?: Record<string, unknown> }) =>
+  row.original ? usageRank(asApp(row.original).usage) : -1;
+const byUsage = (
+  a: { original?: Record<string, unknown> },
+  b: { original?: Record<string, unknown> },
+) => usageOf(a) - usageOf(b);
+
+/**
+ * APP_IDLE per app. A project has no usage, so the column is for CF scans
+ * only. The page caps the table at 1204 px (90rem at the 14 px root size), so
+ * the cell is two short lines in 160 px, the fixed columns below are sized to
+ * their content to make room, and below 1100 px the column pops in under the
+ * app name instead of making the grid scroll sideways (e2e checks 768, 1024
+ * and 1280 px). Grouping by it is off: a popped-in column cannot label groups.
+ */
+const USAGE_COLUMN: AnalyticalTableColumnDefinition = {
+  Header: 'Usage',
+  id: 'usage',
+  accessor: (row: Record<string, unknown>) => usageView(asApp(row).usage).text,
+  Cell: (props: AnalyticalTableCellInstance) => {
+    const app = cellApp(props);
+    return app ? <UsageStatus usage={app.usage} /> : null;
+  },
+  sortType: byUsage,
+  disableGroupBy: true,
+  minWidth: 160,
+  responsiveMinWidth: 1100,
+  responsivePopIn: true,
+};
+
+/** The columns of the Apps table; projects get no app-only columns. */
+export function appColumns(projects: boolean): AnalyticalTableColumnDefinition[] {
+  return [
+    { Header: projects ? 'Project' : 'App', accessor: 'name', minWidth: 160 },
+    {
+      Header: 'Highest severity',
+      id: 'severity',
+      accessor: (row: Record<string, unknown>) => asApp(row).highestSeverity ?? 'none',
+      Cell: (props: AnalyticalTableCellInstance) => {
+        const app = cellApp(props);
+        return app ? <SeverityStatus severity={app.highestSeverity} /> : null;
+      },
+      sortType: byRank,
+      minWidth: 130,
+    },
+    { Header: 'Findings', id: 'findings', accessor: total, hAlign: 'End', width: 100 },
+    ...(projects ? [] : [USAGE_COLUMN]),
+    { Header: 'Org', accessor: 'org', responsiveMinWidth: 700, responsivePopIn: true },
+    { Header: 'Space', accessor: 'space', responsiveMinWidth: 700, responsivePopIn: true },
+    { Header: 'State', id: 'state', accessor: state, width: 100, responsiveMinWidth: 900 },
+    { Header: 'Buildpacks', id: 'buildpacks', accessor: buildpacks, responsiveMinWidth: 1000 },
+    {
+      Header: 'Stack',
+      id: 'stack',
+      accessor: (row: Record<string, unknown>) => asApp(row).stack ?? '—',
+      width: 110,
+      responsiveMinWidth: 1100,
+    },
+    {
+      Header: 'Last deploy',
+      id: 'lastDeployAt',
+      accessor: lastDeployAt,
+      Cell: (props: AnalyticalTableCellInstance) => {
+        const app = cellApp(props);
+        return app ? lastDeployText(app) : '';
+      },
+      width: 110,
+      responsiveMinWidth: 800,
+      responsivePopIn: true,
+    },
+    {
+      Header: 'Risk score',
+      accessor: 'riskScore',
+      hAlign: 'End',
+      width: 100,
+      responsiveMinWidth: 900,
+    },
+  ];
+}
+
 export function Apps() {
   const data = useOutletContext<ReportData>();
   const navigate = useNavigate();
@@ -51,54 +133,7 @@ export function Apps() {
   const projects = isProjectInventory(data.apps);
   const noun = projects ? 'Projects' : 'Apps';
 
-  const columns = useMemo<AnalyticalTableColumnDefinition[]>(
-    () => [
-      { Header: projects ? 'Project' : 'App', accessor: 'name', minWidth: 160 },
-      {
-        Header: 'Highest severity',
-        id: 'severity',
-        accessor: (row: Record<string, unknown>) => asApp(row).highestSeverity ?? 'none',
-        Cell: (props: AnalyticalTableCellInstance) => {
-          const app = cellApp(props);
-          return app ? <SeverityStatus severity={app.highestSeverity} /> : null;
-        },
-        sortType: byRank,
-        minWidth: 150,
-      },
-      { Header: 'Findings', id: 'findings', accessor: total, hAlign: 'End', width: 100 },
-      { Header: 'Org', accessor: 'org', responsiveMinWidth: 700, responsivePopIn: true },
-      { Header: 'Space', accessor: 'space', responsiveMinWidth: 700, responsivePopIn: true },
-      { Header: 'State', id: 'state', accessor: state, width: 110, responsiveMinWidth: 900 },
-      { Header: 'Buildpacks', id: 'buildpacks', accessor: buildpacks, responsiveMinWidth: 1000 },
-      {
-        Header: 'Stack',
-        id: 'stack',
-        accessor: (row: Record<string, unknown>) => asApp(row).stack ?? '—',
-        width: 120,
-        responsiveMinWidth: 1100,
-      },
-      {
-        Header: 'Last deploy',
-        id: 'lastDeployAt',
-        accessor: lastDeployAt,
-        Cell: (props: AnalyticalTableCellInstance) => {
-          const app = cellApp(props);
-          return app ? lastDeployText(app) : '';
-        },
-        width: 130,
-        responsiveMinWidth: 800,
-        responsivePopIn: true,
-      },
-      {
-        Header: 'Risk score',
-        accessor: 'riskScore',
-        hAlign: 'End',
-        width: 110,
-        responsiveMinWidth: 900,
-      },
-    ],
-    [projects],
-  );
+  const columns = useMemo(() => appColumns(projects), [projects]);
   // Projects all share org "local" and space "project", so grouping is hidden for them.
   const grouping = useMemo(
     () => (groupBy === 'none' || projects ? [] : [groupBy]),

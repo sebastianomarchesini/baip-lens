@@ -13,14 +13,14 @@ import {
   reportDirName,
   runWizard,
 } from '../../src/guided/wizard.js';
-import { ACME, acmeFetch } from '../support/acme.js';
+import { ACME, type AcmeOptions, acmeFetch } from '../support/acme.js';
 import { FakeFetch, jsonResponse } from '../support/fakeFetch.js';
 
 const HOST = ACME.api.host;
 
 /** acme-prod plus the calls only guided mode makes: org listing and the passcode exchange. */
-function guidedFetch(): FakeFetch {
-  return acmeFetch()
+function guidedFetch(options: AcmeOptions = {}): FakeFetch {
+  return acmeFetch(options)
     .on('GET', `${HOST}/v3/organizations?per_page=5000`, () =>
       jsonResponse({
         pagination: { next: null },
@@ -77,13 +77,31 @@ describe('guided mode', () => {
     ]);
     const text = prompter.transcript.join('\n');
     expect(text).toContain('You have access to one org: acme-prod.');
-    expect(text).toContain('8 apps scanned, 3 findings');
+    expect(text).toContain('8 apps scanned, 6 findings');
     expect(text).toContain('Nothing in your account was changed.');
     // Neither the passcode nor the token is ever printed or stored.
     expect(text).not.toContain('K7Q2ZX');
     expect(text).not.toContain('POISON');
     const snapshot = await readFile(join(dir, 'snapshot-20260929T000000Z.json'), 'utf8');
     expect(snapshot).not.toContain('POISON');
+  }, 20_000);
+
+  it('says what stopped a check instead of blaming the role', async () => {
+    const cwd = await tmp();
+    const prompter = new ScriptedPrompter(['1', 'https://api.cf.example.org', '1', 'K7Q2ZX', '']);
+    const code = await runWizard({
+      prompter,
+      env: { CF_HOME: cwd },
+      cwd,
+      open: () => Promise.resolve(true),
+      // The CF root advertises no log cache: the traffic check is unavailable.
+      fetch: guidedFetch({ noLogCacheLink: true }).fetch,
+      now: () => ACME.now,
+    });
+    expect(code).toBe(0);
+    const text = prompter.transcript.join('\n');
+    expect(text).toContain('1 check did not run; the report says which and why.');
+    expect(text).not.toContain('with your role');
   }, 20_000);
 
   it('picks a region from the list and uses BAIP_LENS_ACCESS_TOKEN silently', async () => {

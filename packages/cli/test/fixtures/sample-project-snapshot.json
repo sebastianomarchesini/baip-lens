@@ -13,7 +13,11 @@
   },
   "options": {
     "deep": false,
-    "probeRoutes": false
+    "probeRoutes": false,
+    "trafficCheck": false,
+    "minTrafficWindowHours": 12,
+    "trafficPages": 5,
+    "previousScannedAt": null
   },
   "checks": [
     {
@@ -106,6 +110,10 @@
     "spaces": [],
     "apps": [],
     "droplets": [],
+    "routes": [],
+    "processes": [],
+    "traffic": [],
+    "history": [],
     "projects": [
       {
         "id": "acme-incidents",
@@ -760,6 +768,7 @@
       "createdAt": null,
       "updatedAt": null,
       "lastDeployAt": null,
+      "usage": null,
       "findingCounts": {
         "critical": 2,
         "high": 2,

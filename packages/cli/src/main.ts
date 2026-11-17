@@ -87,6 +87,8 @@ function printSummary(data: ReportData, files: string[], io: CliIo): void {
 
 async function runScan(config: ScanConfig, io: CliIo): Promise<number> {
   const log = config.quiet ? () => {} : (message: string) => io.stderr(`${message}\n`);
+  // Read and validated before the scan starts, so a bad file costs no request.
+  const previous = config.previous === undefined ? undefined : await readSnapshot(config.previous);
   const snapshot = await scan({
     apiUrl: config.api,
     org: config.org,
@@ -94,6 +96,10 @@ async function runScan(config: ScanConfig, io: CliIo): Promise<number> {
     deep: config.deep,
     probeRoutes: config.probeRoutes,
     concurrency: config.concurrency,
+    trafficCheck: config.trafficCheck,
+    minTrafficWindowHours: config.minTrafficWindow,
+    trafficPages: config.trafficPages,
+    previous,
     env: io.env,
     fetch: io.fetch,
     now: io.now,
@@ -194,6 +200,17 @@ function buildProgram(io: CliIo, setExit: (code: number) => void): Command {
     .option('--format <list>', 'report formats: html,json,csv,sarif', DEFAULT_FORMATS)
     .option('--fail-on <severity>', FAIL_ON_HELP, 'none')
     .option('--concurrency <n>', 'parallel API requests (1-20)', '5')
+    .option('--no-traffic-check', 'do not read router access logs from Log Cache (APP_IDLE)')
+    .option(
+      '--min-traffic-window <hours>',
+      'with less Log Cache history than this, an app is unknown rather than idle',
+      '12',
+    )
+    .option('--traffic-pages <n>', 'pages of up to 1000 log envelopes read per app (1-20)', '5')
+    .option(
+      '--previous <snapshot>',
+      "an earlier snapshot of the same org: carries each app's traffic history forward (APP_IDLE)",
+    )
     .option('--quiet', 'print errors only', false)
     .action(async (options: Record<string, unknown>) => {
       setExit(await runScan(parseScanConfig(options), io));

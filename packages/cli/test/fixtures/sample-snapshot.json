@@ -13,7 +13,11 @@
   },
   "options": {
     "deep": false,
-    "probeRoutes": false
+    "probeRoutes": false,
+    "trafficCheck": true,
+    "minTrafficWindowHours": 12,
+    "trafficPages": 5,
+    "previousScannedAt": "2026-09-22T00:00:00.000Z"
   },
   "checks": [
     {
@@ -33,8 +37,40 @@
       "status": "ran"
     },
     {
+      "id": "collect.routes",
+      "title": "Routes and their destinations (GET /v3/routes?include=domain)",
+      "roles": [
+        "SpaceAuditor"
+      ],
+      "status": "ran"
+    },
+    {
+      "id": "collect.processes",
+      "title": "Web processes (GET /v3/processes?types=web)",
+      "roles": [
+        "SpaceAuditor"
+      ],
+      "status": "ran"
+    },
+    {
+      "id": "collect.traffic",
+      "title": "Last router request per app (Log Cache GET /api/v1/read)",
+      "roles": [
+        "SpaceAuditor"
+      ],
+      "status": "ran"
+    },
+    {
       "id": "rule.APP_NO_RECENT_DEPLOY",
       "title": "No deploy in the last 12 months",
+      "roles": [
+        "SpaceAuditor"
+      ],
+      "status": "ran"
+    },
+    {
+      "id": "rule.APP_IDLE",
+      "title": "App looks unused",
       "roles": [
         "SpaceAuditor"
       ],
@@ -283,6 +319,194 @@
         "buildpacks": []
       }
     ],
+    "routes": [
+      {
+        "guid": "r0u7e000-0000-4000-8000-000000000001",
+        "spaceGuid": "5pace000-0000-4000-8000-00000000prod",
+        "kind": "http",
+        "appGuids": [
+          "a99a0000-0000-4000-8000-000000000002"
+        ]
+      },
+      {
+        "guid": "r0u7e000-0000-4000-8000-000000000002",
+        "spaceGuid": "5pace000-0000-4000-8000-00000000prod",
+        "kind": "http",
+        "appGuids": [
+          "a99a0000-0000-4000-8000-000000000001"
+        ]
+      },
+      {
+        "guid": "r0u7e000-0000-4000-8000-000000000003",
+        "spaceGuid": "5pace000-0000-4000-8000-00000000prod",
+        "kind": "internal",
+        "appGuids": [
+          "a99a0000-0000-4000-8000-000000000004"
+        ]
+      },
+      {
+        "guid": "r0u7e000-0000-4000-8000-000000000004",
+        "spaceGuid": "5pace000-0000-4000-8000-000000000dev",
+        "kind": "http",
+        "appGuids": [
+          "a99a0000-0000-4000-8000-000000000005"
+        ]
+      },
+      {
+        "guid": "r0u7e000-0000-4000-8000-000000000005",
+        "spaceGuid": "5pace000-0000-4000-8000-00000000prod",
+        "kind": "tcp",
+        "appGuids": [
+          "a99a0000-0000-4000-8000-000000000003"
+        ]
+      },
+      {
+        "guid": "r0u7e000-0000-4000-8000-000000000007",
+        "spaceGuid": "5pace000-0000-4000-8000-000000000dev",
+        "kind": "unknown",
+        "appGuids": [
+          "a99a0000-0000-4000-8000-000000000008"
+        ]
+      }
+    ],
+    "processes": [
+      {
+        "guid": "pr0c0000-0000-4000-8000-000000000001",
+        "appGuid": "a99a0000-0000-4000-8000-000000000001",
+        "type": "web",
+        "instances": 2,
+        "healthCheckType": "port",
+        "updatedAt": "2026-07-20T10:05:00Z"
+      },
+      {
+        "guid": "pr0c0000-0000-4000-8000-000000000009",
+        "appGuid": "a99a0000-0000-4000-8000-000000000001",
+        "type": "web",
+        "instances": 1,
+        "healthCheckType": "port",
+        "updatedAt": "2026-09-28T08:00:00Z"
+      },
+      {
+        "guid": "pr0c0000-0000-4000-8000-000000000002",
+        "appGuid": "a99a0000-0000-4000-8000-000000000002",
+        "type": "web",
+        "instances": 1,
+        "healthCheckType": "http",
+        "updatedAt": "2025-07-01T09:05:00Z"
+      },
+      {
+        "guid": "pr0c0000-0000-4000-8000-000000000003",
+        "appGuid": "a99a0000-0000-4000-8000-000000000003",
+        "type": "web",
+        "instances": 1,
+        "healthCheckType": "port",
+        "updatedAt": "2024-06-30T16:00:00Z"
+      },
+      {
+        "guid": "pr0c0000-0000-4000-8000-000000000004",
+        "appGuid": "a99a0000-0000-4000-8000-000000000004",
+        "type": "web",
+        "instances": 2,
+        "healthCheckType": "port",
+        "updatedAt": "2026-04-02T12:10:00Z"
+      },
+      {
+        "guid": "pr0c0000-0000-4000-8000-000000000005",
+        "appGuid": "a99a0000-0000-4000-8000-000000000005",
+        "type": "web",
+        "instances": 1,
+        "healthCheckType": "port",
+        "updatedAt": "2025-08-20T12:05:00Z"
+      },
+      {
+        "guid": "pr0c0000-0000-4000-8000-000000000006",
+        "appGuid": "a99a0000-0000-4000-8000-000000000006",
+        "type": "web",
+        "instances": 1,
+        "healthCheckType": "port",
+        "updatedAt": "2026-09-01T00:05:00Z"
+      },
+      {
+        "guid": "pr0c0000-0000-4000-8000-000000000007",
+        "appGuid": "a99a0000-0000-4000-8000-000000000007",
+        "type": "web",
+        "instances": 1,
+        "healthCheckType": "process",
+        "updatedAt": "2026-09-09T00:05:00Z"
+      },
+      {
+        "guid": "pr0c0000-0000-4000-8000-000000000008",
+        "appGuid": "a99a0000-0000-4000-8000-000000000008",
+        "type": "web",
+        "instances": 1,
+        "healthCheckType": "port",
+        "updatedAt": "2026-09-20T10:00:00Z"
+      }
+    ],
+    "traffic": [
+      {
+        "appGuid": "a99a0000-0000-4000-8000-000000000001",
+        "lastRequestAt": "2026-09-28T23:50:00.000Z",
+        "windowStart": "2026-09-28T23:40:00.000Z",
+        "envelopesExamined": 4
+      },
+      {
+        "appGuid": "a99a0000-0000-4000-8000-000000000002",
+        "lastRequestAt": null,
+        "windowStart": "2026-09-27T06:00:00.000Z",
+        "envelopesExamined": 3
+      },
+      {
+        "appGuid": "a99a0000-0000-4000-8000-000000000005",
+        "lastRequestAt": null,
+        "windowStart": "2026-09-28T20:00:00.000Z",
+        "envelopesExamined": 0
+      }
+    ],
+    "history": [
+      {
+        "appGuid": "a99a0000-0000-4000-8000-000000000001",
+        "spaceGuid": "5pace000-0000-4000-8000-00000000prod",
+        "lastRequestEverSeen": "2026-09-28T23:50:00.000Z",
+        "firstScanWithoutTraffic": null,
+        "scansWithoutTraffic": 0
+      },
+      {
+        "appGuid": "a99a0000-0000-4000-8000-000000000002",
+        "spaceGuid": "5pace000-0000-4000-8000-00000000prod",
+        "lastRequestEverSeen": "2026-08-10T14:00:00.000Z",
+        "firstScanWithoutTraffic": "2026-08-18T00:00:00.000Z",
+        "scansWithoutTraffic": 6
+      },
+      {
+        "appGuid": "a99a0000-0000-4000-8000-000000000003",
+        "spaceGuid": "5pace000-0000-4000-8000-00000000prod",
+        "lastRequestEverSeen": "2026-05-30T12:00:00.000Z",
+        "firstScanWithoutTraffic": "2026-06-05T00:00:00.000Z",
+        "scansWithoutTraffic": 3
+      },
+      {
+        "appGuid": "a99a0000-0000-4000-8000-000000000004",
+        "spaceGuid": "5pace000-0000-4000-8000-00000000prod",
+        "lastRequestEverSeen": "2026-07-14T09:30:00.000Z",
+        "firstScanWithoutTraffic": null,
+        "scansWithoutTraffic": 0
+      },
+      {
+        "appGuid": "a99a0000-0000-4000-8000-000000000005",
+        "spaceGuid": "5pace000-0000-4000-8000-000000000dev",
+        "lastRequestEverSeen": null,
+        "firstScanWithoutTraffic": "2026-09-15T00:00:00.000Z",
+        "scansWithoutTraffic": 2
+      },
+      {
+        "appGuid": "a99a0000-0000-4000-8000-000000000007",
+        "spaceGuid": "5pace000-0000-4000-8000-000000000dev",
+        "lastRequestEverSeen": "2026-04-02T08:00:00.000Z",
+        "firstScanWithoutTraffic": "2026-04-10T00:00:00.000Z",
+        "scansWithoutTraffic": 2
+      }
+    ],
     "projects": []
   },
   "apps": [
@@ -304,43 +528,20 @@
       "createdAt": "2021-05-03T07:00:00Z",
       "updatedAt": "2024-06-30T16:00:00Z",
       "lastDeployAt": "2024-03-15T08:00:00Z",
+      "usage": {
+        "state": "idle",
+        "signal": "stopped",
+        "confidence": "high"
+      },
       "findingCounts": {
         "critical": 0,
         "high": 0,
         "medium": 1,
-        "low": 0,
-        "info": 0
-      },
-      "highestSeverity": "medium",
-      "riskScore": 5
-    },
-    {
-      "guid": "a99a0000-0000-4000-8000-000000000005",
-      "name": "docs-static",
-      "org": "acme-prod",
-      "space": "dev",
-      "kind": "app",
-      "state": "STARTED",
-      "lifecycleType": "buildpack",
-      "stack": "cflinuxfs4",
-      "buildpacks": [
-        {
-          "name": "staticfile",
-          "version": "1.6.3"
-        }
-      ],
-      "createdAt": "2025-08-20T11:00:00Z",
-      "updatedAt": "2025-08-20T12:05:00Z",
-      "lastDeployAt": "2025-08-20T12:00:00Z",
-      "findingCounts": {
-        "critical": 0,
-        "high": 0,
-        "medium": 0,
         "low": 1,
         "info": 0
       },
-      "highestSeverity": "low",
-      "riskScore": 1
+      "highestSeverity": "medium",
+      "riskScore": 6
     },
     {
       "guid": "a99a0000-0000-4000-8000-000000000002",
@@ -360,15 +561,20 @@
       "createdAt": "2024-02-01T09:10:00Z",
       "updatedAt": "2025-07-01T09:05:00Z",
       "lastDeployAt": "2025-07-01T09:00:00Z",
+      "usage": {
+        "state": "idle",
+        "signal": "no_traffic",
+        "confidence": "high"
+      },
       "findingCounts": {
         "critical": 0,
         "high": 0,
         "medium": 0,
-        "low": 1,
+        "low": 2,
         "info": 0
       },
       "highestSeverity": "low",
-      "riskScore": 1
+      "riskScore": 2
     },
     {
       "guid": "a99a0000-0000-4000-8000-000000000006",
@@ -388,15 +594,52 @@
       "createdAt": "2026-01-15T10:00:00Z",
       "updatedAt": "2026-09-01T00:05:00Z",
       "lastDeployAt": "2026-09-01T00:00:00Z",
+      "usage": {
+        "state": "idle",
+        "signal": "no_route",
+        "confidence": "high"
+      },
       "findingCounts": {
         "critical": 0,
         "high": 0,
         "medium": 0,
-        "low": 0,
+        "low": 1,
         "info": 0
       },
-      "highestSeverity": null,
-      "riskScore": 0
+      "highestSeverity": "low",
+      "riskScore": 1
+    },
+    {
+      "guid": "a99a0000-0000-4000-8000-000000000005",
+      "name": "docs-static",
+      "org": "acme-prod",
+      "space": "dev",
+      "kind": "app",
+      "state": "STARTED",
+      "lifecycleType": "buildpack",
+      "stack": "cflinuxfs4",
+      "buildpacks": [
+        {
+          "name": "staticfile",
+          "version": "1.6.3"
+        }
+      ],
+      "createdAt": "2025-08-20T11:00:00Z",
+      "updatedAt": "2025-08-20T12:05:00Z",
+      "lastDeployAt": "2025-08-20T12:00:00Z",
+      "usage": {
+        "state": "unknown",
+        "reason": "window_too_short"
+      },
+      "findingCounts": {
+        "critical": 0,
+        "high": 0,
+        "medium": 0,
+        "low": 1,
+        "info": 0
+      },
+      "highestSeverity": "low",
+      "riskScore": 1
     },
     {
       "guid": "a99a0000-0000-4000-8000-000000000007",
@@ -411,6 +654,10 @@
       "createdAt": "2026-02-02T10:00:00Z",
       "updatedAt": "2026-09-09T00:05:00Z",
       "lastDeployAt": "2026-09-09T00:00:00Z",
+      "usage": {
+        "state": "not_assessed",
+        "reason": "worker_health_check"
+      },
       "findingCounts": {
         "critical": 0,
         "high": 0,
@@ -439,6 +686,10 @@
       "createdAt": "2023-11-20T12:00:00Z",
       "updatedAt": "2026-04-02T12:10:00Z",
       "lastDeployAt": "2026-04-02T12:00:00Z",
+      "usage": {
+        "state": "unknown",
+        "reason": "traffic_not_measurable"
+      },
       "findingCounts": {
         "critical": 0,
         "high": 0,
@@ -462,6 +713,10 @@
       "createdAt": "2026-09-20T10:00:00Z",
       "updatedAt": "2026-09-20T10:00:00Z",
       "lastDeployAt": null,
+      "usage": {
+        "state": "not_assessed",
+        "reason": "stopped"
+      },
       "findingCounts": {
         "critical": 0,
         "high": 0,
@@ -490,6 +745,10 @@
       "createdAt": "2024-02-01T09:00:00Z",
       "updatedAt": "2026-07-20T10:05:00Z",
       "lastDeployAt": "2026-07-20T10:00:00Z",
+      "usage": {
+        "state": "active",
+        "lastRequestAt": "2026-09-28T23:50:00.000Z"
+      },
       "findingCounts": {
         "critical": 0,
         "high": 0,
@@ -520,6 +779,92 @@
       "remediation": "Update the app dependencies and redeploy (`cf push`), or restage (`cf restage`) to pick up the current buildpack and runtime patches. If the app is no longer needed, delete it.",
       "references": [
         "https://docs.cloudfoundry.org/devguide/deploy-apps/start-restart-restage.html"
+      ]
+    },
+    {
+      "id": "APP_IDLE",
+      "app": {
+        "guid": "a99a0000-0000-4000-8000-000000000006",
+        "name": "custom-bp-app",
+        "space": "dev",
+        "org": "acme-prod"
+      },
+      "severity": "low",
+      "title": "Started, but no route is mapped",
+      "evidence": {
+        "signal": "no_route",
+        "confidence": "high",
+        "appState": "STARTED",
+        "webInstances": 1,
+        "healthCheckTypes": [
+          "port"
+        ],
+        "mappedRoutes": 0
+      },
+      "remediation": "An app with a running web process but no route cannot receive HTTP requests, so it is probably not in use. Check with its owner whether it is still needed. If it should serve requests, map a route (`cf map-route`). If it is a background worker, make that explicit: run it as a `worker` process with `web` scaled to 0, or give `web` the `process` health check, so it is not mistaken for an unused app. If it is no longer needed, stop and delete it (`cf stop`, then `cf delete`) to free its memory quota.",
+      "references": [
+        "https://docs.cloudfoundry.org/devguide/deploy-apps/routes-domains.html",
+        "https://docs.cloudfoundry.org/devguide/deploy-apps/manifest-attributes.html#no-route",
+        "https://docs.cloudfoundry.org/devguide/deploy-apps/healthchecks.html#types"
+      ]
+    },
+    {
+      "id": "APP_IDLE",
+      "app": {
+        "guid": "a99a0000-0000-4000-8000-000000000003",
+        "name": "legacy-reporting",
+        "space": "prod",
+        "org": "acme-prod"
+      },
+      "severity": "low",
+      "title": "Stopped for 820 days",
+      "evidence": {
+        "signal": "stopped",
+        "confidence": "high",
+        "appState": "STOPPED",
+        "updatedAt": "2024-06-30T16:00:00Z",
+        "stoppedDays": 820,
+        "thresholdDays": 90
+      },
+      "remediation": "The app has been stopped for more than 90 days. If it is no longer needed, delete it with its routes (`cf delete -r`): a stopped app keeps its routes, service bindings and droplet, and starting it again brings back the libraries it was staged with. If it is kept on purpose, record why, for example in an annotation.",
+      "references": [
+        "https://docs.cloudfoundry.org/devguide/deploy-apps/start-restart-restage.html",
+        "https://cli.cloudfoundry.org/en-US/v8/delete.html"
+      ]
+    },
+    {
+      "id": "APP_IDLE",
+      "app": {
+        "guid": "a99a0000-0000-4000-8000-000000000002",
+        "name": "orders-approuter",
+        "space": "prod",
+        "org": "acme-prod"
+      },
+      "severity": "low",
+      "title": "No requests seen across 6 scans over 42 days",
+      "evidence": {
+        "signal": "no_traffic",
+        "confidence": "high",
+        "appState": "STARTED",
+        "lastRequestAt": null,
+        "windowStart": "2026-09-27T06:00:00.000Z",
+        "windowHours": 42,
+        "minWindowHours": 12,
+        "envelopesExamined": 3,
+        "lastChangeAt": "2025-07-01T09:05:00Z",
+        "unchangedDays": 454,
+        "unchangedThresholdDays": 180,
+        "scansWithoutTraffic": 6,
+        "firstScanWithoutTraffic": "2026-08-18T00:00:00.000Z",
+        "silentSpanDays": 42,
+        "lastRequestEverSeen": "2026-08-10T14:00:00.000Z",
+        "highConfidenceScans": 3,
+        "highConfidenceSpanDays": 30
+      },
+      "remediation": "No request reached the app in the router logs that Log Cache held (the window, and the scans in a row that saw none, are in the evidence). One window is short: Log Cache keeps logs in memory and caps them per app, so confirm over a longer period before acting, with request metrics or repeated scans (`scan --previous` with the last snapshot). If the app is no longer needed, stop it and delete it with its routes (`cf stop`, then `cf delete -r`) to free its memory quota.",
+      "references": [
+        "https://docs.cloudfoundry.org/devguide/deploy-apps/streaming-logs.html#rtr",
+        "https://github.com/cloudfoundry/log-cache-release/blob/main/src/README.md"
       ]
     },
     {

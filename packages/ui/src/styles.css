@@ -112,6 +112,28 @@ body {
   outline: none;
 }
 
+/* APP_IDLE "not judged" (a worker, a stopped app): secondary text, no status color. */
+.usage-not-judged {
+  color: var(--sapContent_LabelColor);
+}
+
+/* The Usage cell: status on the first line, the signal or reason below it. */
+.usage-cell {
+  display: flex;
+  flex-direction: column;
+  gap: 0.125rem;
+  min-width: 0;
+  max-width: 100%;
+}
+
+.usage-detail {
+  overflow: hidden;
+  font-size: var(--sapFontSmallSize);
+  color: var(--sapContent_LabelColor);
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
 .visually-hidden {
   position: absolute;
   width: 1px;

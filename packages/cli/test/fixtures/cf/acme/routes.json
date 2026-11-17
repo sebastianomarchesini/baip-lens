@@ -1,0 +1,261 @@
+{
+  "pagination": {
+    "total_results": 7,
+    "total_pages": 1,
+    "first": { "href": "https://api.cf.example.org/v3/routes?include=domain&page=1&per_page=5000&space_guids=5pace000-0000-4000-8000-000000000dev%2C5pace000-0000-4000-8000-00000000prod" },
+    "last": { "href": "https://api.cf.example.org/v3/routes?include=domain&page=1&per_page=5000&space_guids=5pace000-0000-4000-8000-000000000dev%2C5pace000-0000-4000-8000-00000000prod" },
+    "next": null,
+    "previous": null
+  },
+  "resources": [
+    {
+      "guid": "r0u7e000-0000-4000-8000-000000000001",
+      "created_at": "2025-07-01T09:00:00Z",
+      "updated_at": "2025-07-01T09:00:00Z",
+      "protocol": "http",
+      "host": "orders",
+      "path": "",
+      "port": null,
+      "url": "orders.acme.example.com",
+      "destinations": [
+        {
+          "guid": "de570000-0000-4000-8000-000000000001",
+          "app": { "guid": "a99a0000-0000-4000-8000-000000000002", "process": { "type": "web" } },
+          "weight": null,
+          "port": 8080,
+          "protocol": "http1",
+          "created_at": "2025-07-01T09:00:00Z",
+          "updated_at": "2025-07-01T09:00:00Z"
+        }
+      ],
+      "options": {},
+      "metadata": { "labels": {}, "annotations": {} },
+      "relationships": {
+        "space": { "data": { "guid": "5pace000-0000-4000-8000-00000000prod" } },
+        "domain": { "data": { "guid": "d0ma1n00-0000-4000-8000-00000000acme" } }
+      },
+      "links": {
+        "self": { "href": "https://api.cf.example.org/v3/routes/r0u7e000-0000-4000-8000-000000000001" },
+        "destinations": { "href": "https://api.cf.example.org/v3/routes/r0u7e000-0000-4000-8000-000000000001/destinations" }
+      }
+    },
+    {
+      "guid": "r0u7e000-0000-4000-8000-000000000002",
+      "created_at": "2026-02-10T08:00:00Z",
+      "updated_at": "2026-02-10T08:00:00Z",
+      "protocol": "http",
+      "host": "orders-srv",
+      "path": "",
+      "port": null,
+      "url": "orders-srv.cfapps.example.org",
+      "destinations": [
+        {
+          "guid": "de570000-0000-4000-8000-000000000002",
+          "app": { "guid": "a99a0000-0000-4000-8000-000000000001", "process": { "type": "web" } },
+          "weight": null,
+          "port": 8080,
+          "protocol": "http1",
+          "created_at": "2026-02-10T08:00:00Z",
+          "updated_at": "2026-02-10T08:00:00Z"
+        },
+        {
+          "guid": "de570000-0000-4000-8000-000000000003",
+          "app": { "guid": "a99a0000-0000-4000-8000-000000000001", "process": { "type": "web" } },
+          "weight": null,
+          "port": 9090,
+          "protocol": "http2",
+          "created_at": "2026-02-10T08:00:00Z",
+          "updated_at": "2026-02-10T08:00:00Z"
+        }
+      ],
+      "metadata": { "labels": {}, "annotations": {} },
+      "relationships": {
+        "space": { "data": { "guid": "5pace000-0000-4000-8000-00000000prod" } },
+        "domain": { "data": { "guid": "d0ma1n00-0000-4000-8000-000000cfapps" } }
+      },
+      "links": { "self": { "href": "https://api.cf.example.org/v3/routes/r0u7e000-0000-4000-8000-000000000002" } }
+    },
+    {
+      "guid": "r0u7e000-0000-4000-8000-000000000003",
+      "created_at": "2026-04-02T12:00:00Z",
+      "updated_at": "2026-04-02T12:00:00Z",
+      "protocol": "http",
+      "host": "inventory-java",
+      "path": "",
+      "port": null,
+      "url": "inventory-java.apps.internal",
+      "destinations": [
+        {
+          "guid": "de570000-0000-4000-8000-000000000004",
+          "app": { "guid": "a99a0000-0000-4000-8000-000000000004", "process": { "type": "web" } },
+          "weight": null,
+          "port": 8080,
+          "protocol": "http1",
+          "created_at": "2026-04-02T12:00:00Z",
+          "updated_at": "2026-04-02T12:00:00Z"
+        }
+      ],
+      "metadata": { "labels": {}, "annotations": {} },
+      "relationships": {
+        "space": { "data": { "guid": "5pace000-0000-4000-8000-00000000prod" } },
+        "domain": { "data": { "guid": "d0ma1n00-0000-4000-8000-0000internal" } }
+      },
+      "links": { "self": { "href": "https://api.cf.example.org/v3/routes/r0u7e000-0000-4000-8000-000000000003" } }
+    },
+    {
+      "guid": "r0u7e000-0000-4000-8000-000000000004",
+      "created_at": "2025-08-20T12:00:00Z",
+      "updated_at": "2025-08-20T12:00:00Z",
+      "protocol": "http",
+      "host": "docs",
+      "path": "/POISON-route-path",
+      "port": null,
+      "url": "docs.acme.example.com/POISON-route-path",
+      "destinations": [
+        {
+          "guid": "de570000-0000-4000-8000-000000000005",
+          "app": { "guid": "a99a0000-0000-4000-8000-000000000005", "process": { "type": "web" } },
+          "weight": null,
+          "port": 8080,
+          "protocol": "http1",
+          "created_at": "2025-08-20T12:00:00Z",
+          "updated_at": "2025-08-20T12:00:00Z"
+        },
+        {
+          "guid": "de570000-0000-4000-8000-000000000006",
+          "app": { "guid": "f0e1d2c3-0000-4000-8000-00000POISONAPP", "process": { "type": "web" } },
+          "weight": null,
+          "port": 8080,
+          "protocol": "http1",
+          "created_at": "2026-01-15T10:00:00Z",
+          "updated_at": "2026-01-15T10:00:00Z"
+        }
+      ],
+      "metadata": { "labels": {}, "annotations": { "contact": "route-owner@example.com" } },
+      "relationships": {
+        "space": { "data": { "guid": "5pace000-0000-4000-8000-000000000dev" } },
+        "domain": { "data": { "guid": "d0ma1n00-0000-4000-8000-00000000acme" } }
+      },
+      "links": { "self": { "href": "https://api.cf.example.org/v3/routes/r0u7e000-0000-4000-8000-000000000004" } }
+    },
+    {
+      "guid": "r0u7e000-0000-4000-8000-000000000005",
+      "created_at": "2024-03-01T10:00:00Z",
+      "updated_at": "2024-03-01T10:00:00Z",
+      "protocol": "tcp",
+      "host": "",
+      "path": "",
+      "port": 61001,
+      "url": "tcp.cfapps.example.org:61001",
+      "destinations": [
+        {
+          "guid": "de570000-0000-4000-8000-000000000007",
+          "app": { "guid": "a99a0000-0000-4000-8000-000000000003", "process": { "type": "web" } },
+          "weight": null,
+          "port": 8080,
+          "protocol": "tcp",
+          "created_at": "2024-03-01T10:00:00Z",
+          "updated_at": "2024-03-01T10:00:00Z"
+        }
+      ],
+      "metadata": { "labels": {}, "annotations": {} },
+      "relationships": {
+        "space": { "data": { "guid": "5pace000-0000-4000-8000-00000000prod" } },
+        "domain": { "data": { "guid": "d0ma1n00-0000-4000-8000-000000000tcp" } }
+      },
+      "links": { "self": { "href": "https://api.cf.example.org/v3/routes/r0u7e000-0000-4000-8000-000000000005" } }
+    },
+    {
+      "guid": "r0u7e000-0000-4000-8000-000000000006",
+      "created_at": "2024-11-01T10:00:00Z",
+      "updated_at": "2024-11-01T10:00:00Z",
+      "protocol": "http",
+      "host": "promo-2024",
+      "path": "",
+      "port": null,
+      "url": "promo-2024.acme.example.com",
+      "destinations": [],
+      "metadata": { "labels": {}, "annotations": {} },
+      "relationships": {
+        "space": { "data": { "guid": "5pace000-0000-4000-8000-000000000dev" } },
+        "domain": { "data": { "guid": "d0ma1n00-0000-4000-8000-00000000acme" } }
+      },
+      "links": { "self": { "href": "https://api.cf.example.org/v3/routes/r0u7e000-0000-4000-8000-000000000006" } }
+    },
+    {
+      "guid": "r0u7e000-0000-4000-8000-000000000007",
+      "created_at": "2026-09-20T10:00:00Z",
+      "updated_at": "2026-09-20T10:00:00Z",
+      "protocol": "http",
+      "host": "never-staged",
+      "path": "",
+      "port": null,
+      "url": "never-staged.oldcorp.example.net",
+      "destinations": [
+        {
+          "guid": "de570000-0000-4000-8000-000000000008",
+          "app": { "guid": "a99a0000-0000-4000-8000-000000000008", "process": { "type": "web" } },
+          "weight": null,
+          "port": 8080,
+          "protocol": "http1",
+          "created_at": "2026-09-20T10:00:00Z",
+          "updated_at": "2026-09-20T10:00:00Z"
+        }
+      ],
+      "metadata": { "labels": {}, "annotations": {} },
+      "relationships": {
+        "space": { "data": { "guid": "5pace000-0000-4000-8000-000000000dev" } },
+        "domain": { "data": { "guid": "d0ma1n00-0000-4000-8000-0000notlisted" } }
+      },
+      "links": { "self": { "href": "https://api.cf.example.org/v3/routes/r0u7e000-0000-4000-8000-000000000007" } }
+    }
+  ],
+  "included": {
+    "domains": [
+      {
+        "guid": "d0ma1n00-0000-4000-8000-00000000acme",
+        "created_at": "2024-01-10T10:00:00Z",
+        "updated_at": "2024-01-10T10:00:00Z",
+        "name": "acme.example.com",
+        "internal": false,
+        "router_group": null,
+        "supported_protocols": ["http"],
+        "metadata": { "labels": {}, "annotations": {} },
+        "relationships": { "organization": { "data": { "guid": "0a1b2c3d-0000-4000-8000-000000000001" } }, "shared_organizations": { "data": [] } }
+      },
+      {
+        "guid": "d0ma1n00-0000-4000-8000-000000cfapps",
+        "created_at": "2023-01-01T00:00:00Z",
+        "updated_at": "2023-01-01T00:00:00Z",
+        "name": "cfapps.example.org",
+        "internal": false,
+        "router_group": null,
+        "supported_protocols": ["http"],
+        "metadata": { "labels": {}, "annotations": {} },
+        "relationships": { "organization": { "data": null }, "shared_organizations": { "data": [] } }
+      },
+      {
+        "guid": "d0ma1n00-0000-4000-8000-0000internal",
+        "created_at": "2023-01-01T00:00:00Z",
+        "updated_at": "2023-01-01T00:00:00Z",
+        "name": "apps.internal",
+        "internal": true,
+        "router_group": null,
+        "supported_protocols": ["http"],
+        "metadata": { "labels": {}, "annotations": {} },
+        "relationships": { "organization": { "data": null }, "shared_organizations": { "data": [] } }
+      },
+      {
+        "guid": "d0ma1n00-0000-4000-8000-000000000tcp",
+        "created_at": "2023-01-01T00:00:00Z",
+        "updated_at": "2023-01-01T00:00:00Z",
+        "name": "tcp.cfapps.example.org",
+        "internal": false,
+        "router_group": { "guid": "r0u7ergr-0000-4000-8000-000000000tcp" },
+        "supported_protocols": ["tcp"],
+        "metadata": { "labels": {}, "annotations": {} },
+        "relationships": { "organization": { "data": null }, "shared_organizations": { "data": [] } }
+      }
+    ]
+  }
+}

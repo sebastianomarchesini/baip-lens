@@ -1,12 +1,17 @@
 import type { CheckDefinition } from '../checks.js';
 import type { AppRef, Finding } from '../model/finding.js';
 import type { RawData, RawProject } from '../model/raw.js';
-import type { RuleMeta } from '../model/snapshot.js';
+import type { CheckResult } from '../model/check.js';
+import type { AppUsage, RuleMeta, SnapshotOptions } from '../model/snapshot.js';
 
 export interface AnalyzerContext {
   /** Reference time: the scan time, so offline re-analysis is reproducible. */
   now: Date;
   raw: RawData;
+  /** The collector checks of the scan, for a rule that uses an optional collector. */
+  checks: readonly CheckResult[];
+  /** The scan options the snapshot recorded (e.g. `--min-traffic-window`). */
+  options: SnapshotOptions;
   /** Resolves an app guid (or a `project:<id>` guid) to the names used in findings. */
   appRef: (appGuid: string) => AppRef | undefined;
   /** The names a finding about a local project carries. */
@@ -19,6 +24,13 @@ export interface Analyzer {
   /** Collector checks that must have run for the result to be meaningful. */
   requires: string[];
   analyze(context: AnalyzerContext): Finding[];
+  /**
+   * The rule's verdict per app for the inventory, for a rule that has one
+   * (`APP_IDLE`). Called whenever the rule applies to the scan, including when
+   * a collector it needs was skipped (`complete` is false), so the inventory
+   * can say "unknown" instead of looking like "no finding".
+   */
+  usage?(context: AnalyzerContext, complete: boolean): ReadonlyMap<string, AppUsage>;
 }
 
 export const RULES_DOC_URL =

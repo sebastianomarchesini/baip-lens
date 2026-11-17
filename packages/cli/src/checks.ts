@@ -22,6 +22,21 @@ export const COLLECTOR_CHECKS = {
     title: 'Current droplets (GET /v3/droplets?current=true)',
     roles: ['SpaceAuditor'],
   },
+  routes: {
+    id: 'collect.routes',
+    title: 'Routes and their destinations (GET /v3/routes?include=domain)',
+    roles: ['SpaceAuditor'],
+  },
+  processes: {
+    id: 'collect.processes',
+    title: 'Web processes (GET /v3/processes?types=web)',
+    roles: ['SpaceAuditor'],
+  },
+  traffic: {
+    id: 'collect.traffic',
+    title: 'Last router request per app (Log Cache GET /api/v1/read)',
+    roles: ['SpaceAuditor'],
+  },
   project: {
     id: 'collect.project',
     title:
@@ -30,8 +45,46 @@ export const COLLECTOR_CHECKS = {
   },
 } as const satisfies Record<string, CheckDefinition>;
 
+/**
+ * A check that cannot run and knows why better than a generic message: the
+ * recorder records it as skipped with this reason code and text. Used where
+ * the status code alone would mislead, e.g. Log Cache answers 404, never 403,
+ * when the caller may not read an app's logs.
+ */
+export class CheckSkipError extends Error {
+  override readonly name = 'CheckSkipError';
+
+  constructor(
+    readonly reasonCode: SkipReasonCode,
+    readonly reason: string,
+  ) {
+    super(reason);
+  }
+}
+
 function roleText(roles: readonly CfRole[]): string {
   return roles.length === 0 ? 'no CF role' : roles.join(' or ');
+}
+
+/**
+ * What stopped the skipped checks, as the words after "N check(s)". The role
+ * is blamed only when a missing role is all that stopped them (a check that
+ * depends on a forbidden one counts too), never for a check that was turned
+ * off or whose service is absent or did not answer. The report words it the
+ * same way (packages/ui/src/data/summary.ts, which cannot import this file).
+ */
+export function skippedPhrase(skipped: readonly CheckResult[]): string {
+  const codes = skipped.map((check) => check.reasonCode);
+  if (
+    codes.includes('insufficient_role') &&
+    codes.every((code) => code === 'insufficient_role' || code === 'dependency_skipped')
+  ) {
+    return 'could not run with your role';
+  }
+  if (codes.length > 0 && codes.every((code) => code === 'disabled')) {
+    return codes.length === 1 ? 'was turned off' : 'were turned off';
+  }
+  return 'did not run';
 }
 
 /**
@@ -58,7 +111,9 @@ export class CheckRecorder {
       return value;
     } catch (error) {
       if (error instanceof CfAuthError || error instanceof ConfigError) throw error;
-      if (error instanceof CfForbiddenError) {
+      if (error instanceof CheckSkipError) {
+        this.skip(check, error.reasonCode, error.reason);
+      } else if (error instanceof CfForbiddenError) {
         this.skip(check, 'insufficient_role', `insufficient role: needs ${roleText(check.roles)}`);
       } else {
         const message = error instanceof Error ? error.message : String(error);

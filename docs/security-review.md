@@ -15,7 +15,7 @@ Verdicts: **✅ verified** (present in code and covered by a test), **🔧 fixed
 | Item | Verdict | Where |
 |---|---|---|
 | GET-only to the CF API; every other method and every unknown host refused before `fetch` (constraint 1) | ✅ | `net/allowlist.ts` `EgressPolicy.authorize`, `test/unit/allowlist.test.ts`, `cfClient.test.ts` |
-| SEC-02 token bound to host: `Authorization` allowed only where the rule says so | ✅ | `allowAuthorization` per rule; the client throws on a header to a public host |
+| SEC-02 token bound to host: `Authorization` allowed only where the rule says so | ✅ | `credentials` per rule: `bearer` (the CF token) for the CF API and the log cache, `basic` for the UAA token endpoint, none elsewhere; the client throws before `fetch` on a credential the host may not receive and on any other kind of `Authorization` header (`test/unit/httpClient.test.ts`, `allowlist.test.ts`) |
 | SEC-03 no redirects on any request | ✅ | `redirect: 'manual'` in `httpClient.ts`; a 3xx from CF is an error ("redirect not followed") |
 | SEC-09 discovered links must be `https:` | ✅ | `authorize` denies any non-https URL, so a `http:` UAA link can never be called |
 | SEC-13 `report --from` is offline | ✅ | `runReport` never constructs an `HttpClient`; `cli.test.ts` injects a fetch that rejects |
@@ -35,7 +35,7 @@ Verdicts: **✅ verified** (present in code and covered by a test), **🔧 fixed
 | SEC-18 no file names from CF names | ✅ | `snapshot-<timestamp>.json` and fixed report names |
 | SEC-19 SBOM parsing | ⏳ | `sbom` command not implemented yet |
 | SEC-20 SARIF without local paths | ✅ | pseudo-URIs `cf/<org>/<space>/<app>`, percent-encoded |
-| SEC-21 snapshot input validated and size-capped | ✅ / 🔧 | strict zod parse, schema version check; **fixed now:** 256 MB cap before parsing (`snapshot.ts`, `files.test.ts`) |
+| SEC-21 snapshot input validated and size-capped | ✅ / 🔧 | zod parse with a schema version check. Unknown keys are **dropped, not rejected** (a deviation from the recommendation below): an older or newer snapshot stays readable, and nothing unknown reaches a report or the next snapshot (`leak.test.ts` plants unknown fields in a `--previous` file). 256 MB cap before parsing, also counted while reading, so it holds for a pipe such as `--previous <(...)` (2026-11-17). A file that is not JSON is reported with its line and column only, never with an excerpt (`snapshot.ts`, `files.test.ts`) |
 | SEC-22 private output modes and warning | 🔧 | `io/files.ts`: directories `0700`, files `0600` (`files.test.ts`); guided mode prints the sharing warning. `scan` and `report` print the sharing warning (added 2026-10-03) |
 | SEC-23 `report --redact` | ⏳ | not implemented; needed before testers share screenshots (campaign Phase 0) |
 | Fixture linter (no e-mails, tokens, real hosts, IPs) | ⏳ | Fixtures use `example.org` and synthetic GUIDs, and `leak.test.ts` covers outputs, but there is no test that lints the fixture files themselves |

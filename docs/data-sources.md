@@ -59,7 +59,7 @@ app_usage_events: { cutoff_age_in_days: 31 }
 audit_events:     { cutoff_age_in_days: 31 }
 ```
 
-⚠️ The SAP BTP retention value is not published. **Assume 31 days.** Consequence: "no usage events in 180 days" cannot be proven from events (see `APP_IDLE` in §4).
+⚠️ The SAP BTP retention value is not published. **Assume 31 days.** Consequence: "no usage events in 180 days" cannot be proven from events, so `APP_IDLE` reads no events at all; it uses routes, processes and router access logs instead (§4, §9).
 
 ---
 
@@ -67,7 +67,7 @@ audit_events:     { cutoff_age_in_days: 31 }
 
 All endpoints are **GET**. "SA" = Space Auditor; "SD" = Space Developer.
 
-**Status in 0.1.0:** the bootstrap calls, `apps.ts` and `droplets.ts` are implemented and are the only CF calls the scan makes. The other rows are verified endpoints for the collectors of the next releases; nothing calls them yet.
+**Status:** the bootstrap calls, `apps.ts` and `droplets.ts` (since 0.1.0) and `routes.ts` and `processes.ts` (for `APP_IDLE`, §9) are implemented and are the only CF calls the scan makes. The other rows are verified endpoints for the collectors of the next releases; nothing calls them yet.
 
 | Collector | Endpoint | Key fields used | Min. role | SA? | Notes |
 |---|---|---|---|---|---|
@@ -76,11 +76,11 @@ All endpoints are **GET**. "SA" = Space Auditor; "SD" = Space Developer.
 | (bootstrap) | `GET /v3/spaces?organization_guids=<g>[&names=<space>]` | `guid`, `name`, `relationships.organization` | any role | ✅ | Filtered to visible spaces. |
 | `apps.ts` | `GET /v3/apps?organization_guids=<org>&per_page=5000` (`space_guids=<space>` with `--space`) | `guid`, `name`, `state` (`STARTED`/`STOPPED`), `created_at`, `updated_at`, `lifecycle.type` (`buildpack`/`cnb`/`docker`), `lifecycle.data.buildpacks[]`, `lifecycle.data.stack`, `relationships.space`, `relationships.current_droplet` | any role | ✅ | `lifecycle.data.buildpacks` may be `[]` and `stack` may be `null` for old records. |
 | `droplets.ts` | `GET /v3/droplets?organization_guids=<org>&current=true&per_page=5000` (`space_guids=<space>` with `--space`) | `guid`, `state`, `created_at`, `updated_at`, `lifecycle.type`, `buildpacks[].{name,buildpack_name,version,detect_output}` (top-level on droplets, unlike apps), `stack`, `image`, `relationships.app` | any role | ✅ | One call instead of N× `/v3/apps/:guid/droplets/current`. `GET /v3/droplets/:guid` notes "some fields are redacted" for SA. ⚠️ The exact redacted fields are not documented; we do not rely on `execution_metadata` or `process_types`. Docker droplets have `image` and no buildpacks. |
-| `processes.ts` | `GET /v3/processes?space_guids=…&per_page=5000` | `type`, `instances`, `memory_in_mb`, `disk_in_mb`, `health_check.type`, `updated_at`, `relationships.app` | any role | ✅ | |
+| `processes.ts` | `GET /v3/processes?types=web&per_page=5000` with `organization_guids=<org>` (`space_guids=<space>` with `--space`) | `type`, `instances`, `health_check.type`, `updated_at`, `relationships.app` | any role | ✅ | Implemented (§9.2). `command` is never read. The legacy health check type `none` is read as `process`, as Cloud Controller's own manifest code does. |
 | `processes.ts` | `GET /v3/processes/:guid/stats` | `state` (`RUNNING`/`CRASHED`/`STARTING`/`STOPPING`/`DOWN`), `uptime`, `usage.{cpu,mem,disk}`, `mem_quota` | SA (redacted) | ✅ | "Some fields are redacted" for SA. ⚠️ Treat `host`, `instance_internal_ip` and `instance_ports` as possibly missing. **Never** written to reports (infrastructure detail). Only called for `STARTED` apps. |
 | `buildpacks.ts` | `GET /v3/buildpacks?per_page=5000` | `name`, `stack`, `state`, `enabled`, `position`, `filename`, `lifecycle`, `updated_at` | any role | ✅ | ⚠️ **There is no `version` field.** The platform's current version must be parsed from `filename` (e.g. `nodejs_buildpack-cflinuxfs4-v1.8.40.zip`). If parsing fails, `BUILDPACK_OUTDATED` falls back to comparing the droplet's `created_at` with the buildpack's `updated_at`, at lower confidence. |
 | `stacks.ts` | `GET /v3/stacks?per_page=5000` | `name`, `state` (`ACTIVE`/`RESTRICTED`/`DEPRECATED`/`DISABLED`), `state_reason`, `default`, `description` | any role | ✅ | Use `state` as the primary signal. ⚠️ The `state` field is newer, so older CC versions may omit it. Fall back to a built-in list (`cflinuxfs3` deprecated) and flag the result as "static list". |
-| `routes.ts` | `GET /v3/routes?space_guids=…&per_page=5000` | `url`, `protocol` (`http`/`tcp`), `host`, `path`, `destinations[].app.guid` | any role | ✅ | Feeds the UI5 probe (§3.3). `/v3/apps/:guid/routes` (SA allowed) is the per-app fallback. |
+| `routes.ts` | `GET /v3/routes?space_guids=…&include=domain&per_page=5000`, 50 space GUIDs per request | `protocol` (`http`/`tcp`), `destinations[].app.guid`, `relationships.{space,domain}`, `included.domains[].internal` | any role | ✅ | Implemented (§9.1). By space, not org, so routes shared into a scanned space count. `url`, `host`, `path` and `port` are not read yet; the UI5 probe (§3.3) will need the URL. |
 | `serviceBindings.ts` | `GET /v3/service_credential_bindings?type=app&app_guids=…&per_page=5000` | `name`, `type`, `relationships.app`, `relationships.service_instance`, `last_operation.state` | SA | ✅ | Metadata only. `GET …/:guid/details` (the credentials) is **SD-only and never called**. |
 | `usageEvents.ts` | `GET /v3/app_usage_events?created_ats[gt]=<now-31d>&order_by=-created_at&per_page=5000` | `created_at`, `state.{current,previous}`, `app.guid`, `space.guid`, `instance_count` | "All Roles" | ✅ / ⚠️ | ⚠️ Listed as "All Roles", but the doc does not say how results are filtered for space-scoped users. On BTP it may return 403 or an empty list for SA. Treat both as `skipped` and fall back to audit events. Ignore `app.name`/`task.name` beyond matching. |
 | `auditEvents.ts` | `GET /v3/audit_events?space_guids=…&types=audit.app.start,audit.app.stop,audit.app.restage,audit.app.droplet.create,audit.app.build.staged,audit.app.process.crash,app.crash&created_ats[gt]=<now-31d>&per_page=5000` | `type`, `created_at`, `target.guid` | **Org Auditor** or SA | ✅ | 🔒 Contains `actor.guid`, `actor.name` and `actor.type` (user identity). The collector **drops `actor.*` and `data` at parse time**; the zod schema strips them before anything reaches the snapshot. |
@@ -134,8 +134,8 @@ All endpoints are **GET**. "SA" = Space Auditor; "SD" = Space Developer.
 
 ⚠️ Many BTP apps bootstrap UI5 from the CDN (`ui5.sap.com/<version>/resources/...`), so the file is 404 on the app route. That case becomes `unknown` in v0.1. Parsing `index.html` for the bootstrap `src` is a candidate for v0.2.
 
-### 3.4 Log cache (v0.2, not used in v0.1)
-Discovered via `GET /` → `links.log_cache`. It is listed in the allow-list now so the config shape is stable.
+### 3.4 Log cache
+Discovered via `GET /` → `links.log_cache`, never derived from the API host name. Read by the traffic check of `APP_IDLE` (`packages/cli/src/collectors/traffic.ts`); the endpoint, its parameters, the response shape, the roles it accepts and what it retains are verified in [§9](#9-traffic-and-route-signals-for-app_idle).
 
 ---
 
@@ -146,7 +146,7 @@ Discovered via `GET /` → `links.log_cache`. It is listed in the allow-list now
 | `RUNTIME_NODE_EOL` / `RUNTIME_JAVA_EOL` | droplet `buildpacks[]` + endoflife.date | Version format varies by buildpack | Parse per buildpack; otherwise `unknown`. Java → `sapmachine` if `sap_java_buildpack`, else `eclipse-temurin`. |
 | `BUILDPACK_OUTDATED` | droplet `buildpacks[].version` vs `/v3/buildpacks` `filename` | No `version` field on buildpacks | Parse from `filename`; fall back to date comparison, flagged as lower confidence in evidence. |
 | `STACK_DEPRECATED` | app `lifecycle.data.stack` or droplet `stack` + `/v3/stacks` `state` | `state` may be absent on old CCs | `state` ∈ {`DEPRECATED`,`RESTRICTED`,`DISABLED`} → finding; otherwise use the static list. |
-| `APP_IDLE` | app `state`/`updated_at`, audit and usage events | **Events are kept ~31 days** | "Stopped > 90 days": `state=STOPPED` and `app.updated_at` older than 90 days (`updated_at` is an upper bound on the last change). "Running, no activity in 180 days": droplet `created_at` and process `updated_at` older than 180 days **and** no events in the retention window. Evidence states the window used. |
+| `APP_IDLE` | app `state`/`updated_at`, routes, `web` processes, router access logs in Log Cache (§9) | Events are kept ~31 days, so they are not used; Log Cache holds **hours, not days** (§9.6) | Stopped > 90 days: `state=STOPPED` and `updated_at` older than 90 days (`updated_at` is the last change, so the app has been stopped at least that long). Started with an instanced `web` process and no route: idle, high confidence. An external HTTP route and no router access log in the window Log Cache holds: idle, medium confidence only when the droplet and the `web` processes are unchanged for 180 days; a window shorter than `--min-traffic-window` is `unknown`. Workers are never judged by routes or traffic (D7), TCP and internal routes are `unknown` (D6). Evidence states the window. With `scan --previous`, 3 or more scans in a row without a request over 30 days or more give high confidence at low severity (D8, D9). |
 | `APP_NO_RECENT_DEPLOY` | current droplet `created_at` | — | Direct. |
 | `UI5_OUT_OF_MAINTENANCE` | app route probe + versionoverview | Protected or CDN-bootstrapped apps are not detectable | `unknown` is reported in inventory, not as a finding. |
 | `SAP_PKG_OUTDATED` | local SBOM (`sbom` command) + npm registry | ⚠️ **The npm registry is not in the allow-list** | See decision D1. |
@@ -181,20 +181,20 @@ Mitigation for report mode:
 
 ---
 
-## 6. Allow-list (to become `packages/cli/src/net/allowlist.ts`)
+## 6. Allow-list (`packages/cli/src/net/allowlist.ts`)
 
-| Host | Methods | Source |
-|---|---|---|
-| `--api` host | GET | user flag |
-| `links.uaa` host | POST `/oauth/token` only | CF root |
-| `links.log_cache` host | GET (v0.2) | CF root |
-| mapped app route hosts in the scanned org | GET `/resources/sap-ui-version.json` only, no auth header, no redirects (planned; not called in 0.1.0) | CF routes |
-| `api.osv.dev` | POST `/v1/querybatch`, GET `/v1/vulns/*` | fixed |
-| `endoflife.date` | GET `/api/v1/products/*` | fixed |
-| `ui5.sap.com` | GET `/versionoverview.json` | fixed |
-| `registry.npmjs.org` | GET `/@sap%2F{cds,approuter,xssec,xsenv}` only | fixed (D1) |
+| Host | Methods | Credentials it may receive | Source |
+|---|---|---|---|
+| `--api` host | GET | the CF token | user flag |
+| `links.uaa` host | POST `/oauth/token` only | the OAuth client id and secret (Basic), never the CF token | CF root |
+| `links.log_cache` host | GET `/api/v1/read/<app-guid>` only (no meta, info or PromQL) | the CF token | CF root |
+| mapped app route hosts in the scanned org | GET `/resources/sap-ui-version.json` only, no redirects (planned; not called yet) | none | CF routes |
+| `api.osv.dev` | POST `/v1/querybatch`, GET `/v1/vulns/*` | none | fixed |
+| `endoflife.date` | GET `/api/v1/products/*` | none | fixed |
+| `ui5.sap.com` | GET `/versionoverview.json` | none | fixed |
+| `registry.npmjs.org` | GET `/@sap%2F{cds,approuter,xssec,xsenv}` only | none | fixed (D1) |
 
-Any other host, or any other method, throws `EgressDeniedError` before `fetch` runs. This is covered by a unit test.
+Every rule lists the kinds of `Authorization` header it may receive (`credentials`): `bearer` for the CF API and the log cache, `basic` for the UAA token endpoint, none for the others. A header of any other kind is refused everywhere. Any other host, any other method, or a credential a host may not receive throws `EgressDeniedError` before `fetch` runs. Unit tests cover each refused combination through the HTTP client, with nothing reaching `fetch`, and a scan test asserts that the CF token went to the CF API and the log cache only.
 
 ---
 
@@ -204,6 +204,11 @@ Any other host, or any other method, throws `EgressDeniedError` before `fetch` r
 - **D2: both roles documented for `--deep`.** Space Developer or Space Supporter can read `/environment_variables`. `permissions.md` notes that Supporter is narrower but can still restart and scale apps.
 - **D3: route probe on by default.** One unauthenticated GET per app, 5 s timeout, no redirects. `--no-probe-routes` turns it off.
 - **D4: dedicated repository.** BAIP Lens lives at the root of [`sebastianomarchesini/BAIP-Lens`](https://github.com/sebastianomarchesini/BAIP-Lens) as an npm-workspaces monorepo (`packages/cli`, `packages/ui`).
+- **D5 (2026-11-13): `--min-traffic-window` defaults to 12 hours**, not 24. §9.6 found that one probed SAP BTP Log Cache node had been up 16.2 h and that an app's own metrics and log volume shrink its window further, so a 24-hour minimum would make `unknown` the answer for almost every app. 12 h keeps the guard against judging an app on a few minutes of history while still letting a normal scan say something. The flag remains configurable and the observed window is always in the evidence.
+- **D6 (2026-11-13): apps reachable only over TCP or an internal domain are `unknown`**, with no separate signal value. §9.3 confirmed that neither traffic class produces a router access log at all (`cf-tcp-router` emits none, and container-to-container traffic bypasses gorouter), so their traffic is not measurable in principle. They share the `unknown` state of apps with no data rather than carrying a third label, because one state fewer is one state less to explain. An `unknown` app has no finding; its reason (`traffic_not_measurable`) is in the inventory, which the report's Usage column and the apps CSV show.
+- **D7 (2026-11-15): a started app whose `web` process has the `process` health check is a worker, and `APP_IDLE` never flags it for a missing route or missing traffic.** Cloud Foundry documents that health check type for an app that "does not support TCP connections. An example of such an app is a worker" (`healthchecks.html#types`), and Cloud Controller maps the legacy `none` to it. This extends the spec's "apps with no web process (workers, jobs) are never flagged" to workers pushed as `web` with `no-route`, which would otherwise all be reported as unused with high confidence. Confirmed by the owner. A worker **stopped** for more than 90 days is still flagged as stopped, like any app: a stopped app serves nothing, so whether it would have listened for requests does not matter.
+- **D8 (2026-11-16): a scan counts in the traffic history of `scan --previous` only when it could have reported `no_traffic` on its own.** A window of at least `--min-traffic-window` without a request extends the run of scans without traffic, and a request ends it; a shorter window, an empty cache or no read at all leaves the history as it was. Otherwise a short window seen scan after scan would add up to high confidence for an app whose logs Log Cache never keeps for long: a chatty app can fill its 100 000-envelope cap in seconds (§9.6). Confirmed by the owner. Applied to the inventory as well (review of 2026-11-17): an app the scan cannot see — outside `--space`, in a space none of whose apps is visible this time, or any app when the inventory could not be read in full — is "no read", so its entry is kept unchanged. Only an app missing from a space whose apps the scan read is dropped, since app visibility in Cloud Foundry is granted per space.
+- **D9 (2026-11-16): high confidence from the history keeps severity `low`**, like `no_route`, which is high confidence too: an unused app is waste and attack surface, not a vulnerability, and `--fail-on medium` should not fail on it. Confirmed by the owner.
 
 ---
 
@@ -270,3 +275,222 @@ The three sources read are deep-merged in that order (a string under `requires` 
 - SAPUI5 CDN URL forms (specific, evergreen, unversioned) and the CDN removal one year after end of maintenance (SAP Note 3001696) from the `SAP-docs/sapui5` mirror (`docs/04_Essentials/variant-for-bootstrapping-from-content-delivery-network-2d3eb2f.md`, `bootstrapping-loading-and-initializing-a04b0d1.md`).
 - The Cloud MTA Build Tool defaults (`mta_archives/`, module folder as build result, `build-parameters.ignore`) from the `SAP/cloud-mta-build-tool` mirror (`docs/docs/usage.md`, `configuration.md`); `gitignore(5)` from the `git/git` mirror (`Documentation/gitignore.adoc`).
 - **OWASP Top 10 (2025):** the category names and the URL pattern `https://owasp.org/Top10/2025/<id>_2025-<Title_with_underscores>/` were verified from `2025/mkdocs.yml` in the `OWASP/Top10` GitHub repository (`site_url` and the `nav` entries, for example `A07 Authentication Failures: en/A07_2025-Authentication_Failures.md`); `packages/cli/src/model/owasp.ts` holds the map and builds every link from that one pattern. The 2025 edition merged "Vulnerable and Outdated Components" into A03 Software Supply Chain Failures.
+
+---
+
+## 9. Traffic and route signals for `APP_IDLE`
+
+What `APP_IDLE` needs beyond §2: which apps have a route, which have a `web` process, and when a router last served a request for them. This section records what was confirmed **before** the collectors were written; §9.7 says how the code (`collectors/routes.ts`, `collectors/processes.ts`, `collectors/traffic.ts`, `http/logCacheClient.ts`, `analyzers/idleApps.ts`) follows it.
+
+- **Verified on:** 2026-11-13.
+- **Log Cache source of truth:** [`cloudfoundry/log-cache-release`](https://github.com/cloudfoundry/log-cache-release) at tag **`v3.2.17`**, the version SAP BTP reports (below). Its API documentation is [`src/README.md`](https://github.com/cloudfoundry/log-cache-release/blob/v3.2.17/src/README.md); `docs.cloudfoundry.org` has no Log Cache API reference of its own and points there. Behaviour was read from `src/internal/auth/cf_auth_middleware.go`, `src/internal/cache/log_cache.go`, `src/internal/cache/store/store.go` and `src/internal/syslog/server.go`.
+- **Router side:** [`cloudfoundry/routing-release`](https://github.com/cloudfoundry/routing-release) (`src/code.cloudfoundry.org/gorouter/accesslog/*`, `jobs/gorouter/templates/gorouter.yml.erb`) and [`cloudfoundry/loggregator-agent-release`](https://github.com/cloudfoundry/loggregator-agent-release) (`src/pkg/egress/syslog/rfc5424.go`, `src/pkg/egress/syslog/log_source.go`, `jobs/loggr-syslog-agent/spec`). `cf-deployment` v60.11.0 pins **routing-release 0.397.0** and **loggregator-agent-release 8.3.31**; ⚠️ the files above were read on the moving `develop` and `main` branches, which matched those releases on the points used here.
+- **CF v3 source of truth:** as §1, re-read at `cloud_controller_ng` commit `d8e6494c` (= capi-release 1.250.0 = **CC API 3.235.0**, the version SAP BTP reports) and at `main` (`5a849387`, API 3.238.0). The routes, destinations, domains, processes and apps docs are identical in both, and unchanged since the commit named in §1.
+- **Platform version observed** (unauthenticated `GET /`, `GET /v3/info`, `GET /api/v1/info` on `eu10` and `us10-001`, 2026-11-12): CC API **3.235.0**, `/v3/info` `build v60.11.0` of `cf-deployment`, Log Cache **3.2.17**. Upstream [`cf-deployment` v60.11.0](https://github.com/cloudfoundry/cf-deployment/blob/v60.11.0/cf-deployment.yml) pins capi-release 1.250.0 and log-cache 3.2.17, so the sources above are the ones running there — unless SAP patches them, which SAP does not document.
+
+Legend as in §1: ✅ confirmed in primary docs or source · 🟡 confirmed second-hand · ⚠️ not confirmed, implemented defensively.
+
+### 9.1 Routes and destinations (item 1) ✅
+
+**One call covers the whole route side:** `GET /v3/routes?space_guids=<spaces>&per_page=5000&include=domain`, following `pagination.next`.
+
+- **Destinations are embedded in every route object of a list response** ✅. The list renders each resource with the same presenter, which always builds `destinations` from the route's mappings. Each destination carries `guid`, `app.guid`, `app.process.type`, `weight` (deprecated, nullable), `port`, `protocol`, `created_at`, `updated_at`. A route holds at most 100 destinations, and `destinations[].created_at` is when that mapping was made.
+- **Route fields** ✅: `guid`, `created_at`, `updated_at`, `protocol`, `host`, `path`, `port` (nullable), `url` (no scheme), `destinations`, `relationships.{space,domain}`, `options` (**the key is omitted when unset**), `metadata`, `links`.
+- **`include`** accepts `domain`, `space`, `space.organization` and `route_policies`; `per_page` is 1–5000 ✅. `include=domain` returns the domain objects under `included.domains` with `name`, **`internal`**, `supported_protocols` and `router_group`.
+- **Scope filters** ✅: `organization_guids` matches the **owning** space's org; `space_guids` matches routes owned by *or shared into* those spaces; `app_guids` matches routes with a destination for those apps. Filters combine with AND. The collector filters by `space_guids`, as `apps.ts` does, so a route shared in from another org is not missed and does not become a false `no_route`.
+- **Protocol** ✅: the route `protocol` is `http` or `tcp` and is derived from the domain, not stored on the route. ⚠️ **A route on an internal domain still reports `protocol: "http"`**, so an internal route is recognised only by `domain.internal === true`. A TCP route has `protocol: "tcp"` and a non-null `port`.
+- **Roles** ✅: `GET /v3/routes`, `/v3/processes` and `/v3/domains` are "All Roles" with results filtered by role; `GET /v3/routes/:guid` and `/v3/routes/:guid/destinations` name Space Auditor and Org Auditor; `GET /v3/apps/:guid/routes` names Space Auditor but **not** Org Auditor.
+- **A missing role is never a 403 here** ✅. List endpoints answer 200 with a filtered, possibly empty list; single-resource reads answer 404. 403 appears only when the token lacks the read scope. The `insufficient_role` path of `CheckRecorder` therefore cannot fire for these endpoints, exactly as §2.1 already notes for apps and droplets.
+- ⚠️ **Shared routes:** with the experimental `route_sharing` feature flag a route can be shared across spaces and orgs, and the presenter renders every mapping with **no permission check**, so `destinations[].app.guid` can name an app in a space the scanning user cannot read (while `GET /v3/routes/:guid` answers 404 for that same route). The collector ignores destinations whose app is not in the scanned inventory and never writes their GUIDs anywhere. Whether the flag is on in SAP BTP is undocumented; SAP's cockpit documentation says a route maps to an app in the same space.
+
+### 9.2 Processes ✅
+
+`GET /v3/processes?space_guids=<spaces>&types=web&per_page=5000` ("All Roles", `per_page` 1–5000) gives `type`, `instances`, `updated_at` and `relationships.app`.
+
+- `instances` is the **desired** count, and the process object has **no state**; whether the app runs comes from the app's `state`. Both are desired state, so a `STARTED` app whose instances are all crashed still counts as started ✅.
+- ⚠️ **An app can have more than one `web` process**: a rolling or canary deployment creates a second one. The analyzer takes the maximum over the app's `web` processes.
+- **Redaction** ✅: for a Space Auditor only `command` is redacted (`[PRIVATE DATA HIDDEN IN LISTS]` in every list response, for every caller). Nothing `APP_IDLE` needs is affected, and BAIP Lens does not read `command` at all (§2, privacy.md).
+- **Running a `web` process with no route is a supported configuration** ✅ (the manifest's `no-route`), which is why `no_route` is a low-severity signal and not an error. The process's `health_check.type` (`port`, `http` or `process`; default `port`) goes into the evidence, because `process` plus no route is far more likely a worker than a forgotten app.
+- ⚠️ **`updated_at` triggers are undocumented.** The docs define `updated_at` only as "the time with zone when the object was last updated"; the start, stop, restart, scale, destination and droplet endpoints say nothing about it. From the model code: starting or stopping an app changes `app.updated_at` only when the desired state really changes (restarting an already-started app does **not**); scaling a process always changes `process.updated_at`; mapping or unmapping a route explicitly sets `updated_at` on each targeted process but leaves `route.updated_at` alone; assigning a current droplet (the end of a restage) always changes `app.updated_at`. Every rule that reads these timestamps treats them as an **upper bound** on the last change, as §4 already does for the "stopped > 90 days" branch.
+
+### 9.3 Log Cache: reading an app's envelopes (item 2) ✅
+
+The host comes **only** from `links.log_cache` of `GET /` (§1.1); it is absent when log cache is not deployed. It is the one host besides the CF API that may receive the CF token (§9.7).
+
+`GET /api/v1/read/<source-id>` — GET only, bound as `get "/api/v1/read/{source_id=**}"`. For an app the source id is its **GUID** (the API docs also accept an app name or a component name).
+
+| Parameter | Type and unit | Default | Notes |
+| --- | --- | --- | --- |
+| `start_time` | int64, UNIX **nanoseconds** | start of the cache | **inclusive** |
+| `end_time` | int64, UNIX **nanoseconds** | current time of the cache | **exclusive** — the docs write the range as `[starttime..endtime)` |
+| `envelope_types` | enum, repeatable | all types | `LOG`, `COUNTER`, `GAUGE`, `TIMER`, `EVENT`; **repeat the parameter** for several types. A comma-separated list is parsed as one value and fails; names must be upper case |
+| `limit` | int64, envelopes | **100** | **maximum 1000** |
+| `descending` | bool | **false = ascending** | |
+| `name_filter` | Go regexp | — | in the proto and enforced by the store, **not** in the API docs. It matches counter, gauge and timer *names* only, so setting it removes every `LOG` envelope |
+
+Consequences, all confirmed in the store and gateway code:
+
+- **`descending=true` must always be sent.** The default walks *upwards* from the oldest envelope, so a default read returns the **oldest** envelopes held, not the newest ✅.
+- **`limit` above 1000 is rejected, not clamped**, and the error is a plain Go error: gRPC turns it into `Unknown`, which the gateway maps to **HTTP 500** with a `google.rpc.Status` body — not 400 ✅. An unparsable parameter (non-integer `limit`, unknown envelope type, non-boolean `descending`) is `InvalidArgument` = **400**. Unknown query parameters are ignored.
+- **Response shape** ✅: `{"envelopes":{"batch":[...]}}` plus a newline. The gateway marshals with `UseProtoNames: true, EmitUnpopulated: true`, so envelope keys are **snake_case** (`source_id`, not `sourceId`) and empty values are emitted (`deprecated_tags: {}`). Per envelope: `timestamp`, `source_id`, `instance_id`, `tags` (string → string), `deprecated_tags`, and at most one of `log`, `counter`, `gauge`, `timer`, `event`.
+- **`timestamp` is a JSON string of decimal int64 nanoseconds** (about 1.7e18, far beyond `Number.MAX_SAFE_INTEGER`) ✅. It must be parsed with a digits-only schema and handled as `BigInt`, never round-tripped through `Number`.
+- **`log.payload` is base64** (a proto `bytes` field) and `log.type` is `"OUT"` or `"ERR"` ✅. The payload is **never decoded, stored or logged**: only the timestamp and `tags.source_type` are read (§9.7).
+- **protojson output is explicitly not byte-stable**, so responses are parsed as JSON and never matched as text ✅.
+- **Paging backwards has no cursor** ✅: `ReadResponse` has one field. The next older page is the same request with `end_time` set to the timestamp of the oldest envelope of the current page; because `end_time` is exclusive, that envelope is not returned twice.
+- ⚠️ **Several envelopes of one source can share a timestamp**, and the store deliberately returns **more than `limit`** rather than split such a group. The collector must not assert `batch.length <= limit` and must not de-duplicate by timestamp.
+- **A page with fewer than `limit` envelopes means the stored range was exhausted** ✅: the type filter runs inside the store traversal, non-matching envelopes do not count towards `limit`, and the walk continues until `limit` matches are collected or the source's range ends. That is the honest stop condition for "nothing older is held".
+- ⚠️ **An empty batch is not proof of silence.** Each source lives on exactly one node (replication factor 1); when the owning node is unreachable the read returns a **successful empty batch**. Empty therefore means `unknown`, never `idle`.
+- ⚠️ **429 is not rate limiting, and its origin is not settled.** Log Cache has no request rate limiter, no concurrency limit and no response compression on the read path, and nothing in its source writes a 429. One reading is that it arises from the gRPC mapping: nodes talk to each other with a 50 MiB receive limit, and `ResourceExhausted` maps to HTTP 429. The other is that a 429 can only come from a layer in front of Log Cache (a platform limiter). Either way the cf CLI treats it as "response too large" and halves its limit, up to ten times, down to 1 — which is the behaviour to copy, rather than waiting as for a CF API 429.
+- **Other statuses** ✅: `Unavailable` → 503 (no node found), gateway unreachable from the auth proxy → 502, `DeadlineExceeded` → 504. The gateway and proxy set only a 2 s read-header timeout; the proxy's CAPI and UAA clients time out after 20 s. ⚠️ The cf CLI replaces go-log-cache's 5 s default with a client that has **no** overall deadline, which is why `cf logs` can hang; BAIP Lens keeps its own bounded timeout, as for the CF API.
+
+**Cross-check against the reference clients** ✅. cf CLI v8 (v8.19.1, pinning `go-log-cache` v2.0.7) implements `cf logs --recent` as **exactly one** read:
+
+```
+GET /api/v1/read/<app-guid>?descending=true&envelope_types=LOG&limit=1000&start_time=<nanos>
+```
+
+preceded by one unauthenticated `GET /api/v1/info`, which the library uses only to choose `/api/v1` over the legacy `/v1`. Three lessons:
+
+- **No client pages backwards.** `go-log-cache`'s `Walk` only moves *forward* (`Start = last.Timestamp + 1`). The backward walk this rule needs exists nowhere upstream and is built here from `descending=true` plus a moving `end_time`.
+- **`start_time` is omitted.** The library always sends it, and for a zero `time.Time` that becomes the nonsense value `-6795364578871345152`; the API documents the default as the start of the cache, so leaving it out is both cleaner and safe from the server's `start_time > end_time` check.
+- **The version probe is skipped** (BTP reports 3.2.17, so the `/api/v1` prefix is fixed). `/api/v1/info` needs **no token**, so it can never double as an authorization or reachability check for an app.
+
+⚠️ The `log-cache-cli` plugin derives the host with `strings.Replace(apiEndpoint, "api", "log-cache", 1)`. That heuristic is **explicitly rejected** here: the host comes only from `links.log_cache` of `GET /`, as the cf CLI itself does.
+
+**How a router access log is identified** ✅ — the expectation holds, and the chain was read end to end:
+
+1. gorouter's `DropsondeLogSender.SendAppLog` sets `sourceType := "RTR"`, `messageType = LogMessage_OUT` and `AppId = <app guid>`, with the access-log line as the message. Emission is **not** an operator property: `jobs/gorouter/templates/gorouter.yml.erb` hardcodes `'loggregator_enabled' => true`.
+2. **Only requests that reached an app instance are logged under the app's source id** ✅: `SendLog` passes `AccessLogRecord.ApplicationID()`, which is `""` when no `RouteEndpoint` was selected; `LogMessage()` returns `""` for an empty app id, and `SendAppLog` drops a record with an empty app id. A request that got a 404 because no route matched, or that failed before a backend was chosen, produces **no** envelope under any app. An `RTR` envelope is therefore evidence that a request was really dispatched to an instance of that app, not merely that something hit the route.
+3. The syslog agent's RFC 5424 converter puts `tags["source_type"]` into the **PROCID** *and* passes **every** tag into the `tags@47450` structured-data element (`buildTagsStructuredData` applies no filter). `default_drain_metadata` defaults to **true** in `jobs/loggr-syslog-agent/spec`, and the Log Cache aggregate drain of `cf-deployment` v60.11.0 (`syslog-tls://log-cache.service.cf.internal:6067?include-metrics-deprecated=true&ssl-strict-internal=true`) does not turn it off.
+4. Log Cache's syslog server builds the envelope with `source_id` = syslog APP-NAME (the app GUID), `timestamp` from the syslog timestamp (the **emitter's** time, not arrival), `instance_id` from the **last** `/`-separated token of PROCID, and copies the `tags@47450` parameters into `envelope.tags`.
+
+So a router access log is **a `LOG` envelope whose `tags.source_type` is `RTR`**, and the match is on that tag alone. ⚠️ If an operator set `drain-metadata=false` on the Log Cache drain, `source_type` would survive only inside PROCID, which Log Cache reduces to `instance_id`; the tag would then be missing from *every* envelope, which the collector reports as `unknown` rather than guessing. `instance_id` is dropped: it is not needed and is infrastructure detail.
+
+⚠️ On an `RTR` envelope `instance_id` is the **gorouter's** own index, not the app instance (gorouter sets `SourceInstance` to its own index). One more reason the collector keeps no instance.
+
+**Other source types share an app's source id** ✅ (`log_source.go`, documented in the upstream "streaming logs" format reference): `API`, `STG`, `RTR`, `LGR`, `APP` (as `APP/PROC/WEB`), `SSH`, `CELL`, and in newer releases `PROXY`, `HEALTH`, `STATS`. A page of `LOG` envelopes can therefore be mostly application output, which is why the read filters on `envelope_types=LOG` and then on the tag, and why a page cap exists at all.
+
+**Which traffic produces no `RTR` envelope at all** ✅ — this decides which apps the rule can judge:
+
+| Traffic | App-scoped envelope? |
+| --- | --- |
+| HTTP request routed to an app instance | **yes** — the only case |
+| Request to an unmatched route (404 at the router) | no — no `RouteEndpoint`, so no app id |
+| gorouter's load-balancer health check | no |
+| The route-service leg | no — it deliberately uses an empty `route.Endpoint` with no `ApplicationId` |
+| **TCP routes** | **no** — `cf-tcp-router` has no app-log emission code at all |
+| **Internal domains (container-to-container)** | **no** — that traffic bypasses gorouter entirely |
+
+⚠️ So an app whose only routes are TCP or internal-domain routes **can never be judged by access logs**, however busy it is. Such apps are `unknown`, never idle — which is why §9.1 classifies every route from `domain.internal` and `protocol` before the traffic check runs. ⚠️ Whether a websocket's envelope is emitted at upgrade or at close was not established.
+
+🟡 **A payload-free alternative exists but is worse for privacy.** Because the Log Cache drain carries `include-metrics-deprecated=true` (`DrainData=ALL`), gorouter's `HttpStartStop` events are forwarded as **`TIMER` envelopes named `http`**, and Log Cache's syslog server does reconstruct them. Reading `envelope_types=TIMER` would give a last-request time with no log line to discard — but their tags carry `uri`, `remote_address`, `user_agent` and the `X-Forwarded-For` chain, i.e. *more* personal data than the access log the collector refuses to keep. ⚠️ Whether SAP BTP's drains forward timers is unknown. Not used in v0.2; recorded so the choice is deliberate.
+
+### 9.4 Log Cache: `/api/v1/meta` (item 3) ✅, but not used
+
+`/api/v1/meta` does report the oldest timestamp held per source, and a non-admin user may call it — but it is the wrong tool here.
+
+- **Response** ✅: one object under `meta`, keyed by source id, each with `count`, `expired`, `oldestTimestamp`, `newestTimestamp`. The API docs' own field list says `expired` is there only "if present", that is, when envelopes have been pruned.
+- ⚠️ **Two different JSON conventions on the same host.** `/api/v1/meta` is built by the auth proxy with **default** protojson options, so its keys are **lowerCamelCase** and zero values are **omitted**; an empty result is `{}` with **no `meta` key at all**. `/api/v1/read` goes through the gateway with `UseProtoNames`/`EmitUnpopulated`, so it is snake_case and emits zeros. All four meta values are int64 **as JSON strings**. Neither endpoint sets `Content-Type`, so a client must not require `application/json`.
+- **Semantics** ✅: the four values cover **all envelope types** of the source (one AVL tree per source id; the envelope type is not considered). Both pruning paths remove the smallest timestamp key first, so pruning is strictly **oldest-first** and every envelope at or after `oldestTimestamp` is still held — which is what would make `oldestTimestamp` a sound window start.
+- **Non-admin callers are served** ✅: a caller counts as admin only with the `doppler.firehose` or `logs.admin` scope; everyone else gets the **intersection** with the source ids they may see.
+- ⚠️ **But the visible-source lookup is expensive and silently fallible.** For a non-admin the proxy calls `GET /v3/apps?per_page=5000` and then `GET /v3/service_instances?per_page=5000` **with the caller's own token**, following every page, with **no caching** (its 60 s cache holds only per-source `read` authorizations). The lookup has **no org or space filter**, so it covers every app the user can see in the whole landscape, not only the scanned org. If any page fails — transport error, timeout, 429 from the CF rate limiter, any non-200 — the proxy answers **200 with an empty result**, indistinguishable from "no visible sources".
+- ⚠️ **Version 3.2.17 — the one SAP BTP reports — has a race in `Store.Meta()`**: it re-loads each source in a second pass and type-asserts the result unchecked, so a source deleted by the truncation loop between the passes makes the call **panic**. Fixed in v3.2.18 (released 2026-11-04); no `cf-deployment` release pins 3.2.18 yet. Each uncached meta call reaches this code (the meta cache holds one second).
+- **Aggregation can be partial without saying so** ✅: meta is merged across nodes by the Log Cache node, and a node whose call fails is logged and skipped; only if *every* node fails does the caller see 502.
+
+**Decision:** `/api/v1/meta` is **not** called. The window start comes from the app's own data: when the newest-first walk ends without a router log, one extra **ascending** read with `limit=1` and no type filter returns the oldest envelope Log Cache holds for that app — the same number meta would report, at the cost of one read instead of two Cloud Controller calls, and without touching the 3.2.17 panic. If that read is empty, `windowStart` is `null` and the app is `unknown`.
+
+### 9.5 Which roles Log Cache accepts (item 4) ✅ upstream, ⚠️ on SAP BTP
+
+**The API documentation states the authorization model** ✅:
+
+> The scopes `doppler.firehose` and `logs.admin` are authorized as `admin` […] For more limited scopes, Cloud Controller is consulted to establish app permissions.
+
+and, decisively for the collector:
+
+> Please note that in case of missing or insufficient authorization, an http status code of 404 (not found) will be returned to discourage malicious actors. Don't expect 401 or 403.
+
+**The code agrees** ✅ (`cf_auth_middleware.go` at v3.2.17). On `/api/v1/read/{sourceID}` it writes `StatusNotFound` for an empty source id, a missing `Authorization` header, a token it cannot read, and a non-admin caller that `IsAuthorized` rejects; there is no 401 or 403 on the path. For a non-admin the authorizer calls **`GET /v3/apps/<source-id>`** with the caller's own header and, if that is not 200, `GET /v3/service_instances/<source-id>`; a 200 authorizes and is cached per token and source id for 60 s. Any other outcome — a CAPI error, a timeout, a 429 — counts as "not authorized".
+
+So **the role question reduces to "may this user `GET /v3/apps/:guid`?"**, which §2 already answers. The official Cloud Foundry roles table confirms it from the other side: in `_oss_roles_table.html.md.erb` the row **"View app logs" is Yes for Space Developer, Space Auditor, Space Manager, Space Supporter, Org Manager, Global Auditor, Admin and Admin Read-Only**, and blank for Org Auditor, Org Billing Manager and Org User.
+
+| Role | Log Cache read for an app in that space | Why |
+| --- | --- | --- |
+| **Space Auditor** | yes ✅ | may `GET /v3/apps/:guid`; "View app logs" = Yes |
+| Space Developer, Space Manager, Space Supporter | yes ✅ | same |
+| Org Manager | yes ✅ | same |
+| Org Auditor only | **no** ✅ | cannot read the app; "View app logs" blank |
+| Global Auditor, Admin Read-Only | yes ✅ | global read |
+| `doppler.firehose` / `logs.admin` scope | yes, everything ✅ | admin path; never used by BAIP Lens |
+
+**Declared role: Space Auditor**, as §2.1.
+
+⚠️ **SAP BTP does not document this.** A code search of the SAP BTP documentation source (`SAP-docs/btp-cloud-platform`, 2 076 Markdown pages) for "log cache" and "log-cache" returns **0 hits**, and so does "log-cache" across the whole `SAP-docs` organisation. SAP's own roles page describes Space Auditor as "Provides read-only access to a space" and Space Supporter as "Allows you to troubleshoot and debug applications and service bindings in a space", mentions logs nowhere, and defers to `docs.cloudfoundry.org/concepts/roles.html` — exactly the table quoted above. It lists the same space and org roles as upstream, with Space Supporter present and unrenamed, but omits upstream's Org Billing Manager. SAP's Help page "Using Application Logs" states no role, no log count and no retention. The Regions page publishes the API endpoint, domain and cockpit URL but **no log-cache host**, so `GET /` stays the only way to learn it.
+
+🟡 **A developers.sap.com tutorial does name "Space Developer, Space Auditor, Space Supporter"**, but it is about the **cockpit's Logs page**, not about the Log Cache API, and it lists a narrower set of three space roles than the upstream table's eight. SAP documents Log Cache itself only in two developers.sap.com tutorials ("enabled by default in SAP BTP Cloud Foundry", reachable "using the log cache API or the log cache plugin", and explicitly "not a solution for storing logs of production applications"). So SAP endorses using this API but states no roles for it; the upstream chain above is the only basis, and what a Space Auditor token really receives on SAP BTP has **not** been observed. The 404 path below is what makes this safe either way.
+
+**No audit event** ✅: a Log Cache read makes Cloud Controller serve `GET /v3/apps/:guid`, which has **no audit type**, so unlike the `--deep` env-var read (§2, which does create `audit.app.environment_variables.show`) the traffic check leaves no trace in the customer's audit log. privacy.md records this.
+
+⚠️ **The skip condition is 404, not 403.** This differs from every other check in `checks.ts`, which detects a missing role by a 403. 404 from Log Cache is **ambiguous** — no access, an invalid or expired token, a failed or rate-limited Cloud Controller lookup, or a missing route all look identical — so it is recorded as `skipped` with a reason that says exactly that, and never as "no traffic".
+
+**Side effect on the CF API budget** ✅: each `read` for a new (token, source) pair costs the scanning user one Cloud Controller request (two when the app lookup is not 200). The proxy sends it to `cc.public_tls.port` (9024), the same endpoint set as public API traffic, with the user's own token, so the CF rate limiter counts it against **that user**, keyed on the user GUID.
+
+What the limits actually are ✅, which also corrects §1.4:
+
+- `/v3/info`'s `rate_limits.general_limit` is rendered from `per_process_general_limit`: **per Cloud Controller process, per user, per 30 minutes** (690 on `us10-001`, 334 on `eu10`). It is *not* the user's budget.
+- The real per-user budget is a separate `global_general_limit`, which `/v3/info` never exposes. A client learns it only from the **`X-RateLimit-Limit`** response header.
+- ⚠️ **`X-RateLimit-Remaining` is quantized**: it is the per-instance fraction rounded down to the nearest 10 %, multiplied by the global maximum, and CF's own documentation warns it can read **0 while requests still succeed**. The pacing in `http/httpClient.ts` must therefore not treat 0 as exhausted — it currently pauses below 5 % of the limit, which is safe, but a 0 is not proof and must never abort a scan.
+- 🟡 SAP states the CF API limit only as "a range of a few 10k requests per hour per user on average", with 429 and `Retry-After`.
+
+The collector therefore reads all pages of one app back to back (inside the 60 s cache), keeps Log Cache concurrency low, and counts one CF request per scanned app.
+
+### 9.6 Retention: how far back the window reaches (item 5) ⚠️
+
+- **In-memory only** ✅, and the release says so plainly: "all logs and metrics will always be lost upon crashes or re-deploys". The replication factor is hardcoded to **1** and source ids are mapped to nodes by xxhash plus a jump-consistent hash over the node list, so a node restart, redeploy or rescale loses that node's slice outright — and moves sources between nodes.
+- **There is no age-based expiry at all** ✅: nothing in the v3.2.17 job spec or store code ever drops an envelope for being old. Only two things bound retention: the per-source item cap and heap-memory pressure.
+- **Per-source cap** ✅: `max_per_source` defaults to **100 000 envelopes**, counting logs, gauges, counters, timers and events **together**; the oldest is evicted on insert once the cap is reached. Independently, truncation runs every `truncation_interval` (default 1 s) once heap use passes `memory_limit_percent` (default 50).
+- **Pruning is strictly oldest-first within a source** ✅ (both paths take the leftmost node of the AVL tree), which is what lets a single ascending read establish the window start.
+- ⚠️ **Memory pressure is biased against exactly the apps this rule is about.** Under pressure the store builds a heap of *every* source's oldest timestamp and repeatedly removes the **globally oldest** envelope, so all sources on a node converge to one time floor and the sources holding the oldest data — which is precisely what an idle app has — bleed first. An idle app's window is therefore systematically *shorter* than a busy app's, in the direction that produces `unknown` rather than a false finding.
+- **The release itself promises no retention** ✅: its scaling section opens with "Numerous variables affect the retention of Log Cache" and lists instance count, max per source id, memory per instance and CPU. 🟡 The official operator target is far smaller than the cap suggests: `docs.cloudfoundry.org` tells operators to keep **"at least 15 minutes"** available, and the release's own `indicators.yml` warns at **30 seconds**.
+- ⚠️ **Order of magnitude, as an estimate, not a promise:** with Diego's 15-second container-metrics tick (3 to 6 envelopes per instance per tick), the 100 000-envelope cap works out to roughly **2.9 to 5.8 days** for a one-instance silent app — but node uptime and memory pressure almost always bind first, and every additional instance divides it.
+- ⚠️ **A chatty app evicts its own history in under a minute.** SAP publishes a log rate limit of **4 000 logs per second per app instance**, which is enough to refill a source's entire 100 000-envelope cap in **25 seconds**. For a verbose app, `windowStart` can therefore be seconds old, and the check will correctly report `unknown` instead of claiming anything.
+- ⚠️ **Metrics compete with logs for the same cap.** The Log Cache drain in `cf-deployment` v60.11.0 carries `include-metrics-deprecated=true`, and Diego emits container metrics for every app instance every 15 s, each gauge value stored as its own envelope. For a quiet app the cap is filled by its own metrics, and the window shrinks as instances are added.
+- ⚠️ **Observed, unauthenticated:** the Log Cache VM answering `/api/v1/info` reported `vm_uptime` **140 111 s (38.9 h)** on `us10-001` and **58 415 s (16.2 h)** on `eu10` on 2026-11-12. `vm_uptime` is the OS uptime of the VM running the answering gateway, an **upper bound** on the age of that node's cache; it says nothing about the other nodes, one of which may own a given app.
+- ⚠️ **SAP BTP publishes no Log Cache retention, per-source cap or rate limit** (the 0-hit code search above). The "SAP BTP-Specific Configurations" page covers the CF API rate limit, a logging rate limit and audit-event retention, but not Log Cache. 🟡 SAP's own tutorial states that the log cache is enabled by default, recommends the `cf log-meta` plugin, points at the upstream API, and warns that it is **not** a solution for storing production logs.
+
+**Stated assumption:** the window is **hours, not days**, and it is never assumed. Every finding names `windowStart` and the window length, and an observed window shorter than `--min-traffic-window` (default 12 h, D5) yields **no finding** and an `unknown` inventory value. Given 16.2 h on one probed node, `unknown` is expected to be the *common* outcome of a single scan. The cross-scan history (`scan --previous`) builds a longer view out of scans that each saw at least the minimum window; it never adds up short windows (D8).
+
+⚠️ SAP documents **14 days** of retention for Cloud Foundry audit events, while §1.6 assumes the open-source default of 31 days. The event branch of `APP_IDLE` inherits the shorter figure; §1.6 is corrected when the event collectors are built.
+
+### 9.7 Consequences for the design, as implemented
+
+⚠️ **On trial accounts the platform stops apps by itself.** SAP documents that in trial accounts "applications stop automatically on a daily basis", at midnight relative to the region, alongside a quota of 10 routes and 4 GB of app memory. Both `APP_IDLE` branches are affected: `STOPPED` says nothing about abandonment there, and an app that was stopped overnight has no traffic for reasons of its own. Worse, ⚠️ **trial-ness cannot be inferred from the API hostname** — SAP lists `api.cf.us10.hana.ondemand.com` as the trial endpoint for `us10` while `us10-001` appears under enterprise regions, and the regions concept page says subaccounts are auto-assigned to an indexed or non-indexed instance. The scan therefore cannot detect a trial landscape reliably; the finding text and docs/rules.md must name this limitation instead of pretending otherwise. (The 0.1.0 sample scan in this repository ran against `us10-001`.)
+
+| Assumed | Confirmed reality | What the code does |
+| --- | --- | --- |
+| "a 403 records the check as skipped" | Log Cache **never** answers 401 or 403; missing access, a bad token and a failed CAPI lookup are all **404** | skip on **404**, with a reason naming the three causes; 403 handling stays for the CF API |
+| `/api/v1/meta` gives `windowStart` | true, but it costs two uncached CF calls, reaches beyond the scanned org, can answer empty on failure, and hits a panic race in the deployed 3.2.17 | meta is **not called**; one ascending `limit=1` read per app instead |
+| read newest-first | the default is **ascending** | `descending=true` on every read |
+| page backwards | no cursor; `end_time` is exclusive | `end_time` = oldest timestamp of the previous page, as the raw string |
+| `limit` | maximum **1000**; above it is **HTTP 500**, not a clamp | `limit` ≤ 1000; a 429 ("too large") or a body above 16 MiB halves it and reads again; only 502–504 are retried |
+| timestamps | int64 **nanoseconds as JSON strings** | digits-only schema, `BigInt` arithmetic, never `Number` |
+| "no route" means idle | internal-domain routes report `protocol: "http"`; TCP and internal traffic may not produce router logs at all | route class from `domain.internal` and `protocol`; only external HTTP routes are candidates for the traffic check |
+| one `web` process | a rolling deployment creates a second | maximum over the app's `web` processes |
+| window ≥ 24 h | one probed node had been up 16.2 h, and metrics share the 100 000-envelope cap | `--min-traffic-window` defaults to 12 h (D5); a shorter window gives **`unknown`**, never a finding |
+| every log envelope carries `source_type` | drain metadata can be turned off, and then the tags are gone (§9.3) | if no examined `LOG` envelope of an app carries a `source_type` tag, the check is skipped as an error: silence that cannot be told apart is not evidence |
+| one failure means the check failed | the first read decides whether Log Cache can be read at all | a 404 on the first app skips the check (`insufficient_role`), no answer or 502–504 skips it as `unavailable`, any other status as `error`; after that a failing app stays `unknown`, and after 3 failures in a row the rest are left unread |
+| "stopped > 90 days" means abandoned | trial accounts stop **every** app nightly, and trial-ness is not detectable from the endpoint | keep the branch, name the trial caveat in the finding and in docs/rules.md |
+| a `TIMER` signal would avoid log payloads | router timers are forwarded upstream, but their tags carry `uri`, `remote_address` and `user_agent` | not used; `LOG` + `source_type` stays the signal |
+
+**Allow-list (§6), as implemented.** The log cache rule allows `GET` on `/api/v1/read/<app-guid>` only (**not** `/api/v1/info`, `/api/v1/meta` or the PromQL endpoints), for the host taken **only** from `links.log_cache`, and lists `bearer` as the one kind of credential it may receive. It is the second and last host that may receive the CF token: every rule lists the credential kinds it accepts, and unit tests assert that the token reaches no other host.
+
+**Privacy (privacy.md) changes for slice 2.** Logs are read for the first time. Kept per app: `lastRequestAt`, `windowStart`, `envelopesExamined`. Dropped at parse time: `log.payload` (the access-log line, which carries the client IP, the request path and query, the user agent and tracing headers), `instance_id`, and every tag except `source_type`. The one envelope of any type read for the window start (a gauge, or a router `http` timer with `uri`, `remote_address` and `user_agent` tags) is reduced to its timestamp the same way. ⚠️ Envelope **tags** carry identifying data too — the router sets the route endpoint's tags (app, space and org metadata), and router timer envelopes carry `uri`, `remote_address` and `user_agent` — so the tag map is read for one key and then discarded.
+
+### 9.8 Open questions (only an authenticated call settles these)
+
+1. What a **Space Auditor** token really gets from `GET /api/v1/read/<app-guid>` on SAP BTP: 200 for an app in its space, 404 for an app elsewhere, 404 for an Org-Auditor-only user.
+2. Which envelope types SAP BTP stores under an app GUID — container metrics, and router `TIMER` envelopes named `http`. The latter would be a usage signal *without* a log payload, but their tags carry `uri`, `remote_address` and `user_agent`: better for the signal, worse for privacy.
+3. The real window: the oldest stored envelope for a quiet single-instance app, a multi-instance app and a busy app, that is SAP's effective `max_per_source` and memory limit, and whether the 12-hour minimum (D5) is regularly reached.
+4. Whether the auth proxy's Cloud Controller lookups really consume the scanning user's CF API budget on SAP BTP, and what the effective per-user limit is, given that `general_limit` is per process.
+5. Whether a websocket's `RTR` envelope is emitted at the upgrade or only when the connection closes, which changes what `lastRequestAt` means for long-lived connections.
+6. Whether SAP's 3.2.17 is unmodified upstream (so the `Store.Meta()` race is present), and when SAP moves to 3.2.18 or later.
+7. The exact bytes of one real SAP BTP `RTR` envelope, for an anonymized fixture: timestamp precision, the tag set, and whether `deprecated_tags` and `instance_id` are populated.

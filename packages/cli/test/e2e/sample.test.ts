@@ -6,13 +6,15 @@ import { ReportDataSchema, SnapshotSchema } from '../../src/model/snapshot.js';
 import { renderJson } from '../../src/reporters/json.js';
 import { toReportData } from '../../src/reporters/reportData.js';
 import { scan } from '../../src/scan.js';
-import { ACME, acmeFetch } from '../support/acme.js';
+import { ACME, acmeFetch, acmePrevious } from '../support/acme.js';
 
 /**
  * Golden files built from the acme fixtures:
  *  - test/fixtures/sample-snapshot.json feeds `npm run sample` (the real CLI
  *    and the real HTML template, in CI);
  *  - packages/ui/src/test/fixtures/report.json is the UI's dev and test data.
+ * The scan carries the history of test/fixtures/history/acme-previous.json
+ * forward (`scan --previous`), so the sample shows a span of scans as well.
  * Regenerate both with `UPDATE_SAMPLE=1 npm test -w baip-lens`.
  */
 const SAMPLE_SNAPSHOT = fileURLToPath(new URL('../fixtures/sample-snapshot.json', import.meta.url));
@@ -39,6 +41,7 @@ describe('sample data', () => {
       env: { BAIP_LENS_ACCESS_TOKEN: ACME.token },
       fetch: acmeFetch().fetch,
       now: () => ACME.now,
+      previous: acmePrevious(),
     });
     const snapshotJson = `${JSON.stringify(snapshot, null, 2)}\n`;
     const reportJson = renderJson(toReportData(snapshot));

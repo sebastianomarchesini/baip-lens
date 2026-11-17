@@ -1,0 +1,178 @@
+{
+  "orders-srv-log": {
+    "envelopes": {
+      "batch": [
+        {
+          "timestamp": "1790639880000000000",
+          "source_id": "a99a0000-0000-4000-8000-000000000001",
+          "instance_id": "0",
+          "deprecated_tags": {},
+          "tags": {
+            "source_type": "APP/PROC/WEB",
+            "app_name": "orders-srv",
+            "x_label": "POISON-app-tag"
+          },
+          "log": {
+            "payload": "R0VUIC9oZWFsdGggMjAwIChpbnRlcm5hbCk=",
+            "type": "OUT"
+          }
+        },
+        {
+          "timestamp": "1790639700000000000",
+          "source_id": "a99a0000-0000-4000-8000-000000000001",
+          "instance_id": "0",
+          "deprecated_tags": {},
+          "tags": {
+            "source_type": "APP/PROC/WEB",
+            "app_name": "orders-srv"
+          },
+          "log": {
+            "payload": "b3JkZXIgNDcxMSBzdG9yZWQ=",
+            "type": "OUT"
+          }
+        },
+        {
+          "timestamp": "1790639400000000000",
+          "source_id": "a99a0000-0000-4000-8000-000000000001",
+          "instance_id": "3",
+          "deprecated_tags": {},
+          "tags": {
+            "source_type": "RTR",
+            "app_id": "a99a0000-0000-4000-8000-000000000001",
+            "app_name": "orders-srv",
+            "organization_name": "acme-prod",
+            "space_name": "prod",
+            "process_type": "web",
+            "process_id": "a99a0000-0000-4000-8000-000000000001",
+            "origin": "gorouter",
+            "remote_address": "203.0.113.77:51234",
+            "user_agent": "POISON-UserAgent/1.0",
+            "uri": "/POISON-request-path"
+          },
+          "log": {
+            "payload": "b3JkZXJzLXNydi5jZmFwcHMuZXhhbXBsZS5vcmcgLSBbMjAyNi0wOS0yOFQyMzo1MDowMC4wMDArMDAwMF0gIkdFVCAvUE9JU09OLXJlcXVlc3QtcGF0aD9zZXNzaW9uPVBPSVNPTi1xdWVyeSBIVFRQLzEuMSIgMjAwIDAgNTEyICItIiAiUE9JU09OLVVzZXJBZ2VudC8xLjAiICIyMDMuMC4xMTMuNzc6NTEyMzQiICIxMC4wLjEuNTo2MTAwMCIgeF9mb3J3YXJkZWRfZm9yOiIyMDMuMC4xMTMuNzciIHhfZm9yd2FyZGVkX3Byb3RvOiJodHRwcyIgdmNhcF9yZXF1ZXN0X2lkOiJQT0lTT04tdmNhcC1pZCIgcmVzcG9uc2VfdGltZTowLjAwNCBnb3JvdXRlcl90aW1lOjAuMDAxIGFwcF9pZDoiYTk5YTAwMDAtMDAwMC00MDAwLTgwMDAtMDAwMDAwMDAwMDAxIiBhcHBfaW5kZXg6IjAi",
+            "type": "OUT"
+          }
+        },
+        {
+          "timestamp": "1790638800000000000",
+          "source_id": "a99a0000-0000-4000-8000-000000000001",
+          "instance_id": "0",
+          "deprecated_tags": {},
+          "tags": {
+            "source_type": "APP/PROC/WEB",
+            "app_name": "orders-srv"
+          },
+          "log": {
+            "payload": "Y2FjaGUgd2FybQ==",
+            "type": "OUT"
+          }
+        }
+      ]
+    }
+  },
+  "orders-approuter-log": {
+    "envelopes": {
+      "batch": [
+        {
+          "timestamp": "1790618400000000000",
+          "source_id": "a99a0000-0000-4000-8000-000000000002",
+          "instance_id": "0",
+          "deprecated_tags": {},
+          "tags": {
+            "source_type": "APP/PROC/WEB",
+            "app_name": "orders-approuter",
+            "x_label": "POISON-app-tag"
+          },
+          "log": {
+            "payload": "dG9rZW4gY2FjaGUgcmVmcmVzaGVk",
+            "type": "OUT"
+          }
+        },
+        {
+          "timestamp": "1790575200000000000",
+          "source_id": "a99a0000-0000-4000-8000-000000000002",
+          "instance_id": "0",
+          "deprecated_tags": {},
+          "tags": {
+            "source_type": "APP/PROC/WEB",
+            "app_name": "orders-approuter"
+          },
+          "log": {
+            "payload": "dG9rZW4gY2FjaGUgcmVmcmVzaGVk",
+            "type": "OUT"
+          }
+        },
+        {
+          "timestamp": "1790532000000000000",
+          "source_id": "a99a0000-0000-4000-8000-000000000002",
+          "instance_id": "0",
+          "deprecated_tags": {},
+          "tags": {
+            "source_type": "CELL",
+            "app_name": "orders-approuter"
+          },
+          "log": {
+            "payload": "Q29udGFpbmVyIGJlY2FtZSBoZWFsdGh5",
+            "type": "OUT"
+          }
+        }
+      ]
+    }
+  },
+  "orders-approuter-oldest": {
+    "envelopes": {
+      "batch": [
+        {
+          "timestamp": "1790488800000000000",
+          "source_id": "a99a0000-0000-4000-8000-000000000002",
+          "instance_id": "0",
+          "deprecated_tags": {},
+          "tags": {
+            "origin": "rep"
+          },
+          "gauge": {
+            "metrics": {
+              "cpu": {
+                "unit": "percentage",
+                "value": 0.4
+              }
+            }
+          }
+        }
+      ]
+    }
+  },
+  "docs-static-log": {
+    "envelopes": {
+      "batch": []
+    }
+  },
+  "docs-static-oldest": {
+    "envelopes": {
+      "batch": [
+        {
+          "timestamp": "1790625600000000000",
+          "source_id": "a99a0000-0000-4000-8000-000000000005",
+          "instance_id": "0",
+          "deprecated_tags": {},
+          "tags": {
+            "origin": "gorouter",
+            "peer_type": "Client",
+            "method": "GET",
+            "status_code": "200",
+            "uri": "https://docs-static.cfapps.example.org/POISON-timer-path?q=POISON-timer-query",
+            "remote_address": "198.51.100.23:50412",
+            "user_agent": "POISON-Timer-UserAgent/2.0",
+            "request_id": "POISON-timer-request-id"
+          },
+          "timer": {
+            "name": "http",
+            "start": "1790625599996000000",
+            "stop": "1790625600000000000"
+          }
+        }
+      ]
+    }
+  }
+}

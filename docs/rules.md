@@ -9,7 +9,7 @@ Every rule carries one or more [OWASP Top 10 (2025)](https://owasp.org/Top10/202
 | [`APP_NO_RECENT_DEPLOY`](#app_no_recent_deploy) | implemented | A03 | low / medium | Space Auditor |
 | [`RUNTIME_NODE_EOL`, `RUNTIME_JAVA_EOL`](#runtime_node_eol--runtime_java_eol) | planned, slice 2 | A03 | medium / high | Space Auditor |
 | [`DEP_KNOWN_CVE`](#dep_known_cve) | planned, slice 3 | A03 | from CVSS | none (local SBOM) |
-| [`APP_IDLE`](#app_idle) | planned, slice 4 | A02 | low | Space Auditor |
+| [`APP_IDLE`](#app_idle) | implemented: no route, no traffic (with history across scans), stopped | A02 | info / low | Space Auditor |
 | [`UI5_OUT_OF_MAINTENANCE`](#ui5_out_of_maintenance) | planned, slice 5 | A03 | medium / high | Space Auditor |
 | [`BUILDPACK_OUTDATED`](#buildpack_outdated) | planned | A03 | low / medium | Space Auditor |
 | [`STACK_DEPRECATED`](#stack_deprecated) | planned | A03 | medium / high | Space Auditor |
@@ -108,14 +108,80 @@ Apps are ranked by a weighted sum of their findings: critical 100, high 25, medi
 
 ## APP_IDLE
 
-**The app is stopped for a long time, or runs with no sign of use.**
+**Nothing shows that the app is used.** An unused app still takes memory quota, keeps its libraries and runtime running without patches, and widens the attack surface for nothing, which is why the rule carries OWASP A02 (unnecessary features).
 
-- **Data:** app `state` and `updated_at`, droplet and process timestamps, plus app usage and audit events.
-- **CF limit:** CF keeps events for **31 days** by default, so "no events in 180 days" cannot be proven from events alone. The evidence names the window that was checked.
-- **Severity:** `low`.
-  - Stopped, with `updated_at` more than 90 days ago.
-  - Or running, with droplet and process unchanged for more than 180 days **and** no events in the retention window.
-- **Remediation:** Confirm that the app is still needed; delete it or its route if not.
+The rule has three signals. With `scan --previous`, the traffic signal also counts the scans before this one ([history across scans](#history-across-scans-scan---previous)).
+
+| Signal | When | Severity | Confidence |
+| --- | --- | --- | --- |
+| `no_route` | `STARTED`, a `web` process with at least one instance, not a worker, and no route at all | `low` | `high` |
+| `no_traffic` | `STARTED`, not a worker, at least one HTTP route, and no router access log in a window of at least `--min-traffic-window`; and at least 3 counted scans in a row without a request, the first one 30 days or more ago (`scan --previous`) | `low` | `high` |
+| `no_traffic` | the same, without that history; droplet and `web` processes unchanged for more than 180 days | `low` | `medium` |
+| `no_traffic` | the same, but the droplet or a `web` process changed within 180 days, or no current droplet is known | `info` | `low` |
+| `stopped` | `STOPPED`, and the app's `updated_at` is more than 90 days ago, worker or not | `low` | `high` |
+
+And when the rule does **not** produce a finding:
+
+| Evidence | Result |
+| --- | --- |
+| A router access log inside the window | no finding; the inventory says `active` with `lastRequestAt` |
+| No router access log, but Log Cache held less than `--min-traffic-window` (default **12 h**, [D5](data-sources.md#7-decisions-resolved-2026-09-29)) of the app's history, or nothing at all | no finding; `unknown` (`window_too_short`) |
+| Only TCP, internal-domain or unclassified routes, which never produce a router access log ([D6](data-sources.md#7-decisions-resolved-2026-09-29)) | no finding; `unknown` (`traffic_not_measurable`) |
+| Log Cache could not be read, or `--no-traffic-check` | no finding; `unknown` (`traffic_unreadable`, `traffic_check_off`) |
+| A started worker or job | never judged; `not_assessed` |
+| Stopped for 90 days or less | `not_assessed` (`stopped`) |
+| Routes or processes could not be read | no finding; `unknown` (`data_unavailable`) for every started app and every app stopped for more than 90 days |
+
+- **Data:**
+  - the app `state` and `updated_at` (`GET /v3/apps`), the current droplet's `created_at` (`GET /v3/droplets?current=true`), the `web` processes with their desired `instances`, `health_check.type` and `updated_at` (`GET /v3/processes?types=web`), and the routes of the scanned spaces with their destinations and domains (`GET /v3/routes?space_guids=…&include=domain`);
+  - for each started non-worker app with an HTTP route, the newest **router access log** in Log Cache: a `LOG` envelope whose `tags.source_type` is `RTR`, which gorouter emits only for a request it dispatched to an instance of that app. It is read newest first (`GET /api/v1/read/<app-guid>?descending=true&envelope_types=LOG&limit=1000`), paged back with the exclusive `end_time` up to `--traffic-pages` pages (default 5). When the cache runs out before that, one ascending read with `limit=1` and no type filter gives the oldest envelope held for the app, where the window starts; Log Cache prunes oldest-first across all envelope types, so nothing newer is missing. Only three values are kept per app: `lastRequestAt`, `windowStart`, `envelopesExamined`.
+  - What was verified about these endpoints is in [data-sources.md §9](data-sources.md#9-traffic-and-route-signals-for-app_idle).
+- **Never flagged while started — workers and jobs ([D7](data-sources.md#7-decisions-resolved-2026-09-29)):** no `web` process, `web` scaled to 0, or a `web` process with the **`process` health check**, which Cloud Foundry documents for an app that "does not support TCP connections. An example of such an app is a worker" ([health checks](https://docs.cloudfoundry.org/devguide/deploy-apps/healthchecks.html#types)). The legacy type `none` is read as `process`, as Cloud Controller does itself (`HEALTH_CHECK_TYPE_MAPPING`). During a rolling deployment an app has two `web` processes, and either one with the `process` health check makes it a worker. A worker stopped for more than 90 days is flagged as `stopped` like any app: a stopped app serves nothing, whether or not it would listen for requests.
+- **Usage in the inventory.** Every app of a Cloud Foundry scan carries one state, shown in the Apps table and in the `usage*` columns of the apps CSV. `unknown` is never shown like "no finding":
+
+  | State | Meaning | Details |
+  | --- | --- | --- |
+  | `idle` | a finding exists | the signal and its confidence |
+  | `active` | a router access log inside the window | `lastRequestAt` |
+  | `unknown` | the rule would judge the app, but the data cannot tell | `window_too_short`, `traffic_not_measurable`, `traffic_unreadable`, `traffic_check_off`, `traffic_not_checked` (a snapshot from before the traffic check), `data_unavailable` (the routes or processes collector was skipped; also for an app stopped more than 90 days, since the rule did not run) |
+  | `not_assessed` | the rule does not judge the app, by design | `stopped`, `no_web_instance`, `worker_health_check` |
+
+- **Evidence:**
+  - `no_route`: `signal`, `confidence`, `appState`, `webInstances` (the highest desired count over the app's `web` processes), `healthCheckTypes` (of the `web` processes that have instances; `not reported` when CF gave none), `mappedRoutes` (0).
+  - `no_traffic`: `signal`, `confidence`, `appState`, `lastRequestAt` (null), **`windowStart` and `windowHours`** (so the finding never claims more than was observed), `minWindowHours`, `envelopesExamined`, `lastChangeAt` (the newer of the current droplet's creation and the last change of a `web` process), `unchangedDays`, `unchangedThresholdDays` (180), and from the history: `scansWithoutTraffic` (this scan included), `firstScanWithoutTraffic`, `silentSpanDays` (from that scan to this one, rounded down), `lastRequestEverSeen`, `highConfidenceScans` (3), `highConfidenceSpanDays` (30). Without a history entry (a snapshot written before the history existed), the run is this scan alone: 1 scan, starting now. `windowHours` and every figure in the title are rounded down. The title names the window, e.g. "No request in 42 hours of router logs", or, after two or more scans without a request that span more than this scan's window, the span, e.g. "No requests seen across 6 scans over 42 days". Scans closer together than one window keep the window in the title, since it says more.
+  - `stopped`: `signal`, `confidence`, `appState`, `updatedAt`, `stoppedDays`, `thresholdDays` (90).
+- **OWASP:** A02:2025 Security Misconfiguration.
+- **Remediation:**
+  - `no_route`: An app with a running web process but no route cannot receive HTTP requests, so it is probably not in use. Check with its owner whether it is still needed. If it should serve requests, map a route (`cf map-route`). If it is a background worker, make that explicit: run it as a `worker` process with `web` scaled to 0, or give `web` the `process` health check, so it is not mistaken for an unused app. If it is no longer needed, stop and delete it (`cf stop`, then `cf delete`) to free its memory quota.
+  - `no_traffic`: No request reached the app in the router logs that Log Cache held (the window, and the scans in a row that saw none, are in the evidence). One window is short: Log Cache keeps logs in memory and caps them per app, so confirm over a longer period before acting, with request metrics or repeated scans (`scan --previous` with the last snapshot). If the app is no longer needed, stop it and delete it with its routes (`cf stop`, then `cf delete -r`) to free its memory quota.
+  - `stopped`: The app has been stopped for more than 90 days. If it is no longer needed, delete it with its routes (`cf delete -r`): a stopped app keeps its routes, service bindings and droplet, and starting it again brings back the libraries it was staged with. If it is kept on purpose, record why, for example in an annotation.
+- **References:** `no_route`: <https://docs.cloudfoundry.org/devguide/deploy-apps/routes-domains.html>, <https://docs.cloudfoundry.org/devguide/deploy-apps/manifest-attributes.html#no-route>, <https://docs.cloudfoundry.org/devguide/deploy-apps/healthchecks.html#types>. `no_traffic`: <https://docs.cloudfoundry.org/devguide/deploy-apps/streaming-logs.html#rtr>, <https://github.com/cloudfoundry/log-cache-release/blob/main/src/README.md>. `stopped`: <https://docs.cloudfoundry.org/devguide/deploy-apps/start-restart-restage.html>, <https://cli.cloudfoundry.org/en-US/v8/delete.html>.
+- **When a collector is missing:**
+  - The routes or processes collector skipped (for example after a 403): the rule is recorded as skipped, and every started app, and every app stopped for more than 90 days, is `unknown` (`data_unavailable`), never idle. The traffic check is skipped too (`dependency_skipped`), because which apps to read depends on the inventory, the routes and the processes.
+  - The traffic check skipped: the `no_route` and `stopped` signals stand, and every app that would need traffic is `unknown`. Log Cache answers a missing role, an expired token and a failed permission lookup alike with **404, never 403**, so a 404 on the first app skips the check as `insufficient_role` with a reason that says so. No answer (a network error, or 502, 503 or 504 after retries) skips it as `unavailable`; any other status, such as the 500 Log Cache returns for a bad parameter, skips it as `error` without a retry. A 429 is not a rate limit on Log Cache but "response too large": the page is read again with half the `limit`, as for a body above 16 MiB. A later app that fails stays `unknown` and the others go on, and after three failed apps in a row the rest are left unread.
+  - Untagged logs: if not one `LOG` envelope of an app carries a `source_type` tag (the platform strips tags when drain metadata is turned off), router access logs cannot be told apart, so the check is skipped as `error` instead of calling every app silent.
+  - No droplet known (the droplets collector skipped): `no_traffic` cannot show the app unchanged, so without a history of 3 scans over 30 days it stays at `info` / `low`; with one, it is `low` / `high` as usual.
+- **Limits / what does not trigger:**
+  - **The window is short and never assumed.** Log Cache keeps logs in memory only, with no age-based expiry: an app's history is capped at 100 000 envelopes upstream (metrics included) and lost when a node restarts, and SAP BTP publishes no figures. One probed SAP BTP node had been up 16 hours. `unknown` (`window_too_short`) is therefore the common single-scan outcome for quiet apps, and memory pressure prunes exactly the oldest data — that of idle apps — first. History across scans turns windows of at least the minimum, seen scan after scan, into a longer view; it does not stretch a short window (D8).
+  - Every read costs the scanning user one CF API request: Log Cache asks Cloud Controller, with the user's token, whether the user may read the app. Two apps are read at a time.
+  - `state` and `instances` are desired state: an app whose every instance crashes still counts as started, and an app scaled to 0 counts as a worker.
+  - A web app that someone gave the `process` health check is treated as a worker and not flagged, even with no route (D7). The alternative flags every queue consumer and scheduler.
+  - Routes are read by space, not by org, so a route shared into a scanned space from another org counts. A destination that points to an app the user cannot see is dropped and never reported.
+  - On SAP BTP trial accounts the platform stops every app nightly ([data-sources.md §9.7](data-sources.md#97-consequences-for-the-design-as-implemented)), and a trial landscape cannot be recognised from the API endpoint.
+  - `updated_at` is an upper bound on the last change: a stopped app may have been stopped even longer than `stoppedDays`.
+  - Cloud Foundry keeps app usage and audit events for 31 days upstream and SAP documents 14 days for audit events, so events are not used: "no events in 180 days" can never be proven from them.
+
+### History across scans (`scan --previous`)
+
+`scan --previous <snapshot.json>` carries the traffic history of an earlier snapshot of the same org forward, and the new snapshot carries it on (`raw.history`), so each scan only needs the one before it.
+
+- **Per app, matched by GUID, never by name:** `spaceGuid`, `lastRequestEverSeen` (the newest request any counted scan saw), `firstScanWithoutTraffic` (when the current run of scans without a request began) and `scansWithoutTraffic` (that run's length, up to and including the latest counted scan). A new app starts with this scan; an app deleted and pushed again, as in a blue-green deployment, has a new GUID and starts over.
+- **Which entries are dropped:** only that of an app missing from a space whose apps this scan read (it saw other apps of that space, and visibility is per space). An app this scan could not see keeps its entry unchanged, as for any scan that cannot tell (D8): its space was outside `--space`, none of its space's apps were visible this time, or the app inventory could not be read in full (a failed `GET /v3/apps`, or apps with an unexpected shape), in which case the whole history is kept. So a `--space` scan, or a scan that lost access to a space, does not break the chain for the others. The entry of an app in a space that is deleted or never visible again stays: it holds two GUIDs, three timestamps and a count.
+- **Which scans count ([D8](data-sources.md#7-decisions-resolved-2026-09-29)):** a scan that saw a request ends the run and moves `lastRequestEverSeen` on. A scan that saw no request in a window of at least `--min-traffic-window` extends it. A scan that cannot tell — a shorter window, an empty cache, Log Cache not read, the traffic check off, or an app that is stopped, a worker or without an HTTP route — leaves the history as it was. A short window seen many times would otherwise add up to a confident verdict about an app whose logs Log Cache never holds for long.
+- **Confidence:** 3 or more counted scans in a row without a request, the first 30 days or more before this one, give `high` confidence. Severity stays `low` ([D9](data-sources.md#7-decisions-resolved-2026-09-29)), as for a missing route. Below that, the single-scan rule decides (`medium` or `low`), and from the second scan on the title states the span.
+- **The previous snapshot must fit:** it is validated with the snapshot schema (unknown fields are dropped), and it must be a Cloud Foundry scan of the same API endpoint and the same org (compared by GUID, so a renamed org still matches) taken before this scan. A file that cannot be read or parsed, a project scan, another API endpoint or a snapshot that is not older stops the scan with exit code 2 before any request. Another org stops it with exit code 2 right after the org lookup (the CF root `GET /`, a token request when one is needed, and `GET /v3/organizations`), before anything about spaces or apps is read. Another `--space` is allowed (see above).
+- **Older snapshots:** one written before the history existed still counts its own observation, judged by its own `--min-traffic-window`.
+- **Offline:** the history is part of the snapshot's raw data, so `report --from` gives identical results without the network. The snapshot records `options.previousScannedAt`, and the report's summary names that scan.
 
 ## UI5_OUT_OF_MAINTENANCE
 

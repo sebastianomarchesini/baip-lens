@@ -11,20 +11,20 @@ BAIP Lens runs on your machine and writes files to your disk. This page lists wh
 
 ## Where requests go
 
-**In 0.1.0 only the first two rows are used.** The other hosts are already in the allow-list for the rules of the next releases, so that adding a rule can never add a destination unnoticed, but nothing contacts them yet.
+**Only the first three rows are used today.** The other hosts are already in the allow-list for the rules of the next releases, so that adding a rule can never add a destination unnoticed, but nothing contacts them yet.
 
 | Host | Why | What is sent | Status |
 | --- | --- | --- | --- |
 | Your CF API (`--api`) | inventory | `GET` only, with your token | 0.1.0 |
 | Your UAA or login server (from the CF root) | sign-in, token refresh or client credentials | `POST /oauth/token` only | 0.1.0 |
-| Your log cache | request metrics | `GET` only | planned (v0.2) |
+| Your log cache (from the CF root, never guessed from the API host) | when each app last served a request (`APP_IDLE`) | `GET /api/v1/read/<app-guid>` only, with your token, for apps with an HTTP route | unreleased; `--no-traffic-check` turns it off |
 | `api.osv.dev` | known vulnerabilities | public package names and versions from your SBOM | planned |
 | `endoflife.date` | runtime end-of-life dates | product names such as `nodejs` | planned |
 | `ui5.sap.com` | UI5 maintenance status | a request for `/versionoverview.json` | planned |
 | `registry.npmjs.org` | current `@sap/*` versions | four fixed package names | planned |
 | Your app routes | the UI5 version served | one unauthenticated `GET /resources/sap-ui-version.json` per app, with no redirects; `--no-probe-routes` will turn it off | planned; 0.1.0 makes no request to app routes |
 
-Your CF token is sent to the CF API only. The allow-list refuses an `Authorization` header to any other host.
+Your CF token is sent to the CF API and its log cache only. The allow-list knows which credential each host may receive: the CF token for those two, the OAuth client id and secret for the token endpoint (never the CF token), and nothing for any other host. Unit tests check that no other host receives it, and that a credential a host may not receive is refused before anything is sent.
 
 ## What is kept
 
@@ -38,6 +38,11 @@ The snapshot and reports contain only allow-listed fields. The parsers drop ever
   - GUID, app, state, timestamps, stack, and the detected buildpack names and versions.
   - Detect output is cut to 200 characters.
   - For Docker droplets, the image reference with credentials removed.
+- **Routes:** GUID, owning space, kind (`http`, `tcp`, `internal` or `unknown`) and the GUIDs of the destination apps, limited to the apps of the scanned inventory. Host, path, port and URL are not kept, nor annotations and labels. A destination that points to an app outside the inventory (possible with shared routes) is dropped, and a route with no destination left is not kept at all.
+- **Web processes:** GUID, app, desired instance count, health check type and updated time. Never the start command.
+- **App usage (`APP_IDLE`):** per app, a state (`idle`, `active`, `unknown` or `not_assessed`) with a signal and confidence, a reason code, or, for `active`, the time of the last request. All are fixed values except that one timestamp. The reports carry the same values: the Apps table, the `usage*` columns of the apps CSV and the JSON report.
+- **Traffic history (`raw.history`):** per app, its GUID and its space's GUID, when the newest request any scan saw was written, when the current run of scans without a request began, and how many scans that run has. The list is in the snapshot only, but a `no_traffic` finding repeats these values (`scansWithoutTraffic`, `firstScanWithoutTraffic`, `silentSpanDays`, `lastRequestEverSeen`) in its evidence, so every report format carries them for that app. With `scan --previous`, the earlier snapshot is read from disk and validated, unknown fields are dropped, and only two things reach the new snapshot: these history values and the earlier scan's time (`options.previousScannedAt`, which the JSON and HTML reports carry too). An entry carries forward for an app still in the inventory, or unchanged for an app this scan could not see; it is dropped once a scan reads the app's space without the app. Nothing else of the earlier snapshot, such as its app names or findings, is carried.
+- **Traffic (`raw.traffic`, snapshot only):** per app with an HTTP route, three values read from Log Cache: `lastRequestAt` (when the newest router access log was written, nothing about the request), `windowStart` (the oldest envelope Log Cache held for the app) and `envelopesExamined` (a count). A `no_traffic` finding repeats the window start and length in its evidence.
 - **Findings:** rule id, severity, app reference, evidence (facts such as dates and versions), remediation and links.
 
 ## What is never kept
@@ -50,10 +55,10 @@ The snapshot and reports contain only allow-listed fields. The parsers drop ever
   - Tokens, refresh tokens and client secrets.
   - Environment variable **values**; with `--deep`, only variable names are kept.
   - Service credentials and service keys.
-  - Droplet `execution_metadata` and start commands (which can contain passwords).
-- **Logs** are not read in v0.1.
+  - Droplet `execution_metadata` and start commands, and process commands (all of which can contain passwords).
+- **Log lines.** The traffic check of `APP_IDLE` reads an app's log envelopes from Log Cache, and of each envelope it parses two things only: its timestamp and its `source_type` tag, which is checked for being `RTR` (and for being there at all) and then dropped. The access-log line (client address, request path and query, user agent, `X-Forwarded-For`, request id), the lines of every other log, every other tag (app, space and org names, addresses) and the instance are never parsed and never kept. Per app, only `lastRequestAt`, `windowStart` and `envelopesExamined` reach the snapshot. The same holds for the one envelope of any type read to find where the window starts, such as a router `http` timer whose tags carry the request's address, path and user agent. The leak test plants a client address, a request path, a query, a user agent and a request id in a router log (in its payload and in its tags) and in such a timer, plus app-log lines and tags on app logs, and fails if any of them reaches the snapshot, a report or what the scan prints while it runs.
 
-A test scans the snapshot and every report format for planted secrets, emails, JWTs and credential URLs (`packages/cli/test/e2e/leak.test.ts`).
+A test scans the snapshot, every report format and the scan's progress output for planted secrets, emails, JWTs and credential URLs (`packages/cli/test/e2e/leak.test.ts`).
 
 ## Project scans
 
@@ -79,6 +84,8 @@ The acme-incidents fixture plants a poison value in every one of those places, a
 ## Side effects in your landscape
 
 `GET` requests do not change anything. One read is audited by Cloud Foundry: with `--deep`, reading an app's environment variables creates an `audit.app.environment_variables.show` event for that app. Tell your security team before you run `--deep` scans.
+
+Reading Log Cache creates no audit event, but it is not free: for each app, Log Cache asks Cloud Controller, with your token, whether you may read the app (`GET /v3/apps/<guid>`), which counts once per app against your CF API rate limit.
 
 ## User-level usage (v0.2)
 

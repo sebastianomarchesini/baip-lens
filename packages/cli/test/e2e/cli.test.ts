@@ -5,7 +5,7 @@ import { describe, expect, it } from 'vitest';
 import { type CliIo, EXIT, main } from '../../src/main.js';
 import { TOOL_VERSION } from '../../src/version.js';
 import { jsonResponse } from '../support/fakeFetch.js';
-import { ACME, acmeFetch } from '../support/acme.js';
+import { ACME, ACME_PREVIOUS_PATH, ACME_TRAFFIC_APPS, acmeFetch } from '../support/acme.js';
 
 interface Captured {
   io: CliIo;
@@ -56,11 +56,116 @@ describe('baip-lens CLI', () => {
       'snapshot-20260929T000000Z.json',
     ]);
     expect(c.out()).toContain(
-      'Scanned 8 app(s) in acme-prod: 3 finding(s) (0 critical, 0 high, 1 medium, 2 low, 0 info)',
+      'Scanned 8 app(s) in acme-prod: 6 finding(s) (0 critical, 0 high, 1 medium, 5 low, 0 info)',
     );
     expect(c.err()).toContain('Credentials: BAIP_LENS_ACCESS_TOKEN');
     // SEC-22: the sharing warning is printed once per scan.
     expect(c.out().match(/do not commit them/g)).toHaveLength(1);
+  });
+
+  it('passes --traffic-pages and --min-traffic-window to the scan and records them', async () => {
+    const out = await tmp();
+    const fake = acmeFetch({ fullLogPage: true });
+    const args = scanArgs(out, '--traffic-pages', '1', '--min-traffic-window', '48');
+    expect(await main(args, capture(fake).io)).toBe(EXIT.ok);
+    const snapshot = JSON.parse(
+      await readFile(join(out, 'snapshot-20260929T000000Z.json'), 'utf8'),
+    ) as { options: unknown; apps: { name: string; usage: unknown }[] };
+    expect(snapshot.options).toMatchObject({
+      trafficCheck: true,
+      trafficPages: 1,
+      minTrafficWindowHours: 48,
+    });
+    // One full page and the cap: no second page and no window-start read for that app,
+    // and the 17.7 hours read are less than the 48 asked for.
+    const approuter = fake.calls.filter((c) =>
+      c.url.pathname.endsWith(ACME_TRAFFIC_APPS['orders-approuter']),
+    );
+    expect(approuter.map((c) => c.url.searchParams.get('limit'))).toEqual(['1000']);
+    expect(snapshot.apps.find((a) => a.name === 'orders-approuter')?.usage).toEqual({
+      state: 'unknown',
+      reason: 'window_too_short',
+    });
+  });
+
+  it('asks Log Cache nothing with --no-traffic-check and says the check was turned off', async () => {
+    const out = await tmp();
+    const fake = acmeFetch();
+    const c = capture(fake);
+    expect(await main(scanArgs(out, '--no-traffic-check'), c.io)).toBe(EXIT.ok);
+    expect(fake.calls.some((call) => call.url.host === ACME.logCache)).toBe(false);
+    expect(c.out()).toContain('skipped collect.traffic: turned off with --no-traffic-check');
+  });
+
+  it('carries history with --previous, and report --from gives the same results offline', async () => {
+    const out = await tmp();
+    const c = capture();
+    expect(await main(scanArgs(out, '--previous', ACME_PREVIOUS_PATH), c.io)).toBe(EXIT.ok);
+    expect(c.err()).toContain('Traffic history carried forward from the scan of 2026-09-22');
+    type Report = { findings: { title: string }[]; apps: unknown[] };
+    const read = async (dir: string) =>
+      JSON.parse(await readFile(join(dir, 'baip-lens-report.json'), 'utf8')) as Report;
+    const scanned = await read(out);
+    expect(scanned.findings.map((f) => f.title)).toContain(
+      'No requests seen across 6 scans over 42 days',
+    );
+
+    const again = await tmp();
+    const r = capture();
+    r.io.fetch = () => Promise.reject(new Error('report --from must not use the network'));
+    const snapshot = join(out, 'snapshot-20260929T000000Z.json');
+    const args = ['report', '--from', snapshot, '--format', 'json', '--out', again];
+    expect(await main(args, r.io)).toBe(EXIT.ok);
+    const offline = await read(again);
+    expect(offline.findings).toEqual(scanned.findings);
+    expect(offline.apps).toEqual(scanned.apps);
+  });
+
+  it('exits 2 for a --previous snapshot it cannot use, before any request', async () => {
+    const dir = await tmp();
+    const other = join(dir, 'other.json');
+    const previous = JSON.parse(await readFile(ACME_PREVIOUS_PATH, 'utf8')) as {
+      scope: { apiEndpoint: string };
+    };
+    previous.scope.apiEndpoint = 'https://api.cf.other.example.org/';
+    await writeFile(other, JSON.stringify(previous));
+    const fake = acmeFetch();
+    const c = capture(fake);
+    expect(await main(scanArgs(await tmp(), '--previous', other), c.io)).toBe(EXIT.error);
+    expect(c.err()).toContain(
+      'is of https://api.cf.other.example.org/, not https://api.cf.example.org/',
+    );
+    expect(fake.calls).toEqual([]);
+
+    // A file that is not a snapshot, one that is missing, one that is not JSON
+    // (its content is never quoted back) and a project scan: nothing is sent.
+    const unused = acmeFetch();
+    const cases: [string, string, string][] = [
+      ['broken.json', '{ "schemaVersion": 1 }', 'is not valid'],
+      ['missing.json', '', 'Could not read snapshot'],
+      ['secret.txt', 'sk_live_51HxQzK9-POISON', 'the file is not valid JSON'],
+    ];
+    for (const [name, content, message] of cases) {
+      const file = join(dir, name);
+      if (content !== '') await writeFile(file, content);
+      const d = capture(unused);
+      expect(await main(scanArgs(await tmp(), '--previous', file), d.io)).toBe(EXIT.error);
+      expect(d.err()).toContain(message);
+      expect(d.err()).not.toContain('sk_live');
+    }
+    const project = join(dir, 'project.json');
+    const sample = JSON.parse(await readFile(ACME_PREVIOUS_PATH, 'utf8')) as Record<
+      string,
+      unknown
+    >;
+    await writeFile(
+      project,
+      JSON.stringify({ ...sample, scope: { orgs: [], projects: ['acme-incidents'] } }),
+    );
+    const p = capture(unused);
+    expect(await main(scanArgs(await tmp(), '--previous', project), p.io)).toBe(EXIT.error);
+    expect(p.err()).toContain('is a project scan');
+    expect(unused.calls).toEqual([]);
   });
 
   it('scans a local project directory without the network and names the project', async () => {
@@ -160,9 +265,21 @@ describe('baip-lens CLI', () => {
     );
     expect(code).toBe(EXIT.findings);
     const report = JSON.parse(await readFile(join(reportOut, 'baip-lens-report.json'), 'utf8')) as {
-      findings: unknown[];
+      findings: { id: string; app: { name: string } }[];
+      apps: { name: string; usage: unknown }[];
     };
-    expect(report.findings).toHaveLength(3);
+    // Three APP_NO_RECENT_DEPLOY findings and three APP_IDLE ones, recomputed offline.
+    expect(report.findings).toHaveLength(6);
+    expect(report.findings.filter((f) => f.id === 'APP_IDLE').map((f) => f.app.name)).toEqual([
+      'custom-bp-app',
+      'legacy-reporting',
+      'orders-approuter',
+    ]);
+    expect(report.apps.find((a) => a.name === 'custom-bp-app')?.usage).toEqual({
+      state: 'idle',
+      signal: 'no_route',
+      confidence: 'high',
+    });
   });
 
   it('exits 2 for an unreadable snapshot', async () => {

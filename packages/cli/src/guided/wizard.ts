@@ -1,5 +1,6 @@
 import { join } from 'node:path';
 import { z } from 'zod';
+import { skippedPhrase } from '../checks.js';
 import { listSpaces } from '../collectors/orgs.js';
 import { parseApiUrl } from '../config.js';
 import {
@@ -399,9 +400,10 @@ export async function runWizard(o: WizardOptions): Promise<number> {
           ? ` (${c.critical} critical · ${c.high} high · ${c.medium} medium · ${c.low} low · ${c.info} info).`
           : '.'),
     );
-    if (data.summary.checksSkipped > 0) {
+    const skipped = data.checks.filter((check) => check.status === 'skipped');
+    if (skipped.length > 0) {
       p.say(
-        `${plural(data.summary.checksSkipped, 'check')} could not run with your role; the report says which. Nothing is wrong with your apps because of that.`,
+        `${plural(skipped.length, 'check')} ${skippedPhrase(skipped)}; the report says which and why. Nothing is wrong with your apps because of that.`,
       );
     }
     p.say(`Report: ${html}`);

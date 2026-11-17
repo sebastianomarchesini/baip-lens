@@ -2,7 +2,14 @@ import type { CheckResult } from '../model/check.js';
 import type { AppRef, Finding } from '../model/finding.js';
 import type { RawData, RawProject } from '../model/raw.js';
 import { type Severity, emptySeverityCounts, severityRank } from '../model/severity.js';
-import type { AppInventoryItem, Snapshot } from '../model/snapshot.js';
+import {
+  type AppInventoryItem,
+  type AppUsage,
+  DEFAULT_SNAPSHOT_OPTIONS,
+  type Snapshot,
+  type SnapshotOptions,
+} from '../model/snapshot.js';
+import { idleApps } from './idleApps.js';
 import { noRecentDeploy } from './noRecentDeploy.js';
 import { PROJECT_ANALYZERS } from './project/index.js';
 import {
@@ -15,7 +22,7 @@ import {
 } from './types.js';
 
 /** Every rule, in report order: Cloud Foundry rules first, then project rules. */
-export const ANALYZERS: readonly Analyzer[] = [noRecentDeploy, ...PROJECT_ANALYZERS];
+export const ANALYZERS: readonly Analyzer[] = [noRecentDeploy, idleApps, ...PROJECT_ANALYZERS];
 
 /** Weights used to rank apps by risk (docs/rules.md). */
 export const RISK_WEIGHTS: Record<Severity, number> = {
@@ -118,6 +125,7 @@ export function buildInventory(
   raw: RawData,
   findings: Finding[],
   appRef: (guid: string) => AppRef | undefined,
+  usage: ReadonlyMap<string, AppUsage> = new Map(),
 ): AppInventoryItem[] {
   const droplets = new Map(raw.droplets.map((d) => [d.appGuid, d]));
   const byApp = new Map<string, Finding[]>();
@@ -147,6 +155,7 @@ export function buildInventory(
       createdAt: app.createdAt,
       updatedAt: app.updatedAt,
       lastDeployAt: droplet?.createdAt ?? null,
+      usage: usage.get(app.guid) ?? null,
       ...countFindings(byApp.get(app.guid) ?? []),
     };
   });
@@ -165,6 +174,7 @@ export function buildInventory(
       createdAt: null,
       updatedAt: null,
       lastDeployAt: null,
+      usage: null,
       ...countFindings(byApp.get(ref.guid) ?? []),
     };
   });
@@ -187,17 +197,30 @@ export function analyze(
   scannedAt: string,
   collectorChecks: readonly CheckResult[],
   analyzers: readonly Analyzer[] = ANALYZERS,
+  options: SnapshotOptions = DEFAULT_SNAPSHOT_OPTIONS,
 ): AnalysisResult {
   const appRef = appRefResolver(raw);
-  const context: AnalyzerContext = { now: new Date(scannedAt), raw, appRef, projectRef };
+  const context: AnalyzerContext = {
+    now: new Date(scannedAt),
+    raw,
+    checks: collectorChecks,
+    options,
+    appRef,
+    projectRef,
+  };
   const status = new Map(collectorChecks.map((c) => [c.id, c.status]));
   const findings: Finding[] = [];
   const ruleChecks: CheckResult[] = [];
+  const usage = new Map<string, AppUsage>();
 
   for (const analyzer of analyzers) {
     if (analyzer.requires.some((id) => !status.has(id))) continue;
     const check = ruleCheck(analyzer.rule);
     const missing = analyzer.requires.filter((id) => status.get(id) !== 'ran');
+    // Also when a collector was skipped: the inventory then says "unknown".
+    for (const [guid, verdict] of analyzer.usage?.(context, missing.length === 0) ?? []) {
+      usage.set(guid, verdict);
+    }
     if (missing.length > 0) {
       ruleChecks.push({
         id: check.id,
@@ -214,7 +237,7 @@ export function analyze(
   }
 
   findings.sort(compareFindings);
-  return { apps: buildInventory(raw, findings, appRef), findings, ruleChecks };
+  return { apps: buildInventory(raw, findings, appRef, usage), findings, ruleChecks };
 }
 
 /**
@@ -223,7 +246,13 @@ export function analyze(
  */
 export function reanalyze(snapshot: Snapshot): Snapshot {
   const collectorChecks = snapshot.checks.filter((c) => c.id.startsWith('collect.'));
-  const analysis = analyze(snapshot.raw, snapshot.scannedAt, collectorChecks);
+  const analysis = analyze(
+    snapshot.raw,
+    snapshot.scannedAt,
+    collectorChecks,
+    ANALYZERS,
+    snapshot.options,
+  );
   return {
     ...snapshot,
     checks: [...collectorChecks, ...analysis.ruleChecks],

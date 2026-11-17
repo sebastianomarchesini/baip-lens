@@ -413,7 +413,17 @@ export function htmlBootstrap(
 }
 
 export function rawData(...projects: RawProject[]): RawData {
-  return { orgs: [], spaces: [], apps: [], droplets: [], projects };
+  return {
+    orgs: [],
+    spaces: [],
+    apps: [],
+    droplets: [],
+    routes: [],
+    processes: [],
+    traffic: [],
+    history: [],
+    projects,
+  };
 }
 
 /** Runs one rule as a project scan would: the project collector ran, nothing else exists. */

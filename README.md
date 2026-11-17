@@ -79,6 +79,8 @@ baip-lens guided [--no-open]    the same, explicitly
 baip-lens doctor [--api <url>]  checks Node.js, network, certificates, login and output folder
 baip-lens scan   --api <cf api url> --org <name> [--space <name>] [--deep]
                 [--out ./reports] [--format html,json,csv,sarif] [--fail-on <severity>] [--concurrency 5]
+                [--no-traffic-check] [--min-traffic-window 12] [--traffic-pages 5]
+                [--previous <snapshot.json>] [--quiet]
 baip-lens project --path <dir> [--out ./reports] [--format html,json,csv,sarif] [--fail-on <severity>] [--quiet]
 baip-lens report --from <snapshot.json> [--format html,json,csv,sarif] [--out ./reports] [--fail-on <severity>]
 baip-lens version
@@ -89,6 +91,7 @@ baip-lens version
 - Guided mode signs in the way `cf login --sso` does (one-time code from your company login) or with username and password, keeps the session in memory only, and writes to `./baip-lens-reports/<date-time>/`.
 - `scan` and `project` write one snapshot (`snapshot-<time>.json`) and the requested reports.
 - `report --from` re-runs every rule on a snapshot **offline**, for example after you upgrade BAIP Lens.
+- `scan --previous <snapshot.json>` passes the last snapshot of the same org to the next scan, so `APP_IDLE` counts scans in a row without a request ("No requests seen across 6 scans over 42 days"). Three or more over 30 days or more raise its confidence to high. Each snapshot carries the history on, so the last one is all the next scan needs, even when it was a `--space` scan: the history of apps a scan did not see is kept as it was.
 - Exit codes:
   - `0`: no findings at or above `--fail-on` (the default, `none`, never fails).
   - `1`: findings met the threshold.
@@ -101,7 +104,9 @@ The HTML report is a single file. Fonts, themes and data are embedded, it follow
 | Check | Minimum CF role | Default |
 | --- | --- | --- |
 | App inventory and current droplets (`collect.apps`, `collect.droplets`), rule `APP_NO_RECENT_DEPLOY` | Space Auditor | on |
-| Planned: processes, buildpacks, stacks, routes, binding metadata and the rules built on them | Space Auditor | on, in the next releases |
+| Routes and web processes (`collect.routes`, `collect.processes`), rule `APP_IDLE` | Space Auditor | on |
+| Last request per app from Log Cache (`collect.traffic`), for `APP_IDLE` | Space Auditor | on; `--no-traffic-check` turns it off |
+| Planned: buildpacks, stacks, binding metadata and the rules built on them | Space Auditor | on, in the next releases |
 | Planned: plain-text secrets in environment variable **names** (`ENV_SECRET_PLAINTEXT`) | Space Developer or Space Supporter | `--deep` only |
 | Project scan (`collect.project` and the thirteen project rules) | none: local files, no login, no network | on, for `baip-lens project` |
 
@@ -109,8 +114,8 @@ The Cloud Foundry list endpoints answer with what your user may see rather than 
 
 ## Privacy
 
-- **Read-only:** the HTTP client refuses any method other than `GET` to the CF API. The only `POST` request goes to the OAuth token endpoint.
-- **No data leaves your machine:** a Cloud Foundry scan talks to your CF API and its login server (UAA) and to nothing else. The egress allow-list also names `api.osv.dev`, `endoflife.date`, `ui5.sap.com` and `registry.npmjs.org` for the version and vulnerability rules of the next releases; none of them is contacted yet. There is no telemetry.
+- **Read-only:** the HTTP client refuses any method other than `GET` to the CF API and its log cache. The only `POST` request goes to the OAuth token endpoint.
+- **No data leaves your machine:** a Cloud Foundry scan talks to your CF API, its login server (UAA) and its log cache, and to nothing else. The log cache address comes from your CF API, and `--no-traffic-check` leaves it out. The egress allow-list also names `api.osv.dev`, `endoflife.date`, `ui5.sap.com` and `registry.npmjs.org` for the version and vulnerability rules of the next releases; none of them is contacted yet. There is no telemetry.
 - **No personal data:** user names, emails and IDs are never written. Audit-event actors are dropped when the events are read.
 - **No secrets:** tokens, environment variable values and service credentials are never printed or stored. Credentials in buildpack URLs are stripped, everything printed to the terminal passes through a redaction filter, and the endpoints that return credentials (`/v3/apps/:guid/env`, binding `details`) are refused by the allow-list even for `GET`.
 

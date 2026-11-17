@@ -63,6 +63,85 @@ export const RawDropletSchema = z.object({
 });
 export type RawDroplet = z.infer<typeof RawDropletSchema>;
 
+/**
+ * How a route can carry traffic (docs/data-sources.md §9.1). Only `http`
+ * routes go through gorouter and leave access logs; `tcp` and `internal`
+ * routes never do; `unknown` is a route whose domain was not returned.
+ */
+export const RouteKindSchema = z.enum(['http', 'tcp', 'internal', 'unknown']);
+export type RouteKind = z.infer<typeof RouteKindSchema>;
+
+/**
+ * A route of the scanned spaces with at least one destination in the
+ * inventory. Host, path, port and URL are not kept: the rules only need to
+ * know that an app is reachable, and how.
+ */
+export const RawRouteSchema = z.object({
+  guid: z.string(),
+  /** The space that owns the route (it may be shared into a scanned space). */
+  spaceGuid: z.string(),
+  kind: RouteKindSchema,
+  /**
+   * Destination apps, limited to apps in the scanned inventory. CF allows at
+   * most 100 destinations per route; no cap is applied here, because dropping
+   * one would make a reachable app look unrouted.
+   */
+  appGuids: z.array(z.string()),
+});
+export type RawRoute = z.infer<typeof RawRouteSchema>;
+
+/** `health_check.type` of a process; anything unrecognised becomes `unknown`. */
+export const HealthCheckTypeSchema = z.enum(['port', 'http', 'process', 'unknown']);
+export type HealthCheckType = z.infer<typeof HealthCheckTypeSchema>;
+
+/** A `web` process. Its `command` is never collected (docs/data-sources.md §9.2). */
+export const RawProcessSchema = z.object({
+  guid: z.string(),
+  appGuid: z.string(),
+  type: z.literal('web'),
+  /** Desired instance count, not the number running. */
+  instances: z.number().int().nonnegative(),
+  healthCheckType: HealthCheckTypeSchema.nullable(),
+  updatedAt: Timestamp,
+});
+export type RawProcess = z.infer<typeof RawProcessSchema>;
+
+/**
+ * What the traffic check keeps per app, and nothing else (docs/privacy.md):
+ * the access-log lines, their tags and the instance are dropped as they are
+ * read, so client addresses, paths and user agents never reach a snapshot.
+ */
+export const RawTrafficSchema = z.object({
+  appGuid: z.string(),
+  /** The newest router access log seen; null when the window held none. */
+  lastRequestAt: Timestamp.nullable(),
+  /** The oldest moment the window covers; null when Log Cache held nothing for the app. */
+  windowStart: Timestamp.nullable(),
+  /** LOG envelopes read to get there. */
+  envelopesExamined: z.number().int().nonnegative(),
+});
+export type RawTraffic = z.infer<typeof RawTrafficSchema>;
+
+/**
+ * What earlier scans saw of an app's traffic, carried forward with
+ * `scan --previous` and matched by app GUID (docs/rules.md#app_idle). A
+ * request in any window ends a run; a scan without one counts only when it
+ * read at least `--min-traffic-window` (D8). Like `RawTraffic`, it holds
+ * times and a count, never anything about a request.
+ */
+export const RawHistorySchema = z.object({
+  appGuid: z.string(),
+  /** The app's space: an entry is dropped only when a scan read that space's apps without this one. */
+  spaceGuid: z.string(),
+  /** The newest request any counted scan saw; null when none ever did. */
+  lastRequestEverSeen: Timestamp.nullable(),
+  /** When the current run of scans without a request began; null while the latest counted scan saw one. */
+  firstScanWithoutTraffic: Timestamp.nullable(),
+  /** Scans in a row, the latest counted one included, that saw no request. */
+  scansWithoutTraffic: z.number().int().nonnegative(),
+});
+export type RawHistory = z.infer<typeof RawHistorySchema>;
+
 /*
  * Local project (`baip-lens project`). Every field is an allow-listed
  * structural fact: identifiers, relative file names, counts and booleans.
@@ -413,6 +492,14 @@ export const RawDataSchema = z.object({
   apps: z.array(RawAppSchema),
   /** Current droplet per app; absent when the droplet collector was skipped. */
   droplets: z.array(RawDropletSchema),
+  /** Routes with a destination in the inventory; empty in snapshots written before 0.3. */
+  routes: z.array(RawRouteSchema).default([]),
+  /** `web` processes of the inventory's apps; empty in snapshots written before 0.3. */
+  processes: z.array(RawProcessSchema).default([]),
+  /** Last request per app that has an HTTP route, from Log Cache; empty before 0.3. */
+  traffic: z.array(RawTrafficSchema).default([]),
+  /** Traffic history per app, this scan included (`scan --previous`); empty before 0.3. */
+  history: z.array(RawHistorySchema).default([]),
   /** Local projects (`baip-lens project`); empty for a CF scan and in snapshots written before 0.2. */
   projects: z.array(RawProjectSchema).default([]),
 });

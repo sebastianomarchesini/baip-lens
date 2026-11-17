@@ -5,7 +5,7 @@ import { type Analyzer, projectRef, ruleHelpUri } from '../../../src/analyzers/t
 import { FindingSchema } from '../../../src/model/finding.js';
 import { OWASP_2025_IDS } from '../../../src/model/owasp.js';
 import { RawDataSchema, RawProjectSchema } from '../../../src/model/raw.js';
-import { RuleMetaSchema } from '../../../src/model/snapshot.js';
+import { DEFAULT_SNAPSHOT_OPTIONS, RuleMetaSchema } from '../../../src/model/snapshot.js';
 import {
   NOW,
   POISON,
@@ -150,6 +150,8 @@ describe('projectFinding', () => {
   const context = {
     now: new Date(NOW),
     raw: rawData(project),
+    checks: [],
+    options: DEFAULT_SNAPSHOT_OPTIONS,
     appRef: () => undefined,
     projectRef,
   };

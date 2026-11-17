@@ -1,4 +1,4 @@
-import type { ReportData } from '@baip-lens/model';
+import type { CheckResult, ReportData } from '@baip-lens/model';
 import { formatDate } from './format';
 
 /**
@@ -127,6 +127,20 @@ export function startHereSentences(data: ReportData): string[] {
     sentences.push(
       `${apps(data.summary.apps)} in ${where} ${were(data.summary.apps)} scanned on ${when}.`,
     );
+    // `scan --previous`: say where a span of scans in a finding comes from,
+    // only when traffic was read and the rule that uses it ran.
+    const previous = data.options.previousScannedAt;
+    const ran = (id: string) => data.checks.some((c) => c.id === id && c.status === 'ran');
+    if (
+      previous !== null &&
+      previous !== undefined &&
+      ran('collect.traffic') &&
+      ran('rule.APP_IDLE')
+    ) {
+      sentences.push(
+        `Whether apps are used also counts the earlier scans, up to the one of ${formatDate(previous)}.`,
+      );
+    }
   }
 
   const affected = project
@@ -141,13 +155,13 @@ export function startHereSentences(data: ReportData): string[] {
     );
   }
 
-  const skipped = data.summary.checksSkipped;
-  if (skipped > 0) {
-    const checks = `${skipped} check${skipped === 1 ? '' : 's'}`;
+  const skipped = data.checks.filter((check) => check.status === 'skipped');
+  if (skipped.length > 0) {
+    const checks = `${skipped.length} check${skipped.length === 1 ? '' : 's'}`;
     sentences.push(
       project
         ? `${checks} could not run, so some things were not looked at. That is not a problem with your project.`
-        : `${checks} could not run with your role, so some things were not looked at. That is not a problem with your apps.`,
+        : `${checks} ${skippedPhrase(skipped)}, so some things were not looked at. That is not a problem with your apps.`,
     );
   }
   sentences.push(
@@ -156,4 +170,25 @@ export function startHereSentences(data: ReportData): string[] {
       : 'Nothing in your account was changed: this scan only read information.',
   );
   return sentences;
+}
+
+/**
+ * What stopped the skipped checks, as the words after "N check(s)": the role
+ * only when a missing role is all that stopped them (a check that depends on a
+ * forbidden one counts too), never for a check that was turned off or whose
+ * service is absent or did not answer. Twin of `skippedPhrase` in
+ * packages/cli/src/checks.ts, which the UI build cannot import.
+ */
+export function skippedPhrase(skipped: readonly CheckResult[]): string {
+  const codes = skipped.map((check) => check.reasonCode);
+  if (
+    codes.includes('insufficient_role') &&
+    codes.every((code) => code === 'insufficient_role' || code === 'dependency_skipped')
+  ) {
+    return 'could not run with your role';
+  }
+  if (codes.length > 0 && codes.every((code) => code === 'disabled')) {
+    return codes.length === 1 ? 'was turned off' : 'were turned off';
+  }
+  return 'did not run';
 }

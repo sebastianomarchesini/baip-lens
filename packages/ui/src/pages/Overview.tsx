@@ -6,6 +6,7 @@ import { SeverityChart } from '../components/SeverityChart';
 import { formatEvidenceValue } from '../data/format';
 import { SEVERITY_LABEL, SEVERITY_STATE } from '../data/severity';
 import { scopeLabel, startHereSentences } from '../data/summary';
+import { idleHint } from '../data/usage';
 
 interface Kpi {
   label: string;
@@ -29,6 +30,12 @@ function ruleKpi(data: ReportData, label: string, ruleIds: string[], unit: strin
       .map((f) => `${f.app.guid}:${formatEvidenceValue(f.evidence.subject)}`),
   );
   return { label, value: String(affected.size), hint: unit };
+}
+
+/** Idle apps: APP_IDLE findings, with each signal's confidence and the unknown apps as the hint. */
+function idleKpi(data: ReportData): Kpi {
+  const kpi = ruleKpi(data, 'Idle apps', ['APP_IDLE'], 'apps that look unused');
+  return kpi.value === '—' ? kpi : { ...kpi, hint: idleHint(data.apps) };
 }
 
 /** The two rule KPIs depend on what was scanned: a CF landscape or local projects. */
@@ -65,7 +72,7 @@ function kpiRow(data: ReportData): Kpi[] {
   return [
     { label: 'Apps scanned', value: String(data.summary.apps), hint: scopeLabel(data.scope) },
     findings,
-    ruleKpi(data, 'Idle apps', ['APP_IDLE'], 'apps with no activity'),
+    idleKpi(data),
     ruleKpi(
       data,
       'End-of-life runtimes',

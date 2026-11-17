@@ -30,12 +30,22 @@ test('the report works from disk with networking disabled', async ({ page, conte
 
   await page.getByRole('tab', { name: 'Findings' }).click();
   await expect(page).toHaveURL(/#\/findings$/);
-  await expect(page.getByRole('article')).toHaveCount(3);
+  // Three APP_NO_RECENT_DEPLOY findings and three APP_IDLE findings.
+  await expect(page.getByRole('article')).toHaveCount(6);
   await expect(page).toHaveTitle('Findings · BAIP Lens report');
 
   await page.getByRole('tab', { name: 'Apps' }).click();
   await expect(page).toHaveURL(/#\/apps$/);
   await expect(page.getByRole('gridcell', { name: 'legacy-reporting', exact: true })).toBeVisible();
+  // APP_IDLE per app: a Usage column at this width, with the full sentence as tooltip.
+  await expect(page.getByRole('columnheader', { name: 'Usage' })).toBeVisible();
+  await expect(page.getByTitle('Looks unused: no route, high confidence')).toBeVisible();
+  await expect(page.getByTitle(/^In use: last request Sep 28, 2026/)).toBeVisible();
+  await expect(page.getByTitle('Unknown: log history too short')).toBeVisible();
+  await expect(
+    // Six scans over 42 days without a request (scan --previous): high confidence.
+    page.getByTitle('Looks unused: no request in the router logs, high confidence'),
+  ).toBeVisible();
   await expect(page).toHaveTitle('Apps · BAIP Lens report');
   await expect(page.getByRole('heading', { level: 1, name: 'Apps · acme-prod' })).toBeAttached();
   // Focus moved to the page, so a screen reader announces the new section.
@@ -123,6 +133,26 @@ test('the theme menu switches between light and dark by hand', async ({ page, co
   await page.getByRole('button', { name: 'Theme' }).click();
   await page.locator('ui5-menu-item[data-mode="light"]').click();
   await expect.poll(() => background(page)).toBe(light);
+});
+
+test('the apps table fits tablet, laptop and desktop widths without scrolling sideways', async ({
+  page,
+  context,
+}) => {
+  await isolate(context, page);
+  // At 1024 px and below the Usage column pops in under the app name; at 1280 px it is a column.
+  for (const width of [768, 1024, 1280]) {
+    await page.setViewportSize({ width, height: 900 });
+    await page.goto(`${REPORT}#/apps`);
+    await expect(page.getByText('Apps (8)')).toBeVisible();
+    await page.waitForTimeout(300);
+    const overflow = await page.evaluate(() => {
+      const table = document.querySelector('[data-component-name="AnalyticalTableContainer"]');
+      return table ? table.scrollWidth - table.clientWidth : -1;
+    });
+    expect(overflow, `apps table overflow at ${width}px`).toBeLessThanOrEqual(0);
+    await expect(page.getByTitle('Looks unused: no route, high confidence')).toBeVisible();
+  }
 });
 
 test('is usable at phone width without horizontal page scrolling', async ({ page, context }) => {
