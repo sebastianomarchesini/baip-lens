@@ -49,7 +49,17 @@ Press Ctrl+C at any time to stop; nothing is written until the scan starts.
 ## Step 4 · Answer four questions
 
 **1 · Where is your landscape?**
-Pick your region from the list by typing its number, or choose `1` and paste the **API Endpoint** from the BTP cockpit: open your subaccount, look at **Overview → Cloud Foundry Environment**, and copy the address that starts with `https://api.cf.`. You can also type just the region, for example `eu10-004` or `us10-001.hana.ondemand.com`. BAIP Lens checks that it can reach the address before going on.
+Type your region and press Enter, for example `eu10`, `us10` or `us10-001` (`us10.001` works too). You find it in the BTP cockpit: open your subaccount and look at **Overview → Cloud Foundry Environment**. You can also paste the full **API Endpoint** shown there, the address that starts with `https://api.cf.`. Not sure which region you are in? Type `list` to see all of them, or run `npx baip-lens regions` in another terminal. BAIP Lens checks that it can reach the address before going on.
+
+```
+Step 1 of 4 · Where is your landscape?
+Type your region, for example eu10, us10 or us10-001, or paste the API endpoint.
+Both are shown in the BTP cockpit under Subaccount → Overview → Cloud Foundry Environment.
+Not sure? Type "list" to see all regions.
+Region or API endpoint: eu10
+Checking api.cf.eu10.hana.ondemand.com (Europe (Frankfurt), AWS) …
+Connected.
+```
 
 **2 · Sign in**
 Choose **Open a browser and sign in with my company account**. Your browser opens a page from your own landscape's login server. Sign in the way you always do (single sign-on, two-factor, whatever your company uses). The page then shows a **one-time code**. Copy it, go back to the terminal, paste it, press Enter. The code works once and is not stored anywhere.

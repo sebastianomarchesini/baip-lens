@@ -3,7 +3,6 @@ import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 import { describe, expect, it } from 'vitest';
 import { ScriptedPrompter } from '../../src/guided/prompt.js';
-import { REGIONS } from '../../src/guided/regions.js';
 import { HttpNetworkError } from '../../src/http/errors.js';
 import type { CfRoot } from '../../src/http/cfClient.js';
 import {
@@ -43,8 +42,7 @@ describe('guided mode', () => {
     const cwd = await tmp();
     const opened: string[] = [];
     const prompter = new ScriptedPrompter([
-      '1', // paste the endpoint
-      'https://api.cf.example.org',
+      'https://api.cf.example.org', // pasted endpoint
       '1', // browser + one-time code (no cf CLI session in this env)
       'K7Q2ZX',
       '', // confirm (default yes)
@@ -88,7 +86,7 @@ describe('guided mode', () => {
 
   it('says what stopped a check instead of blaming the role', async () => {
     const cwd = await tmp();
-    const prompter = new ScriptedPrompter(['1', 'https://api.cf.example.org', '1', 'K7Q2ZX', '']);
+    const prompter = new ScriptedPrompter(['https://api.cf.example.org', '1', 'K7Q2ZX', '']);
     const code = await runWizard({
       prompter,
       env: { CF_HOME: cwd },
@@ -104,18 +102,21 @@ describe('guided mode', () => {
     expect(text).not.toContain('with your role');
   }, 20_000);
 
-  it('picks a region from the list and uses BAIP_LENS_ACCESS_TOKEN silently', async () => {
-    const cwd = await tmp();
-    const trial = REGIONS.findIndex((r) => r.id === 'us10-001');
-    const host = 'api.cf.us10-001.hana.ondemand.com';
-    const fake = new FakeFetch()
+  /** A region API that answers GET / and lists no org, so the wizard stops after Step 1 and 2. */
+  function regionFetch(region: string): FakeFetch {
+    const host = `api.cf.${region}.hana.ondemand.com`;
+    return new FakeFetch()
       .on('GET', `${host}/`, () =>
-        jsonResponse({ links: { uaa: { href: `https://uaa.cf.us10-001.hana.ondemand.com` } } }),
+        jsonResponse({ links: { uaa: { href: `https://uaa.cf.${region}.hana.ondemand.com` } } }),
       )
       .on('GET', `${host}/v3/organizations?per_page=5000`, () =>
         jsonResponse({ pagination: { next: null }, resources: [] }),
       );
-    const prompter = new ScriptedPrompter([String(trial + 2)]);
+  }
+
+  async function stepOne(answers: string[], fake: FakeFetch): Promise<string> {
+    const cwd = await tmp();
+    const prompter = new ScriptedPrompter(answers);
     await expect(
       runWizard({
         prompter,
@@ -126,40 +127,65 @@ describe('guided mode', () => {
         now: () => ACME.now,
       }),
     ).rejects.toThrow(/no role in any Cloud Foundry org/);
-    expect(prompter.transcript.join('\n')).toContain('Using the token from BAIP_LENS_ACCESS_TOKEN');
+    return prompter.transcript.join('\n');
+  }
+
+  it('asks for the region as text, with an example, and uses BAIP_LENS_ACCESS_TOKEN silently', async () => {
+    const fake = regionFetch('us10-001');
+    const text = await stepOne(['us10-001'], fake);
+    expect(text).toContain('Type your region, for example eu10, us10 or us10-001');
+    expect(text).toContain('Type "list" to see all regions.');
+    expect(text).not.toMatch(/Enter a number/);
+    expect(text).toContain(
+      'Checking api.cf.us10-001.hana.ondemand.com (US East (Virginia), AWS, extension landscape)',
+    );
+    expect(text).toContain('Using the token from BAIP_LENS_ACCESS_TOKEN');
     expect(fake.calls.map((c) => c.url.pathname)).toEqual(['/', '/v3/organizations']);
   });
 
-  it('accepts the region domain or id where the API endpoint is asked', async () => {
-    for (const typed of ['us10-001.hana.ondemand.com', 'eu10-004']) {
-      const cwd = await tmp();
-      const region = typed.split('.')[0];
-      const host = `api.cf.${region}.hana.ondemand.com`;
-      const fake = new FakeFetch()
-        .on('GET', `${host}/`, () =>
-          jsonResponse({ links: { uaa: { href: `https://uaa.cf.${region}.hana.ondemand.com` } } }),
-        )
-        .on('GET', `${host}/v3/organizations?per_page=5000`, () =>
-          jsonResponse({ pagination: { next: null }, resources: [] }),
-        );
-      const prompter = new ScriptedPrompter(['1', typed]);
-      await expect(
-        runWizard({
-          prompter,
-          env: { BAIP_LENS_ACCESS_TOKEN: 'abc', CF_HOME: cwd },
-          cwd,
-          open: null,
-          fetch: fake.fetch,
-          now: () => ACME.now,
-        }),
-      ).rejects.toThrow(/no role in any Cloud Foundry org/);
-      expect(prompter.transcript.join('\n')).toContain(`Checking ${host}`);
-    }
+  it.each([
+    ['eu10', 'eu10'],
+    ['EU10', 'eu10'],
+    ['us10.001', 'us10-001'],
+    ['cf-eu10-004', 'eu10-004'],
+    ['eu10-004', 'eu10-004'],
+    ['us10-001.hana.ondemand.com', 'us10-001'],
+    ['https://api.cf.eu20.hana.ondemand.com', 'eu20'],
+  ])('accepts %s as region %s', async (typed, region) => {
+    const text = await stepOne([typed], regionFetch(region));
+    expect(text).toContain(`Checking api.cf.${region}.hana.ondemand.com (`);
+  });
+
+  it('prints every region on "list" and asks again without counting it as a mistake', async () => {
+    const text = await stepOne(['list', '?', '', 'eu10'], regionFetch('eu10'));
+    expect(text).toMatch(/^ {2}eu10 +Europe \(Frankfurt\), AWS$/m);
+    expect(text).toMatch(/^ {2}cn40 +China \(Shanghai\), Alibaba Cloud$/m);
+    expect(text).toContain('Not listed? Paste the API endpoint from the BTP cockpit');
+    expect(text.match(/^\? Region or API endpoint$/gm)).toHaveLength(4);
+    expect(text).toContain('Checking api.cf.eu10.hana.ondemand.com (Europe (Frankfurt), AWS)');
+  });
+
+  it('tries a region that is not in the list, and says so', async () => {
+    const text = await stepOne(['us21-001'], regionFetch('us21-001'));
+    expect(text).toContain('"us21-001" is not in the region list of baip-lens; trying it anyway.');
+    expect(text).toContain('Checking api.cf.us21-001.hana.ondemand.com …');
+  });
+
+  it('asks again when a typed region cannot be reached', async () => {
+    const fake = regionFetch('eu10').on('GET', 'api.cf.us01-001.hana.ondemand.com/', () => {
+      throw Object.assign(new Error('getaddrinfo ENOTFOUND api.cf.us01-001.hana.ondemand.com'), {
+        code: 'ENOTFOUND',
+      });
+    });
+    const text = await stepOne(['us01.001', 'eu10'], fake);
+    expect(text).toContain('The address api.cf.us01-001.hana.ondemand.com could not be found.');
+    expect(text).toContain('or type "list" to see all regions.');
+    expect(text).toContain('Connected.');
   });
 
   it('exits 0 and writes nothing when the user declines to start', async () => {
     const cwd = await tmp();
-    const prompter = new ScriptedPrompter(['1', 'https://api.cf.example.org', '1', 'K7Q2ZX', 'n']);
+    const prompter = new ScriptedPrompter(['https://api.cf.example.org', '1', 'K7Q2ZX', 'n']);
     const code = await runWizard({
       prompter,
       env: { CF_HOME: cwd },
@@ -176,7 +202,6 @@ describe('guided mode', () => {
   it('retries a wrong one-time code and never echoes it', async () => {
     const cwd = await tmp();
     const prompter = new ScriptedPrompter([
-      '1',
       'https://api.cf.example.org',
       '1',
       'WRONG1',
@@ -200,11 +225,13 @@ describe('guided mode', () => {
 
   it('explains a mistyped endpoint and gives up after three attempts', async () => {
     const cwd = await tmp();
-    const prompter = new ScriptedPrompter(['1', 'not a url', 'http://plain.example', 'ftp://x']);
+    const prompter = new ScriptedPrompter(['not a url', 'http://plain.example', 'ftp://x']);
     await expect(
       runWizard({ prompter, env: {}, cwd, open: null, fetch: new FakeFetch().fetch }),
     ).rejects.toThrow(/three attempts/);
-    expect(prompter.transcript.join('\n')).toContain('--api must use https');
+    const text = prompter.transcript.join('\n');
+    expect(text).toContain('--api must use https');
+    expect(text).toContain('Type a region such as eu10, us10 or us10-001');
   });
 });
 

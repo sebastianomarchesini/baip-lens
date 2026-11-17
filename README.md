@@ -34,7 +34,7 @@ You need [Node.js](https://nodejs.org) (the LTS installer, next-next-finish) and
 npx baip-lens
 ```
 
-Guided mode asks four questions: where your landscape is (pick a region or paste the API endpoint from the cockpit), how to sign in (your browser opens your company login and shows a one-time code), which org, and whether to start. The report then opens in your browser. Never used a terminal? Follow the [step-by-step guide with screenshots](docs/getting-started-no-terminal.md). Something not working? `npx baip-lens doctor` checks Node.js, network, certificates, login and the output folder and tells you what to do in one sentence each.
+Guided mode asks four questions: where your landscape is (type your region, for example `eu10` or `us10-001`, or paste the API endpoint from the cockpit; `list` shows all regions), how to sign in (your browser opens your company login and shows a one-time code), which org, and whether to start. The report then opens in your browser. Never used a terminal? Follow the [step-by-step guide with screenshots](docs/getting-started-no-terminal.md). Something not working? `npx baip-lens doctor` checks Node.js, network, certificates, login and the output folder and tells you what to do in one sentence each.
 
 ## Quickstart for developers and CI
 
@@ -77,6 +77,7 @@ Behind a corporate proxy, set `HTTPS_PROXY` and `NODE_USE_ENV_PROXY=1` so that N
 baip-lens                       guided mode (four questions, report opens in the browser)
 baip-lens guided [--no-open]    the same, explicitly
 baip-lens doctor [--api <url>]  checks Node.js, network, certificates, login and output folder
+baip-lens regions               lists the regions you can type instead of an API endpoint
 baip-lens scan   --api <cf api url> --org <name> [--space <name>] [--deep]
                 [--out ./reports] [--format html,json,csv,sarif] [--fail-on <severity>] [--concurrency 5]
                 [--no-traffic-check] [--min-traffic-window 12] [--traffic-pages 5]
@@ -87,6 +88,7 @@ baip-lens version
 ```
 
 - With no arguments on a terminal, guided mode starts; in a script it prints usage and exits 2.
+- `--api` takes the API endpoint or just the region: `--api eu10` is `https://api.cf.eu10.hana.ondemand.com`. `baip-lens regions` lists the regions.
 - `project` scans a local CAP or MTA project folder for the thirteen configuration and model rules in [docs/rules.md](docs/rules.md#project-rules) (mocked authentication in production, unrestricted services, missing audit logging, open approuter routes, seed data with card numbers, and more), each tagged with its OWASP Top 10 (2025) category. It reads files only: no login, no network, no child process, and it never opens `.env`, `.cdsrc-private.json`, `default-env.json`, keys or `*.mtaext` files.
 - Guided mode signs in the way `cf login --sso` does (one-time code from your company login) or with username and password, keeps the session in memory only, and writes to `./baip-lens-reports/<date-time>/`.
 - `scan` and `project` write one snapshot (`snapshot-<time>.json`) and the requested reports.

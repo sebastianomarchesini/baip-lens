@@ -14,6 +14,7 @@ import {
 import { formatDoctor, runDoctor } from './doctor.js';
 import { type OpenInBrowser, openInBrowser } from './guided/open.js';
 import { type Prompter, TerminalPrompter } from './guided/prompt.js';
+import { regionListLines } from './guided/regions.js';
 import { runWizard } from './guided/wizard.js';
 import type { FetchLike } from './http/httpClient.js';
 import { sanitizeOutput } from './io/redact.js';
@@ -48,6 +49,7 @@ export const EXIT = { ok: 0, findings: 1, error: 2 } as const;
 
 const DEFAULT_FORMATS = 'html,json,csv,sarif';
 const FAIL_ON_HELP = 'exit 1 on a finding at or above: critical, high, medium, low, info';
+const API_HELP = `CF API endpoint or region, e.g. eu10, us10-001 or https://api.cf.eu10.hana.ondemand.com (all regions: ${TOOL_NAME} regions)`;
 
 function exitCodeFor(data: ReportData, failOn: FailOn): number {
   const threshold = failThreshold(failOn);
@@ -190,7 +192,7 @@ function buildProgram(io: CliIo, setExit: (code: number) => void): Command {
   program
     .command('scan')
     .description('scan one CF org (GET requests only) and write a snapshot and reports')
-    .requiredOption('--api <url>', 'CF API endpoint, e.g. https://api.cf.eu10.hana.ondemand.com')
+    .requiredOption('--api <url>', API_HELP)
     .requiredOption('--org <name>', 'org to scan')
     .option('--space <name>', 'scan only this space')
     .option('--deep', 'also run checks that need SpaceDeveloper or SpaceSupporter', false)
@@ -261,9 +263,19 @@ function buildProgram(io: CliIo, setExit: (code: number) => void): Command {
   program
     .command('doctor')
     .description('check Node.js, network, certificates, login and output folder, with plain fixes')
-    .option('--api <url>', 'CF API endpoint to test (default: the cf CLI target)')
+    .option('--api <url>', 'CF API endpoint or region to test (default: the cf CLI target)')
     .action(async (options: Record<string, unknown>) => {
       setExit(await runDoctorCommand(io, options));
+    });
+
+  program
+    .command('regions')
+    .description('list the Cloud Foundry regions you can type instead of an API endpoint')
+    .action(() => {
+      io.stdout(`${regionListLines().join('\n')}\n`);
+      io.stdout(
+        `Type the region where guided mode asks for it, or pass it to --api, for example: ${TOOL_NAME} scan --api eu10 --org <name>\n`,
+      );
     });
 
   program
