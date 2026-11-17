@@ -4,7 +4,11 @@ import { noRecentDeploy } from '../../src/analyzers/noRecentDeploy.js';
 import { DAY_MS } from '../../src/analyzers/types.js';
 import type { CheckResult } from '../../src/model/check.js';
 import type { RawData, RawDroplet } from '../../src/model/raw.js';
-import { SNAPSHOT_SCHEMA_VERSION, type Snapshot } from '../../src/model/snapshot.js';
+import {
+  DEFAULT_SNAPSHOT_OPTIONS,
+  SNAPSHOT_SCHEMA_VERSION,
+  type Snapshot,
+} from '../../src/model/snapshot.js';
 
 const NOW = '2026-09-29T00:00:00.000Z';
 const daysAgo = (days: number) => new Date(Date.parse(NOW) - days * DAY_MS).toISOString();
@@ -49,6 +53,10 @@ function raw(ages: Record<string, number | null>): RawData {
     droplets: Object.entries(ages)
       .filter((entry): entry is [string, number] => entry[1] !== null)
       .map(([name, age]) => droplet(name, age)),
+    routes: [],
+    processes: [],
+    traffic: [],
+    history: [],
     projects: [],
   };
 }
@@ -144,7 +152,7 @@ describe('reanalyze', () => {
       tool: { name: 'baip-lens', version: '0.0.0' },
       scannedAt: NOW,
       scope: { apiEndpoint: 'https://api.cf.example.org/', orgs: ['org'] },
-      options: { deep: false, probeRoutes: true },
+      options: { ...DEFAULT_SNAPSHOT_OPTIONS, probeRoutes: true },
       checks: [
         ...collectorsRan,
         { id: 'rule.OLD_RULE', title: 'removed rule', roles: [], status: 'ran' },

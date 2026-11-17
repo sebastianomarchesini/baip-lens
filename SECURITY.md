@@ -22,8 +22,8 @@ Include the version (`baip-lens version`), the command you ran with any secrets 
 
 These properties are security guarantees. Anything that breaks one is in scope:
 
-- **Read-only:** no request other than `GET` reaches the Cloud Foundry API.
-- **Egress:** no request goes to a host outside the allow-list (`packages/cli/src/net/allowlist.ts`, documented in `docs/data-sources.md` §6), and no credentials go to any host other than the CF API and UAA.
+- **Read-only:** no request other than `GET` reaches the Cloud Foundry API or its log cache.
+- **Egress:** no request goes to a host outside the allow-list (`packages/cli/src/net/allowlist.ts`, documented in `docs/data-sources.md` §6), the CF token goes to the CF API and its log cache only, the OAuth client credentials to the UAA token endpoint only, and no credentials to any other host.
 - **No secrets or personal data** (tokens, environment variable values, service credentials, user names, e-mails) in snapshots, reports, logs or console output.
 - **Inert outputs:** the HTML report makes no network request when opened, data from the scanned landscape cannot inject script into it, and CSV and SARIF outputs cannot execute formulas or code in the tools that open them.
 - **Safe parsing** of snapshots now, and of project files in the `sbom` command once it ships: no path traversal, zip-slip, XML entity expansion or unbounded decompression.

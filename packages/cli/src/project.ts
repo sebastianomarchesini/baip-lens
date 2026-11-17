@@ -3,7 +3,11 @@ import { analyze } from './analyzers/index.js';
 import { CheckRecorder, COLLECTOR_CHECKS } from './checks.js';
 import { collectProject } from './collectors/project/index.js';
 import type { RawData, RawProject } from './model/raw.js';
-import { SNAPSHOT_SCHEMA_VERSION, type Snapshot } from './model/snapshot.js';
+import {
+  DEFAULT_SNAPSHOT_OPTIONS,
+  SNAPSHOT_SCHEMA_VERSION,
+  type Snapshot,
+} from './model/snapshot.js';
 import { TOOL_NAME, TOOL_VERSION } from './version.js';
 
 export interface ScanProjectOptions {
@@ -39,7 +43,17 @@ export async function scanProject(options: ScanProjectOptions): Promise<Snapshot
     );
   }
 
-  const raw: RawData = { orgs: [], spaces: [], apps: [], droplets: [], projects };
+  const raw: RawData = {
+    orgs: [],
+    spaces: [],
+    apps: [],
+    droplets: [],
+    routes: [],
+    processes: [],
+    traffic: [],
+    history: [],
+    projects,
+  };
   const collectorChecks = recorder.list();
   const analysis = analyze(raw, scannedAt, collectorChecks);
   return {
@@ -47,7 +61,8 @@ export async function scanProject(options: ScanProjectOptions): Promise<Snapshot
     tool: { name: TOOL_NAME, version: TOOL_VERSION },
     scannedAt,
     scope: { orgs: [], projects: projects.map((p) => p.id) },
-    options: { deep: false, probeRoutes: false },
+    // No CF collector runs in a project scan, so no Log Cache either.
+    options: { ...DEFAULT_SNAPSHOT_OPTIONS },
     checks: [...collectorChecks, ...analysis.ruleChecks],
     raw,
     apps: analysis.apps,

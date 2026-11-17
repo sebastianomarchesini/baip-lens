@@ -1,4 +1,4 @@
-import type { ReportData } from '@baip-lens/model';
+import type { ReportData, SkipReasonCode } from '@baip-lens/model';
 import { describe, expect, it } from 'vitest';
 import projectSample from '../test/fixtures/report-project.json';
 import sample from '../test/fixtures/report.json';
@@ -13,19 +13,54 @@ import {
 const data = sample as unknown as ReportData;
 const project = projectSample as unknown as ReportData;
 
+/** The sample with these checks skipped, each for its reason code. */
+function skipping(codes: Record<string, SkipReasonCode>): ReportData {
+  const checks = data.checks.map((check) => {
+    const reasonCode = codes[check.id];
+    return reasonCode === undefined
+      ? check
+      : { ...check, status: 'skipped' as const, reason: 'test', reasonCode };
+  });
+  const checksSkipped = checks.filter((check) => check.status === 'skipped').length;
+  expect(checksSkipped).toBe(Object.keys(codes).length);
+  return { ...data, checks, summary: { ...data.summary, checksSkipped } };
+}
+
 describe('startHereSentences', () => {
   it('summarises the sample scan in plain language', () => {
     const s = startHereSentences(data);
     expect(s[0]).toBe('8 apps in acme-prod were scanned on Sep 29, 2026.');
-    expect(s[1]).toBe('3 apps need attention: 3 have not been deployed in over a year.');
+    // The sample carries the traffic history of an earlier scan forward (scan --previous).
+    expect(s[1]).toBe(
+      'Whether apps are used also counts the earlier scans, up to the one of Sep 22, 2026.',
+    );
+    expect(s[2]).toBe(
+      '4 apps need attention: 3 have not been deployed in over a year; 3 look unused.',
+    );
     expect(s.at(-1)).toBe('Nothing in your account was changed: this scan only read information.');
   });
 
+  it('says nothing about earlier scans when none was carried forward', () => {
+    const alone = { ...data, options: { ...data.options, previousScannedAt: null } };
+    expect(startHereSentences(alone).join(' ')).not.toContain('earlier scans');
+  });
+
+  it('says nothing about earlier scans when traffic was not read or APP_IDLE did not run', () => {
+    for (const id of ['collect.traffic', 'rule.APP_IDLE']) {
+      const s = startHereSentences(skipping({ [id]: 'dependency_skipped' }));
+      expect(s.join(' ')).not.toContain('earlier scans');
+    }
+  });
+
   it('says when nothing was found and when checks were skipped', () => {
+    const skipped = skipping({
+      'collect.routes': 'insufficient_role',
+      'collect.traffic': 'dependency_skipped',
+    });
     const s = startHereSentences({
-      ...data,
+      ...skipped,
       findings: [],
-      summary: { ...data.summary, findings: 0, checksSkipped: 2 },
+      summary: { ...skipped.summary, findings: 0 },
     });
     expect(s).toEqual([
       '8 apps in acme-prod were scanned on Sep 29, 2026.',
@@ -33,6 +68,22 @@ describe('startHereSentences', () => {
       '2 checks could not run with your role, so some things were not looked at. That is not a problem with your apps.',
       'Nothing in your account was changed: this scan only read information.',
     ]);
+  });
+
+  it('blames the role only when a missing role is what stopped the checks', () => {
+    // Every case skips the traffic check, so no sentence about earlier scans comes first.
+    const sentence = (codes: Record<string, SkipReasonCode>) =>
+      startHereSentences(skipping(codes))[2];
+    expect(sentence({ 'collect.traffic': 'disabled' })).toBe(
+      '1 check was turned off, so some things were not looked at. That is not a problem with your apps.',
+    );
+    expect(sentence({ 'collect.traffic': 'unavailable' })).toBe(
+      '1 check did not run, so some things were not looked at. That is not a problem with your apps.',
+    );
+    expect(sentence({ 'collect.traffic': 'error' })).toMatch(/^1 check did not run, /);
+    expect(
+      sentence({ 'collect.droplets': 'insufficient_role', 'collect.traffic': 'unavailable' }),
+    ).toMatch(/^2 checks did not run, /);
   });
 
   it('names the space when the scan was limited to one', () => {
@@ -57,8 +108,15 @@ describe('startHereSentences', () => {
   it('counts findings, not projects, per project rule', () => {
     const open = project.findings.find((f) => f.id === 'CAP_SERVICE_NO_RESTRICTION')!;
     const twice = [open, { ...open, location: { file: 'srv/other.cds' } }];
+    // The sentence counts the skipped checks themselves, not the summary figure.
+    const checks = project.checks.map((check, i) =>
+      i === 0
+        ? { ...check, status: 'skipped' as const, reason: 'test', reasonCode: 'error' as const }
+        : check,
+    );
     const s = startHereSentences({
       ...project,
+      checks,
       findings: twice,
       summary: { ...project.summary, findings: 2, checksSkipped: 1 },
     });
@@ -101,6 +159,6 @@ describe('startHereSentences', () => {
       findings: [finding],
       rules: [...data.rules, { ...data.rules[0]!, id: 'SOMETHING_NEW', title: 'Something new' }],
     });
-    expect(s[1]).toBe('1 app needs attention: 1 has "Something new".');
+    expect(s).toContain('1 app needs attention: 1 has "Something new".');
   });
 });

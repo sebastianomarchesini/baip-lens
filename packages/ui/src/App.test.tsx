@@ -28,17 +28,24 @@ describe('report UI', () => {
     const values = within(kpis)
       .getAllByText(/^(\d+|—)$/)
       .map((el) => el.textContent);
-    // Apps scanned, critical + high, idle apps (not checked), EOL runtimes (not checked)
-    expect(values).toEqual(['8', '0', '—', '—']);
+    // Apps scanned, critical + high, idle apps, EOL runtimes (not checked)
+    expect(values).toEqual(['8', '0', '3', '—']);
+    // The idle figure names each signal with its confidence, and how many apps are unknown.
+    expect(
+      kpis.querySelector('ui5-card-header[title-text="Idle apps"]')?.getAttribute('subtitle-text'),
+    ).toBe('1 stopped 90+ days (high) · 1 no traffic (high) · 1 no route (high) · 2 unknown');
   });
 
   it('lists findings grouped by rule with remediation and evidence', async () => {
     embed(sample);
     renderAt('#/findings');
     expect(await screen.findByText('Last deployed 30 months ago')).toBeInTheDocument();
-    expect(screen.getAllByRole('article')).toHaveLength(3);
+    // Three APP_NO_RECENT_DEPLOY findings and three APP_IDLE findings.
+    expect(screen.getAllByRole('article')).toHaveLength(6);
     expect(screen.getAllByText(/cf restage/)).toHaveLength(3);
     expect(screen.getAllByText('ageDays')).toHaveLength(3);
+    expect(screen.getByText('Started, but no route is mapped')).toBeInTheDocument();
+    expect(screen.getByText(/cf map-route/)).toBeInTheDocument();
   });
 
   it('filters findings by severity from the URL', async () => {

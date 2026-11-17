@@ -1,4 +1,4 @@
-import type { EgressPolicy, HttpMethod } from '../net/allowlist.js';
+import { type EgressPolicy, type HttpMethod, credentialKind } from '../net/allowlist.js';
 import { HttpBodyTooLargeError, HttpNetworkError } from './errors.js';
 import { Semaphore } from './semaphore.js';
 
@@ -14,6 +14,12 @@ export interface HttpRequest {
   maxBytes?: number;
   /** Retry on network errors, 429 and 5xx (default true). */
   retry?: boolean;
+  /**
+   * The statuses worth retrying for this request (default: 429, 500, 502,
+   * 503, 504). Log Cache answers 429 for a response that is too large and
+   * 500 for a bad parameter, so retrying those would only repeat the error.
+   */
+  retryOn?: readonly number[];
 }
 
 export interface HttpResponse {
@@ -136,8 +142,9 @@ export class HttpClient implements ReadOnlyHttp {
   async request(req: HttpRequest): Promise<HttpResponse> {
     const method = req.method ?? 'GET';
     const headers = lowerCaseKeys(req.headers);
-    // Throws before anything is sent when the request is not allowed.
-    this.policy.authorize(req.url, method, 'authorization' in headers);
+    // Throws before anything is sent when the request is not allowed, including
+    // when it carries a kind of credential its host may not receive.
+    this.policy.authorize(req.url, method, credentialKind(headers.authorization));
     return this.semaphore.run(() => this.send(req, method, headers));
   }
 
@@ -152,6 +159,7 @@ export class HttpClient implements ReadOnlyHttp {
     headers: Record<string, string>,
   ): Promise<HttpResponse> {
     const maxRetries = req.retry === false ? 0 : this.maxRetries;
+    const retryable = req.retryOn === undefined ? RETRYABLE_STATUS : new Set(req.retryOn);
     for (let attempt = 0; ; attempt += 1) {
       await this.pace(req.url.host);
       let res: Response;
@@ -171,7 +179,7 @@ export class HttpClient implements ReadOnlyHttp {
         throw new HttpNetworkError(req.url, error);
       }
       this.recordRateLimit(req.url.host, res.headers);
-      if (RETRYABLE_STATUS.has(res.status) && attempt < maxRetries) {
+      if (retryable.has(res.status) && attempt < maxRetries) {
         discardBody(res);
         await this.sleep(this.retryDelay(res.headers, attempt));
         continue;

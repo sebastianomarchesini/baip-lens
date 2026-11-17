@@ -4,7 +4,7 @@ Evaluating BAIP Lens for a company? The [due diligence page](due-diligence.md) g
 
 ### Is it safe to run with my production login?
 
-BAIP Lens only reads. The HTTP client can send `GET` requests to the Cloud Foundry API and nothing else; the one exception is the login request to your own UAA server. This is enforced in one file (`packages/cli/src/net/allowlist.ts`) and covered by tests that try every other method and fail if one gets through. The Space Auditor role, which is read-only, is all it needs. A public [security review](security-review.md) and a [disclosure policy](../SECURITY.md) exist for the same reason you are asking.
+BAIP Lens only reads. The HTTP client can send `GET` requests to the Cloud Foundry API and its log cache and nothing else; the one exception is the login request to your own UAA server. This is enforced in one file (`packages/cli/src/net/allowlist.ts`) and covered by tests that try every other method and fail if one gets through. The Space Auditor role, which is read-only, is all it needs. A public [security review](security-review.md) and a [disclosure policy](../SECURITY.md) exist for the same reason you are asking.
 
 ### Will SAP know I ran it?
 
@@ -20,7 +20,7 @@ Because the Cloud Foundry API only answers people with a role. BAIP Lens uses yo
 
 ### What leaves my machine?
 
-In 0.1.0, requests go to your CF API and its login server only. The rules of the next releases add public version and vulnerability lookups at `api.osv.dev`, `endoflife.date`, `ui5.sap.com` and `registry.npmjs.org`; those hosts are already in the allow-list but are not contacted yet. The full list, with what is sent to each, is in [privacy.md](privacy.md). The HTML report itself carries a Content Security Policy with `connect-src 'none'`, so even the browser refuses to let it connect anywhere.
+A Cloud Foundry scan sends requests to your CF API, its login server and its log cache only (the log cache to see when each app last served a request; `--no-traffic-check` leaves it out). The rules of the next releases add public version and vulnerability lookups at `api.osv.dev`, `endoflife.date`, `ui5.sap.com` and `registry.npmjs.org`; those hosts are already in the allow-list but are not contacted yet. The full list, with what is sent to each, is in [privacy.md](privacy.md). The HTML report itself carries a Content Security Policy with `connect-src 'none'`, so even the browser refuses to let it connect anywhere.
 
 ### It says my role is insufficient. What now?
 

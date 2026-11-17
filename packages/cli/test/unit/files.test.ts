@@ -1,3 +1,4 @@
+import { execFileSync } from 'node:child_process';
 import { mkdtemp, readFile, stat, symlink, writeFile } from 'node:fs/promises';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
@@ -41,8 +42,24 @@ describe('private output files: symlinks and existing files', () => {
     const base = await mkdtemp(join(tmpdir(), 'baip-lens-json-'));
     const path = join(base, 'bad.json');
     await writeFile(path, '{not json');
-    await expect(readSnapshot(path)).rejects.toThrow(/not valid JSON/);
+    await expect(readSnapshot(path)).rejects.toThrow(
+      /not valid JSON at (line 1, column 2|position 1)\./,
+    );
     await expect(ensurePrivateDir(join(path, 'nested'))).rejects.toThrow(/not a folder/);
+  });
+
+  it('never quotes the content of a file that is not JSON', async () => {
+    const base = await mkdtemp(join(tmpdir(), 'baip-lens-json-'));
+    const path = join(base, 'token.txt');
+    // A secret passed by mistake: the parser's own message would quote its start.
+    // Marked POISON, like every planted secret, so the secret scan lets it through.
+    await writeFile(path, 'sk_live_51HxQzK9-POISON');
+    const error = await readSnapshot(path).then(
+      () => undefined,
+      (e: unknown) => e,
+    );
+    expect(String(error)).toMatch(/not valid JSON/);
+    expect(String(error)).not.toContain('sk_live');
   });
 });
 
@@ -55,6 +72,16 @@ describe('readSnapshot limits', () => {
     await handle.truncate(MAX_SNAPSHOT_BYTES + 1);
     await handle.close();
     await expect(readSnapshot(path)).rejects.toThrow(/the limit is/);
+  });
+
+  it.skipIf(!posix)('refuses a pipe that streams past the size cap', async () => {
+    const base = await mkdtemp(join(tmpdir(), 'baip-lens-fifo-'));
+    const fifo = join(base, 'snapshot.json');
+    execFileSync('mkfifo', [fifo]);
+    // A pipe reports no useful size up front, so the bytes are counted as read.
+    const writing = writeFile(fifo, `"${'x'.repeat(64 * 1024)}"`).catch(() => undefined);
+    await expect(readSnapshot(fifo, { maxBytes: 1024 })).rejects.toThrow(/the limit is 1024/);
+    await writing;
   });
 
   it('rejects unknown schema versions with a clear message', async () => {

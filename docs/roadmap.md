@@ -16,7 +16,7 @@ Released as 0.1.0 on 2026-10-10:
 
 Moved to the 0.1.x and 0.2 releases:
 
-- [ ] Rules: `RUNTIME_NODE_EOL`, `RUNTIME_JAVA_EOL` (endoflife.date), `BUILDPACK_OUTDATED`, `STACK_DEPRECATED`, `APP_IDLE`, `UI5_OUT_OF_MAINTENANCE`, `SAP_PKG_OUTDATED`, `DEP_KNOWN_CVE` (OSV.dev), `ENV_SECRET_PLAINTEXT` (`--deep`)
+- [ ] Rules: `RUNTIME_NODE_EOL`, `RUNTIME_JAVA_EOL` (endoflife.date), `BUILDPACK_OUTDATED`, `STACK_DEPRECATED`, `APP_IDLE` (done: no route, traffic with history across scans, stopped), `UI5_OUT_OF_MAINTENANCE`, `SAP_PKG_OUTDATED`, `DEP_KNOWN_CVE` (OSV.dev), `ENV_SECRET_PLAINTEXT` (`--deep`)
 - [ ] `baip-lens sbom` from `package-lock.json`, `pom.xml`, `mta.yaml` and `.mtar`
 - [ ] `report --redact` so people can share screenshots
 - [ ] Route probe for the UI5 version with the SSRF guards from the security review

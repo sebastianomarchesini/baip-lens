@@ -27,6 +27,8 @@ export const SkipReasonCodeSchema = z.enum([
   'dependency_skipped',
   /** The check failed with an error; the scan continued. */
   'error',
+  /** The service the check reads is absent or did not answer (e.g. no log cache). */
+  'unavailable',
 ]);
 export type SkipReasonCode = z.infer<typeof SkipReasonCodeSchema>;
 

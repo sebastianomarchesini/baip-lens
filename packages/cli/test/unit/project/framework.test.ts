@@ -6,7 +6,11 @@ import { projectFinding } from '../../../src/analyzers/project/support.js';
 import { type Analyzer, projectRef, ruleHelpUri } from '../../../src/analyzers/types.js';
 import type { CheckResult } from '../../../src/model/check.js';
 import type { Finding } from '../../../src/model/finding.js';
-import { SNAPSHOT_SCHEMA_VERSION, type Snapshot } from '../../../src/model/snapshot.js';
+import {
+  DEFAULT_SNAPSHOT_OPTIONS,
+  SNAPSHOT_SCHEMA_VERSION,
+  type Snapshot,
+} from '../../../src/model/snapshot.js';
 import {
   NOW,
   PROJECT_COLLECTOR,
@@ -82,7 +86,17 @@ describe('analyze: which rules run', () => {
   });
 
   it('omits project rules for a CF scan', () => {
-    const raw = { orgs: [], spaces: [], apps: [], droplets: [], projects: [] };
+    const raw = {
+      orgs: [],
+      spaces: [],
+      apps: [],
+      droplets: [],
+      routes: [],
+      processes: [],
+      traffic: [],
+      history: [],
+      projects: [],
+    };
     const result = analyze(raw, NOW, cfCollectors);
     expect(result.ruleChecks.map((c) => c.id)).toEqual(['rule.APP_NO_RECENT_DEPLOY']);
   });
@@ -93,7 +107,7 @@ describe('analyze: which rules run', () => {
       tool: { name: 'baip-lens', version: '0.0.0' },
       scannedAt: NOW,
       scope: { orgs: [], projects: ['acme'] },
-      options: { deep: false, probeRoutes: false },
+      options: { ...DEFAULT_SNAPSHOT_OPTIONS },
       checks: [PROJECT_COLLECTOR, { ...cfCollectors[0]!, id: 'rule.OLD_RULE' }],
       raw: rawData(rawProject()),
       apps: [],
@@ -109,6 +123,7 @@ describe('analyze: which rules run', () => {
   it('lists the CF rules before the project rules', () => {
     expect(ANALYZERS.map((a) => a.rule.id)).toEqual([
       'APP_NO_RECENT_DEPLOY',
+      'APP_IDLE',
       ...PROJECT_ANALYZERS.map((a) => a.rule.id),
     ]);
   });
@@ -197,6 +212,7 @@ describe('buildInventory for projects', () => {
         createdAt: null,
         updatedAt: null,
         lastDeployAt: null,
+        usage: null,
         findingCounts: { critical: 0, high: 0, medium: 1, low: 0, info: 0 },
         highestSeverity: 'medium',
         riskScore: 5,

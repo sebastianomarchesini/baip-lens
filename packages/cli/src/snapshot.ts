@@ -1,4 +1,4 @@
-import { readFile, stat } from 'node:fs/promises';
+import { open } from 'node:fs/promises';
 import { join } from 'node:path';
 import { ConfigError } from './http/errors.js';
 import { describeFsError, ensurePrivateDir, writePrivateFile } from './io/files.js';
@@ -12,6 +12,7 @@ export function snapshotFileName(scannedAt: string): string {
 
 /** Larger files are refused before parsing: a snapshot is never this big. */
 export const MAX_SNAPSHOT_BYTES = 256 * 1024 * 1024;
+const CHUNK_BYTES = 1024 * 1024;
 
 export async function writeSnapshot(snapshot: Snapshot, outDir: string): Promise<string> {
   await ensurePrivateDir(outDir);
@@ -20,18 +21,56 @@ export async function writeSnapshot(snapshot: Snapshot, outDir: string): Promise
   return path;
 }
 
-export async function readSnapshot(path: string): Promise<Snapshot> {
+/**
+ * The file's text, refused once it passes `maxBytes`. The size a regular file
+ * reports is checked first; the bytes are counted as they are read too, so a
+ * pipe (`--previous <(...)`, /dev/stdin), whose size is not known up front,
+ * cannot get past the limit either.
+ */
+async function readCapped(path: string, maxBytes: number): Promise<string> {
+  const handle = await open(path, 'r');
+  try {
+    const { size } = await handle.stat();
+    if (size > maxBytes) throw new Error(`file is ${size} bytes, the limit is ${maxBytes}`);
+    const chunks: Buffer[] = [];
+    let total = 0;
+    for (;;) {
+      const buffer = Buffer.alloc(CHUNK_BYTES);
+      const { bytesRead } = await handle.read(buffer, 0, CHUNK_BYTES, null);
+      if (bytesRead === 0) break;
+      total += bytesRead;
+      if (total > maxBytes)
+        throw new Error(`file is over ${maxBytes} bytes, the limit is ${maxBytes}`);
+      chunks.push(buffer.subarray(0, bytesRead));
+    }
+    return Buffer.concat(chunks).toString('utf8');
+  } finally {
+    await handle.close();
+  }
+}
+
+/**
+ * Where the JSON broke, from the parser's message, digits only: the message
+ * also quotes the start of the input, which may be a secret pasted by mistake.
+ */
+function jsonErrorLocation(error: SyntaxError): string {
+  const lineColumn = /line (\d+) column (\d+)/.exec(error.message);
+  if (lineColumn) return ` at line ${lineColumn[1]}, column ${lineColumn[2]}`;
+  const position = /at position (\d+)/.exec(error.message);
+  return position ? ` at position ${position[1]}` : '';
+}
+
+export async function readSnapshot(
+  path: string,
+  { maxBytes = MAX_SNAPSHOT_BYTES }: { maxBytes?: number } = {},
+): Promise<Snapshot> {
   let json: unknown;
   try {
-    const { size } = await stat(path);
-    if (size > MAX_SNAPSHOT_BYTES) {
-      throw new Error(`file is ${size} bytes, the limit is ${MAX_SNAPSHOT_BYTES}`);
-    }
-    json = JSON.parse(await readFile(path, 'utf8'));
+    json = JSON.parse(await readCapped(path, maxBytes));
   } catch (error) {
     const reason =
       error instanceof SyntaxError
-        ? `the file is not valid JSON (${error.message})`
+        ? `the file is not valid JSON${jsonErrorLocation(error)}`
         : describeFsError(error);
     throw new ConfigError(`Could not read snapshot ${path}: ${reason}.`);
   }

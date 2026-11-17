@@ -1,4 +1,4 @@
-import type { ReportData } from '../model/snapshot.js';
+import type { AppUsage, ReportData } from '../model/snapshot.js';
 
 /**
  * Excel opens a UTF-8 file correctly only when it starts with a byte-order
@@ -90,25 +90,47 @@ export function renderAppsCsv(data: ReportData): string {
       'low',
       'info',
       'kind',
+      'usage',
+      'usage_signal',
+      'usage_confidence',
+      'usage_reason',
+      'usage_last_request_at',
     ],
-    data.apps.map((a) => [
-      a.org,
-      a.space,
-      a.name,
-      a.guid,
-      a.state,
-      a.lifecycleType,
-      a.stack,
-      a.buildpacks.map((b) => (b.version ? `${b.name}@${b.version}` : b.name)).join(' '),
-      a.lastDeployAt,
-      a.riskScore,
-      a.highestSeverity,
-      a.findingCounts.critical,
-      a.findingCounts.high,
-      a.findingCounts.medium,
-      a.findingCounts.low,
-      a.findingCounts.info,
-      a.kind,
-    ]),
+    data.apps.map((a) => [...appColumns(a), ...usageColumns(a.usage ?? null)]),
   );
+}
+
+/** The five usage columns; a report written before APP_IDLE existed has no usage. */
+function usageColumns(usage: AppUsage | null): unknown[] {
+  if (usage === null) return ['', '', '', '', ''];
+  switch (usage.state) {
+    case 'idle':
+      return [usage.state, usage.signal, usage.confidence, '', ''];
+    case 'active':
+      return [usage.state, '', '', '', usage.lastRequestAt];
+    default:
+      return [usage.state, '', '', usage.reason, ''];
+  }
+}
+
+function appColumns(a: ReportData['apps'][number]): unknown[] {
+  return [
+    a.org,
+    a.space,
+    a.name,
+    a.guid,
+    a.state,
+    a.lifecycleType,
+    a.stack,
+    a.buildpacks.map((b) => (b.version ? `${b.name}@${b.version}` : b.name)).join(' '),
+    a.lastDeployAt,
+    a.riskScore,
+    a.highestSeverity,
+    a.findingCounts.critical,
+    a.findingCounts.high,
+    a.findingCounts.medium,
+    a.findingCounts.low,
+    a.findingCounts.info,
+    a.kind,
+  ];
 }

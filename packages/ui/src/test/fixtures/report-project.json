@@ -13,7 +13,11 @@
   },
   "options": {
     "deep": false,
-    "probeRoutes": false
+    "probeRoutes": false,
+    "trafficCheck": false,
+    "minTrafficWindowHours": 12,
+    "trafficPages": 5,
+    "previousScannedAt": null
   },
   "checks": [
     {
@@ -120,6 +124,7 @@
       "createdAt": null,
       "updatedAt": null,
       "lastDeployAt": null,
+      "usage": null,
       "findingCounts": {
         "critical": 2,
         "high": 2,
@@ -673,6 +678,18 @@
         "A03:2025"
       ],
       "helpUri": "https://github.com/sebastianomarchesini/BAIP-Lens/blob/main/docs/rules.md#app_no_recent_deploy"
+    },
+    {
+      "id": "APP_IDLE",
+      "title": "App looks unused",
+      "description": "Nothing shows that the app is used: it runs a web process but no route is mapped to it, or no request reached it in the router logs that Log Cache held, or it has been stopped for more than 90 days. With `scan --previous`, scans in a row that saw no request raise the confidence to high after 3 scans over 30 days. Workers are never flagged for missing routes or traffic, and a stopped worker only after 90 days, like any app. An unused app still takes memory quota and keeps old libraries running.",
+      "roles": [
+        "SpaceAuditor"
+      ],
+      "owasp": [
+        "A02:2025"
+      ],
+      "helpUri": "https://github.com/sebastianomarchesini/BAIP-Lens/blob/main/docs/rules.md#app_idle"
     },
     {
       "id": "CAP_MOCKED_AUTH_IN_PROD",

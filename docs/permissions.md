@@ -27,7 +27,11 @@ In the BTP cockpit the administrator does this under **Cloud Foundry Environment
 | `collect.apps` | `GET /v3/apps` | Space Auditor | on |
 | `collect.droplets` | `GET /v3/droplets?current=true` | Space Auditor | on |
 | `rule.APP_NO_RECENT_DEPLOY` | droplets (above) | Space Auditor | on |
-| planned: processes, stacks, buildpacks, routes, binding metadata | `GET /v3/...` | Space Auditor | on |
+| `collect.routes` | `GET /v3/routes?space_guids=…&include=domain` (destinations and the domain's `internal` flag only) | Space Auditor | on |
+| `collect.processes` | `GET /v3/processes?types=web` (instances and health check type only) | Space Auditor | on |
+| `collect.traffic` | Log Cache `GET /api/v1/read/<app-guid>` for apps with an HTTP route: router log timestamps only | Space Auditor (Log Cache asks Cloud Controller whether you may read the app) | on; `--no-traffic-check` turns it off |
+| `rule.APP_IDLE` | apps, droplets, routes, processes and traffic (above) | Space Auditor | on |
+| planned: stacks, buildpacks, binding metadata | `GET /v3/...` | Space Auditor | on |
 | planned: audit events | `GET /v3/audit_events` | Space Auditor or Org Auditor | on |
 | planned: app usage events | `GET /v3/app_usage_events` | not documented for BTP; skipped on 403 | on |
 | planned: `ENV_SECRET_PLAINTEXT` | `GET /v3/apps/:guid/environment_variables` (names only) | Space Developer or Space Supporter | `--deep` |
@@ -45,8 +49,10 @@ Reading environment variables needs **Space Developer** or **Space Supporter**. 
 
 ## When a role is missing
 
-- The v3 **list** endpoints BAIP Lens uses (`/v3/spaces`, `/v3/apps`, `/v3/droplets`) do not answer 403 to a user without a space role: they return only what the user may see, which can be nothing. BAIP Lens therefore stops with exit code 2 and the text to send to your administrator when the org is visible but none of its spaces is. The number of visible spaces is printed while the scan runs and the spaces are listed in the snapshot (`raw.spaces`).
+- The v3 **list** endpoints BAIP Lens uses (`/v3/spaces`, `/v3/apps`, `/v3/droplets`, `/v3/routes`, `/v3/processes`) do not answer 403 to a user without a space role: they return only what the user may see, which can be nothing. BAIP Lens therefore stops with exit code 2 and the text to send to your administrator when the org is visible but none of its spaces is. The number of visible spaces is printed while the scan runs and the spaces are listed in the snapshot (`raw.spaces`).
 - A call that returns **403** records the check as `skipped` with reason `insufficient role: needs <roles>`, and the scan continues.
+- **Log Cache never answers 403.** A missing role, an expired token and a failed permission lookup all come back as **404**, so a 404 on the first app records `collect.traffic` as skipped (`insufficient_role`) with a reason that names all three; no answer records it as `unavailable`. Either way the rest of the scan, and the no-route and stopped signals of `APP_IDLE`, stand. Without the app inventory, the routes or the processes (a 403 or an error there), the traffic check does not run at all (`dependency_skipped`), since those decide which apps to read.
+- `scan --previous` reads an earlier snapshot from disk: it needs no role and sends nothing itself. A file that is not a valid snapshot, a project scan, a snapshot of another API endpoint or one that is not older stops the scan with exit code 2 before any request. A snapshot of another org stops it with exit code 2 right after the org lookup (the CF root, a token request when one is needed, and `GET /v3/organizations`), before anything about spaces or apps is read.
 - Rules that depend on a skipped collector are skipped too.
 - Skipped checks appear in every report: on the HTML overview, in the JSON `checks`, and as SARIF notifications. Missing data is therefore never mistaken for "no findings".
 - Only a **401** after a token refresh, or a configuration error, stops the scan (exit code 2).

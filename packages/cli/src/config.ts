@@ -65,6 +65,20 @@ export const ScanConfigSchema = CommonSchema.extend({
     .int('--concurrency must be a whole number')
     .min(1, '--concurrency must be at least 1')
     .max(20, '--concurrency must be at most 20'),
+  /** `--no-traffic-check` sets this to false. */
+  trafficCheck: z.boolean(),
+  /** Hours; D5 sets the default to 12. A month is the most Log Cache could ever hold. */
+  minTrafficWindow: z.coerce
+    .number({ error: () => '--min-traffic-window must be a number of hours' })
+    .positive('--min-traffic-window must be more than 0 hours')
+    .max(720, '--min-traffic-window must be at most 720 hours'),
+  trafficPages: z.coerce
+    .number({ error: () => '--traffic-pages must be a number' })
+    .int('--traffic-pages must be a whole number')
+    .min(1, '--traffic-pages must be at least 1')
+    .max(20, '--traffic-pages must be at most 20'),
+  /** `--previous`: an earlier snapshot of the same org whose traffic history is carried forward. */
+  previous: z.string().trim().min(1, '--previous needs a snapshot file').optional(),
   quiet: z.boolean(),
 });
 export type ScanConfig = z.infer<typeof ScanConfigSchema>;
