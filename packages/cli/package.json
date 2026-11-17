@@ -1,6 +1,6 @@
 {
   "name": "baip-lens",
-  "version": "0.2.0",
+  "version": "0.3.0",
   "description": "Read-only scanner for SAP BTP Cloud Foundry landscapes and CAP projects: inventory, runtime health, outdated libraries and security posture.",
   "license": "Apache-2.0",
   "type": "module",

@@ -1,6 +1,6 @@
 # Due diligence
 
-This page answers the questions a manager, a security officer, a legal or procurement team, or a customer asks before BAIP Lens runs against their landscape. Every answer points to the code, test or document that backs it, so you can check the claim instead of trusting it. It describes release 0.2.0. Where something is not done yet, the answer says so.
+This page answers the questions a manager, a security officer, a legal or procurement team, or a customer asks before BAIP Lens runs against their landscape. Every answer points to the code, test or document that backs it, so you can check the claim instead of trusting it. It describes release 0.3.0. Where something is not done yet, the answer says so.
 
 ## In short
 
@@ -27,7 +27,7 @@ Yes, on exactly two paths, and never to your CF API:
 | Host | Method and path | Why |
 | --- | --- | --- |
 | Your UAA (login server) | `POST /oauth/token` | Signing in or refreshing the token. OAuth requires `POST` here, and `cf login` does the same. It returns a token and changes nothing in your landscape. |
-| `api.osv.dev` | `POST /v1/querybatch` | Known-vulnerability lookups for public package names and versions, with no credentials. It is on the allow-list for a coming release; **0.2.0 never calls it.** |
+| `api.osv.dev` | `POST /v1/querybatch` | Known-vulnerability lookups for public package names and versions, with no credentials. It is on the allow-list for a coming release; **0.3.0 never calls it.** |
 
 `PUT`, `PATCH` and `DELETE` are not in the type at all, so the code cannot express them.
 
@@ -37,7 +37,7 @@ The first layer still holds: a Space Auditor user cannot change anything, whatev
 
 ### Does it put load on the platform or hit rate limits?
 
-Hardly. A scan of an org with fewer than 5000 apps needs fewer than ten requests, because every list is read with 5000 items per page. BAIP Lens sends at most 5 requests at a time (`--concurrency`, 1 to 20), honors `Retry-After`, backs off on errors, and slows down on its own when the `X-RateLimit-*` headers say the budget is running low. SAP documents the CF API limit on BTP in the range of tens of thousands of requests per hour per user ([data-sources.md §1.4](data-sources.md)).
+Hardly. Without the traffic check, a scan of an org with fewer than 5000 apps needs about ten CF API requests, because every list is read with 5000 items per page (routes 50 spaces at a time). The traffic check of `APP_IDLE`, on by default, adds Log Cache reads for each started app with an HTTP route, two apps at a time: one read, or up to `--traffic-pages` (default 5) plus one. Log Cache checks each app with Cloud Controller under your user, so these reads also count against your CF API rate limit ([rules.md](rules.md#app_idle)); `--no-traffic-check` turns them off. BAIP Lens sends at most 5 requests at a time (`--concurrency`, 1 to 20), honors `Retry-After`, backs off on errors, and slows down on its own when the `X-RateLimit-*` headers say the budget is running low. SAP documents the CF API limit on BTP in the range of tens of thousands of requests per hour per user ([data-sources.md §1.4](data-sources.md)).
 
 ### Does it install or create anything in our subaccount?
 
@@ -121,7 +121,7 @@ On ownership: the maintainer publishes the project under Apache-2.0. Where a par
 
 Yes. All software can, whoever writes it, and a tool that claims otherwise is not being honest. What matters is how small the exposure is and how fast problems are found and fixed:
 
-- **Small attack surface:** two runtime dependencies (`commander` and `zod`), no server, no listening port, no stored credentials.
+- **Small attack surface:** three runtime dependencies (`commander`, `yaml` and `zod`), no server, no listening port, no stored credentials.
 - **Limited worst case:** the token it holds is a read-only one, and the program sends it to your CF API and its log cache only.
 - **Continuous checks:** CodeQL, gitleaks, dependency review and Dependabot run on the repository. `npm audit` reported no known vulnerabilities in the dependency tree on 2026-10-11.
 - **Public threat model and review:** the [security review](security-review.md) lists every item with its status, including the ones still open.
@@ -140,7 +140,7 @@ The route probe planned for the SAPUI5 rule must not ship without its guards aga
 
 ### How do we know the npm package is the code on GitHub?
 
-Releases are built and published by a GitHub Actions workflow, not from a laptop, with **npm provenance**. The package on npm carries a signed SLSA provenance statement that links it to the commit and the workflow that built it, and the npm page shows that link. To verify it, install the package in an empty folder and run `npm audit signatures`. Pin the version you reviewed (`npx baip-lens@0.2.0`) instead of whatever is latest, or install it from your company's registry mirror after review. The published package contains only `dist`, `README.md`, `LICENSE` and `NOTICE`, and the release workflow fails if anything else would ship.
+Releases are built and published by a GitHub Actions workflow, not from a laptop, with **npm provenance**. The package on npm carries a signed SLSA provenance statement that links it to the commit and the workflow that built it, and the npm page shows that link. To verify it, install the package in an empty folder and run `npm audit signatures`. Pin the version you reviewed (`npx baip-lens@0.3.0`) instead of whatever is latest, or install it from your company's registry mirror after review. The published package contains only `dist`, `README.md`, `LICENSE` and `NOTICE`, and the release workflow fails if anything else would ship.
 
 ### Has it had an independent penetration test?
 
@@ -170,17 +170,18 @@ No, and those certifications would not apply in the usual way. They certify an o
 
 ## Maturity, support and continuity
 
-### What does 0.2.0 actually check? Is it ready?
+### What does 0.3.0 actually check? Is it ready?
 
-0.2.0 is aimed at developers and platform teams. Against a Cloud Foundry org it does three things:
+0.3.0 is aimed at developers and platform teams. Against a Cloud Foundry org it does four things:
 
 - It inventories every app in the org with its state, buildpacks, stack and current droplet.
-- It applies one rule, `APP_NO_RECENT_DEPLOY`: the last deployment is older than 12 months.
+- It applies `APP_NO_RECENT_DEPLOY`: the last deployment is older than 12 months.
+- It applies `APP_IDLE`: apps that nothing seems to use, because they are started with no route, no request reached them in the router logs that Log Cache holds, or they have been stopped for more than 90 days. Each finding carries a confidence, and an app the data cannot judge is shown as unknown, never as fine. One scan sees only the hours of logs Log Cache keeps; `scan --previous` builds a longer view across scans ([rules.md](rules.md#app_idle)).
 - It writes HTML, JSON, CSV and SARIF reports.
 
 Since 0.2.0, `baip-lens project --path <dir>` checks a local CAP or MTA project against thirteen configuration and model rules tagged with the OWASP Top 10 (2025) categories, without any login or network access ([rules.md](rules.md#project-rules), [privacy.md](privacy.md#project-scans)).
 
-The other rules and the `sbom` command are designed and documented in [rules.md](rules.md) and arrive in the next releases ([roadmap](roadmap.md)). Those rules cover end-of-life runtimes and stacks, outdated buildpacks, idle apps, SAPUI5 maintenance, outdated `@sap/*` packages, known CVEs and plain-text secrets. Treat 0.2.0 as an inventory and a first health signal, not as a full security assessment.
+The other rules and the `sbom` command are designed and documented in [rules.md](rules.md) and arrive in the next releases ([roadmap](roadmap.md)). Those rules cover end-of-life runtimes and stacks, outdated buildpacks, SAPUI5 maintenance, outdated `@sap/*` packages, known CVEs and plain-text secrets. Treat 0.3.0 as an inventory and a first health signal, not as a full security assessment.
 
 ### How reliable are the results?
 
@@ -200,7 +201,7 @@ It complements them. Scanners in your CI pipeline look at source repositories; B
 
 ### Which environments does it support?
 
-- **Platforms:** Cloud Foundry on SAP BTP, in any region. Kyma support is planned for v0.3. Neo and the ABAP environment are out of scope.
+- **Platforms:** Cloud Foundry on SAP BTP, in any region. Kyma support is planned for a later release ([roadmap](roadmap.md)). Neo and the ABAP environment are out of scope.
 - **Operating systems:** Windows, macOS and Linux, with Node.js 22.12 or later.
 - **Networks:** it works behind a corporate proxy (`HTTPS_PROXY` with `NODE_USE_ENV_PROXY=1`, on Node.js 22.21 or 24 and later), and behind a TLS-inspecting proxy once you add your company's CA with `NODE_EXTRA_CA_CERTS`.
 - **Sign-in and automation:** it works with single sign-on (a one-time code, like `cf login --sso`) and in CI (a token or an OAuth client, `--fail-on`, SARIF output).
@@ -209,16 +210,16 @@ It complements them. Scanners in your CI pipeline look at source repositories; B
 
 About 30 minutes for a technical reviewer:
 
-1. **Read the gate.** [`packages/cli/src/net/allowlist.ts`](../packages/cli/src/net/allowlist.ts) is under 200 lines, and it decides every host, method and path the tool may use.
+1. **Read the gate.** [`packages/cli/src/net/allowlist.ts`](../packages/cli/src/net/allowlist.ts) is about 200 lines, and it decides every host, method and path the tool may use.
 2. **Run the tests** on the release you plan to use:
 
    ```sh
    git clone https://github.com/sebastianomarchesini/BAIP-Lens.git && cd BAIP-Lens
-   git checkout v0.2.0
+   git checkout v0.3.0
    npm ci --ignore-scripts && npm run build && npm test
    ```
 
-3. **Verify the package.** In an empty folder, run `npm install baip-lens@0.2.0 && npm audit signatures`. It should report verified registry signatures and attestations.
+3. **Verify the package.** In an empty folder, run `npm install baip-lens@0.3.0 && npm audit signatures`. It should report verified registry signatures and attestations.
 4. **Use a minimal user.** Create a technical user with Space Auditor on a non-production space, and run the first scan with it.
 5. **Watch the traffic.** Run a scan through your company proxy, or through an inspecting proxy on your machine (set `HTTPS_PROXY`, `NODE_USE_ENV_PROXY=1`, and `NODE_EXTRA_CA_CERTS` pointing to the proxy's CA), and read its log. It should show only `GET` requests to your CF API host, `GET /api/v1/read/<app-guid>` requests to your log cache host (none with `--no-traffic-check`) and `POST /oauth/token` to your UAA or login host.
 6. **Open the report offline.** Disconnect the network and open the HTML file. It works, and the browser's developer tools show no network request.
