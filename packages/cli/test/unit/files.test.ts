@@ -5,8 +5,10 @@ import { join } from 'node:path';
 import { describe, expect, it } from 'vitest';
 import { ensurePrivateDir, writePrivateFile } from '../../src/io/files.js';
 import { MAX_SNAPSHOT_BYTES, readSnapshot } from '../../src/snapshot.js';
+import { nested, readFixture, repeated, withJsonAt } from '../support/snapshotText.js';
 
 const posix = process.platform !== 'win32';
+const sample = readFixture('sample-snapshot.json');
 
 describe('private output files', () => {
   it.skipIf(!posix)('creates directories 0700 and files 0600', async () => {
@@ -82,6 +84,27 @@ describe('readSnapshot limits', () => {
     const writing = writeFile(fifo, `"${'x'.repeat(64 * 1024)}"`).catch(() => undefined);
     await expect(readSnapshot(fifo, { maxBytes: 1024 })).rejects.toThrow(/the limit is 1024/);
     await writing;
+  });
+
+  it('refuses a snapshot nested deeper than 64 levels before parsing it', async () => {
+    const path = join(await mkdtemp(join(tmpdir(), 'baip-lens-deep-')), 'deep.json');
+    // Under a finding's evidence, which the schema keeps as it is: the
+    // reporters would overflow the stack writing it out.
+    await writeFile(
+      path,
+      withJsonAt(sample, ['findings', 0, 'evidence', 'deep'], nested('0', 10_000)),
+    );
+    await expect(readSnapshot(path)).rejects.toThrow(
+      /^Snapshot .*deep\.json is not valid: it nests more than 64 levels deep\.$/,
+    );
+  });
+
+  it('refuses a snapshot with more than 4,194,304 values before parsing it', async () => {
+    const path = join(await mkdtemp(join(tmpdir(), 'baip-lens-dense-')), 'dense.json');
+    await writeFile(path, withJsonAt(sample, ['scope', 'orgs'], repeated('0', 4_194_304)));
+    await expect(readSnapshot(path)).rejects.toThrow(
+      /^Snapshot .*dense\.json is not valid: it holds more than 4,194,304 values\.$/,
+    );
   });
 
   it('rejects unknown schema versions with a clear message', async () => {

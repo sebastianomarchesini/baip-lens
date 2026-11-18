@@ -6,6 +6,7 @@ import { type CliIo, EXIT, main } from '../../src/main.js';
 import { TOOL_VERSION } from '../../src/version.js';
 import { FakeFetch, jsonResponse } from '../support/fakeFetch.js';
 import { ACME, ACME_PREVIOUS_PATH, ACME_TRAFFIC_APPS, acmeFetch } from '../support/acme.js';
+import { nested, readFixture, repeated, withJsonAt } from '../support/snapshotText.js';
 
 interface Captured {
   io: CliIo;
@@ -140,10 +141,22 @@ describe('baip-lens CLI', () => {
     // A file that is not a snapshot, one that is missing, one that is not JSON
     // (its content is never quoted back) and a project scan: nothing is sent.
     const unused = acmeFetch();
+    const acmePrevious = readFixture('history/acme-previous.json');
     const cases: [string, string, string][] = [
       ['broken.json', '{ "schemaVersion": 1 }', 'is not valid'],
       ['missing.json', '', 'Could not read snapshot'],
       ['secret.txt', 'sk_live_51HxQzK9-POISON', 'the file is not valid JSON'],
+      // Crafted (SEC-21): refused at once, not after gigabytes of memory.
+      [
+        'crafted.json',
+        withJsonAt(acmePrevious, ['raw', 'history'], repeated('0', 200_001)),
+        'is not valid: raw.history: Too big',
+      ],
+      [
+        'deep.json',
+        withJsonAt(acmePrevious, ['raw', 'history'], nested('0', 1_000)),
+        'is not valid: it nests more than 64 levels deep.',
+      ],
     ];
     for (const [name, content, message] of cases) {
       const file = join(dir, name);
@@ -286,6 +299,43 @@ describe('baip-lens CLI', () => {
     const c = capture();
     expect(await main(['report', '--from', '/nonexistent/snapshot.json'], c.io)).toBe(EXIT.error);
     expect(c.err()).toContain('Could not read snapshot');
+  });
+
+  it('exits 2 for a crafted snapshot at once, without writing a report', async () => {
+    const dir = await tmp();
+    const out = await tmp();
+    const sample = readFixture('sample-snapshot.json');
+    const cases: [string, string, string][] = [
+      // One file per limit; craftedSnapshot.test.ts measures the costly ones.
+      [
+        'long.json',
+        withJsonAt(sample, ['findings'], repeated('0', 1_000_001)),
+        'is not valid: findings: Too big',
+      ],
+      [
+        'invalid.json',
+        withJsonAt(sample, ['findings'], repeated('{}', 1_000)),
+        'is not valid: findings.0.id: Invalid input',
+      ],
+      [
+        'deep.json',
+        withJsonAt(sample, ['findings', 0, 'evidence', 'deep'], nested('0', 1_000)),
+        'is not valid: it nests more than 64 levels deep.',
+      ],
+      [
+        'dense.json',
+        withJsonAt(sample, ['junk'], repeated('0', 4_200_000)),
+        'is not valid: it holds more than 4,194,304 values.',
+      ],
+    ];
+    for (const [name, content, message] of cases) {
+      const file = join(dir, name);
+      await writeFile(file, content);
+      const c = capture();
+      expect(await main(['report', '--from', file, '--out', out], c.io)).toBe(EXIT.error);
+      expect(c.err()).toContain(message);
+    }
+    expect(await readdir(out)).toEqual([]);
   });
 
   it('without arguments in a script prints help and exits 2, and starts guided mode on a TTY', async () => {
