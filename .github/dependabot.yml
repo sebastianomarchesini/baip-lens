@@ -13,6 +13,15 @@ updates:
         patterns:
           - '@ui5/*'
           - '@sap-theming/*'
+    ignore:
+      # typescript-eslint (8.73.0) peers on typescript <6.1.0, so a TypeScript 7 lockfile
+      # fails `npm ci` with ERESOLVE. Remove once its peer range accepts TypeScript 7.
+      - dependency-name: typescript
+        versions: ['>=7.0.0']
+      # The CLI supports Node >=22.12.0 and CI tests Node 22, so the types stay on 22.x.
+      # Remove when the minimum Node version moves past 22.
+      - dependency-name: '@types/node'
+        update-types: ['version-update:semver-major']
     labels:
       - dependencies
   - package-ecosystem: github-actions
