@@ -1,5 +1,11 @@
 # Changelog
 
+## Unreleased
+
+### Security
+
+- **zod 4.6.7** (was 4.6.5), with the fix for [GHSA-mrhx-c7xc-m3w5](https://github.com/advisories/GHSA-mrhx-c7xc-m3w5): zod checked an array's `.max()` limit only after parsing every element, building one validation issue per bad element first. In a snapshot only the lists inside a project record have such a limit, so `report --from` and `scan --previous` now reject one of them at once when it is over its limit. This does not stop a crafted snapshot from exhausting memory: the list of projects and the other lists have no limit, and the nested limits multiply. The package now requires `zod@^4.6.7`, so npm can no longer satisfy it with an older copy already installed in a project.
+
 ## 0.3.0 (2026-11-17)
 
 ### Added
