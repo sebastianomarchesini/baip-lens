@@ -71,9 +71,9 @@ jobs:
             const files = JSON.parse(require("fs").readFileSync("pack.json", "utf8"))[0].files.map((f) => f.path);
             const allowed = /^(dist\/|README\.md$|LICENSE$|NOTICE$|package\.json$)/;
             const extra = files.filter((p) => !allowed.test(p));
-            if (!files.includes("dist/cli.js") || !files.includes("dist/report-template.html")) {
-              console.error("The package is missing dist/cli.js or dist/report-template.html"); process.exit(1);
-            }
+            // README.md, LICENSE and NOTICE are copied in by prepack, so this also checks that it ran.
+            const missing = ["dist/cli.js", "dist/report-template.html", "README.md", "LICENSE", "NOTICE"].filter((p) => !files.includes(p));
+            if (missing.length) { console.error("The package is missing:", missing); process.exit(1); }
             if (extra.length) { console.error("Unexpected files in the package:", extra); process.exit(1); }
             console.log(files.length + " files, all allowed");
           '
