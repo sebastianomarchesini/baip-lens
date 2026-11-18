@@ -1,22 +1,29 @@
 /*
  * A look at JSON text before `JSON.parse` turns it into values. It reads the
- * bytes once, allocates nothing and stops at the first limit passed, so a
- * file that would cost far more memory parsed than it takes on disk (millions
- * of `{}` in a few megabytes) or that nests deeper than any code reading it
- * can recurse is refused before it is parsed (docs/security-review.md SEC-21).
+ * bytes once, allocates almost nothing and stops at the first limit passed,
+ * so a file that would cost far more memory parsed than it takes on disk
+ * (millions of `{}` or of distinct keys in a few megabytes), or that nests
+ * deeper than any code reading it can recurse, is refused before it is
+ * parsed (docs/security-review.md SEC-21).
  *
  * It does not validate the JSON: text that is not JSON passes or fails here
  * like any other, and `JSON.parse` then reports it.
  */
 
 export interface JsonShapeLimits {
-  /** Deepest nesting of arrays and objects; a top-level array is 1 deep. */
+  /** Deepest nesting of arrays and objects; a top-level array is 1 deep. Sizes two arrays of state per level. */
   maxDepth: number;
-  /** Most values the parser may build, arrays and objects included; object keys do not count. */
-  maxValues: number;
+  /**
+   * Most items the parser may build: every value (arrays and objects
+   * included) and every object key. A key costs memory like a value: a
+   * distinct one takes more than an empty object.
+   */
+  maxItems: number;
+  /** Most keys one object may hold; a large object is far costlier per key. */
+  maxMembers: number;
 }
 
-export type JsonShapeLimit = 'depth' | 'values';
+export type JsonShapeLimit = 'depth' | 'items' | 'members';
 
 const QUOTE = 0x22;
 const BACKSLASH = 0x5c;
@@ -50,25 +57,43 @@ function endOfString(bytes: Uint8Array, start: number): number {
 
 /**
  * The first limit that `bytes`, read as JSON text, goes past, or undefined.
- * Values are counted as the parser builds them: the top-level value, then
- * one for the first member of every array or object that is not empty and
- * one for every comma between members.
+ * Items are counted as the parser builds them: the top-level value, then for
+ * every member of an array one item, and of an object two (its key and its
+ * value). A member is counted where it starts: at the first byte after `[`
+ * or `{` that does not close it, and at every comma.
  */
 export function jsonShapeExcess(
   bytes: Uint8Array,
   limits: JsonShapeLimits,
 ): JsonShapeLimit | undefined {
+  // Per open array or object: whether it is an object, and its keys so far.
+  const isObject = new Uint8Array(limits.maxDepth + 1);
+  const members = new Uint32Array(limits.maxDepth + 1);
   let depth = 0;
-  let values = 1;
+  let items = 1;
   // The last byte that was not whitespace opened an array or an object.
   let opened = false;
+
+  const member = (): JsonShapeLimit | undefined => {
+    if (isObject[depth] === 1) {
+      items += 2;
+      const keys = (members[depth] ?? 0) + 1;
+      members[depth] = keys;
+      if (keys > limits.maxMembers) return 'members';
+    } else {
+      items += 1;
+    }
+    return items > limits.maxItems ? 'items' : undefined;
+  };
+
   for (let i = 0; i < bytes.length; i++) {
     const byte = bytes[i];
     if (isWhitespace(byte)) continue;
     if (opened) {
       opened = false;
-      if (byte !== CLOSE_ARRAY && byte !== CLOSE_OBJECT && ++values > limits.maxValues) {
-        return 'values';
+      if (byte !== CLOSE_ARRAY && byte !== CLOSE_OBJECT) {
+        const excess = member();
+        if (excess !== undefined) return excess;
       }
     }
     switch (byte) {
@@ -78,15 +103,20 @@ export function jsonShapeExcess(
       case OPEN_ARRAY:
       case OPEN_OBJECT:
         if (++depth > limits.maxDepth) return 'depth';
+        isObject[depth] = byte === OPEN_OBJECT ? 1 : 0;
+        members[depth] = 0;
         opened = true;
         break;
       case CLOSE_ARRAY:
       case CLOSE_OBJECT:
-        depth--;
+        // Text that closes more than it opened is not JSON; the parser says so.
+        if (depth > 0) depth--;
         break;
-      case COMMA:
-        if (++values > limits.maxValues) return 'values';
+      case COMMA: {
+        const excess = member();
+        if (excess !== undefined) return excess;
         break;
+      }
     }
   }
   return undefined;

@@ -14,25 +14,30 @@ export function snapshotFileName(scannedAt: string): string {
 /*
  * What a snapshot file may be, checked before it is parsed
  * (docs/security-review.md SEC-21). A snapshot from someone else is
- * untrusted: parsed, a few megabytes of `{}` would cost gigabytes. A scan
- * writes about 3.2 KB and 84 values per app, so these hold about 42,000 apps
- * (50,000 written without whitespace). Each list has its own limit as well
- * (`model/list.ts`).
+ * untrusted: parsed, a few megabytes of `{}` or of distinct keys would cost
+ * gigabytes. A scan writes about 157 keys and values per app (84 values, 73
+ * keys), so these hold about 26,000 apps however the file is formatted. Each
+ * list has its own limit as well (`model/list.ts`).
  */
-/** Larger files are refused before they are read in full. */
+/** Larger files are refused before they are read in full; a real one meets the item limit first. */
 export const MAX_SNAPSHOT_BYTES = 128 * 1024 * 1024;
 /** A snapshot nests 11 levels at most (the roles of an entity in a project's service). */
 export const MAX_SNAPSHOT_DEPTH = 64;
 /**
- * One value per 32 bytes over the whole size limit. A scan writes one per 35
- * to 47 bytes; minified, one per 27, so a minified file meets this limit first.
+ * Keys and values together: one per 32 bytes over the whole size limit. A
+ * scan writes one per 18 to 27 bytes (13 to 19 minified), about 85 MB at this
+ * limit. The costliest file within it, four million `{}`, parses in about a
+ * second and 400 MB.
  */
-export const MAX_SNAPSHOT_VALUES = 4 * 1024 * 1024;
+export const MAX_SNAPSHOT_ITEMS = 4 * 1024 * 1024;
+/** Keys of one object: a snapshot's objects hold 17 at most, and a huge object costs far more per key. */
+export const MAX_SNAPSHOT_MEMBERS = 1_000;
 const CHUNK_BYTES = 1024 * 1024;
 
 const SHAPE_REASONS: Record<JsonShapeLimit, string> = {
   depth: `it nests more than ${MAX_SNAPSHOT_DEPTH} levels deep`,
-  values: `it holds more than ${MAX_SNAPSHOT_VALUES.toLocaleString('en-US')} values`,
+  items: `it holds more than ${MAX_SNAPSHOT_ITEMS.toLocaleString('en-US')} keys and values`,
+  members: `an object in it has more than ${MAX_SNAPSHOT_MEMBERS.toLocaleString('en-US')} keys`,
 };
 
 export async function writeSnapshot(snapshot: Snapshot, outDir: string): Promise<string> {
@@ -54,15 +59,17 @@ async function readCapped(path: string, maxBytes: number): Promise<Buffer> {
     const { size } = await handle.stat();
     if (size > maxBytes) throw new Error(`file is ${size} bytes, the limit is ${maxBytes}`);
     const chunks: Buffer[] = [];
+    const buffer = Buffer.allocUnsafe(CHUNK_BYTES);
     let total = 0;
     for (;;) {
-      const buffer = Buffer.alloc(CHUNK_BYTES);
       const { bytesRead } = await handle.read(buffer, 0, CHUNK_BYTES, null);
       if (bytesRead === 0) break;
       total += bytesRead;
       if (total > maxBytes)
         throw new Error(`file is over ${maxBytes} bytes, the limit is ${maxBytes}`);
-      chunks.push(buffer.subarray(0, bytesRead));
+      // A copy of what was read, so a pipe that hands over a few kilobytes at
+      // a time does not hold on to a megabyte per read.
+      chunks.push(Buffer.from(buffer.subarray(0, bytesRead)));
     }
     return Buffer.concat(chunks, total);
   } finally {
@@ -80,7 +87,8 @@ async function readText(path: string, maxBytes: number): Promise<string> {
   }
   const excess = jsonShapeExcess(bytes, {
     maxDepth: MAX_SNAPSHOT_DEPTH,
-    maxValues: MAX_SNAPSHOT_VALUES,
+    maxItems: MAX_SNAPSHOT_ITEMS,
+    maxMembers: MAX_SNAPSHOT_MEMBERS,
   });
   if (excess !== undefined) {
     throw new ConfigError(`Snapshot ${path} is not valid: ${SHAPE_REASONS[excess]}.`);
@@ -114,11 +122,20 @@ async function readJson(path: string, maxBytes: number): Promise<unknown> {
   }
 }
 
+/** The schema version as a message may name it: a number as written, never text from the file. */
+function describeVersion(version: unknown): string {
+  if (version === undefined) return 'no schema version';
+  return typeof version === 'number'
+    ? `schema version ${version}`
+    : 'a schema version that is not a number';
+}
+
 /**
  * A snapshot from a file, for `report --from` and `scan --previous`. The file
- * may come from someone else, so whatever it holds, reading it ends quickly,
- * in a snapshot or in a `ConfigError` (exit code 2) that names what is wrong
- * without quoting the file (docs/security-review.md SEC-21).
+ * may come from someone else, so whatever it holds, reading it ends within
+ * seconds and a few hundred megabytes, in a snapshot or in a `ConfigError`
+ * (exit code 2) that names what is wrong without quoting the file
+ * (docs/security-review.md SEC-21).
  */
 export async function readSnapshot(
   path: string,
@@ -128,7 +145,7 @@ export async function readSnapshot(
   const version = (json as { schemaVersion?: unknown } | null)?.schemaVersion;
   if (version !== SNAPSHOT_SCHEMA_VERSION) {
     throw new ConfigError(
-      `Snapshot ${path} has schema version ${String(version)}; this baip-lens reads version ${SNAPSHOT_SCHEMA_VERSION}.`,
+      `Snapshot ${path} has ${describeVersion(version)}; this baip-lens reads version ${SNAPSHOT_SCHEMA_VERSION}.`,
     );
   }
   const parsed = SnapshotSchema.safeParse(json);
