@@ -9,6 +9,7 @@
 ### Fixed
 
 - **The logo on the npm page** was a broken image: the prepack step pinned the README's Markdown links and images to the release tag but not its HTML attributes, so npmjs.com looked for the logo under `packages/cli` on the default branch and left the dark variant's `srcset` relative to npmjs.com. Prepack now pins the `src`, `srcset`, `href` and `poster` of HTML tags too, and fails when it finds a relative URL it cannot pin (the target of a link reference definition) instead of packing a README with a broken link. CI now runs `npm pack --dry-run` on every pull request, so this check and the release workflow's file check run before a release, and the file check now also requires the `README.md`, `LICENSE` and `NOTICE` that prepack copies in.
+- **The npm description** no longer promises runtime health and outdated-library checks, which are still planned. It names what ships (app inventory, idle apps, stale deployments, the OWASP-based project checks and the report formats) and says that the project is not affiliated with SAP. The keyword `sbom` is replaced by `cap` and `sarif`.
 
 ## 0.3.0 (2026-11-17)
 
