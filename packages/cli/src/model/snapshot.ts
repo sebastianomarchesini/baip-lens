@@ -1,6 +1,7 @@
 import { z } from 'zod';
 import { CfRoleSchema, CheckResultSchema } from './check.js';
 import { FindingSchema } from './finding.js';
+import { SNAPSHOT_LIST_LIMITS as LIMITS, list } from './list.js';
 import { OwaspCategorySchema } from './owasp.js';
 import { LifecycleTypeSchema, RawDataSchema } from './raw.js';
 import { SeveritySchema } from './severity.js';
@@ -88,7 +89,10 @@ export const AppInventoryItemSchema = z.object({
   state: z.enum(['STARTED', 'STOPPED']).nullable(),
   lifecycleType: LifecycleTypeSchema,
   stack: z.string().nullable(),
-  buildpacks: z.array(z.object({ name: z.string(), version: z.string().nullable() })),
+  buildpacks: list(
+    z.object({ name: z.string(), version: z.string().nullable() }),
+    LIMITS.buildpacks,
+  ),
   createdAt: Timestamp.nullable(),
   updatedAt: Timestamp.nullable(),
   /** When the current droplet was staged; null when unknown or not visible. */
@@ -106,9 +110,9 @@ export const RuleMetaSchema = z.object({
   id: z.string().regex(/^[A-Z0-9_]+$/),
   title: z.string(),
   description: z.string(),
-  roles: z.array(CfRoleSchema),
+  roles: list(CfRoleSchema, LIMITS.tags),
   /** OWASP Top 10 (2025) categories the rule maps to. */
-  owasp: z.array(OwaspCategorySchema),
+  owasp: list(OwaspCategorySchema, LIMITS.tags),
   helpUri: z.url(),
 });
 export type RuleMeta = z.infer<typeof RuleMetaSchema>;
@@ -116,10 +120,10 @@ export type RuleMeta = z.infer<typeof RuleMetaSchema>;
 export const ScopeSchema = z.object({
   /** Absent for a project scan. */
   apiEndpoint: z.url().optional(),
-  orgs: z.array(z.string()),
-  spaces: z.array(z.string()).optional(),
+  orgs: list(z.string(), LIMITS.orgs),
+  spaces: list(z.string(), LIMITS.spaces).optional(),
   /** Ids of the local projects scanned with `baip-lens project`. */
-  projects: z.array(z.string()).optional(),
+  projects: list(z.string(), LIMITS.projects).optional(),
 });
 
 export const ScanOptionsSchema = z.object({
@@ -156,10 +160,11 @@ export const SnapshotSchema = z.object({
   scannedAt: Timestamp,
   scope: ScopeSchema,
   options: ScanOptionsSchema,
-  checks: z.array(CheckResultSchema),
+  checks: list(CheckResultSchema, LIMITS.checks),
   raw: RawDataSchema,
-  apps: z.array(AppInventoryItemSchema),
-  findings: z.array(FindingSchema),
+  /** One item per app and per project. */
+  apps: list(AppInventoryItemSchema, LIMITS.apps + LIMITS.projects),
+  findings: list(FindingSchema, LIMITS.findings),
 });
 export type Snapshot = z.infer<typeof SnapshotSchema>;
 
@@ -169,7 +174,7 @@ export type Snapshot = z.infer<typeof SnapshotSchema>;
  */
 export const ReportDataSchema = SnapshotSchema.omit({ raw: true }).extend({
   /** Metadata for every rule known to this tool version. */
-  rules: z.array(RuleMetaSchema),
+  rules: list(RuleMetaSchema, LIMITS.rules),
   summary: z.object({
     /** Inventory items of kind `app`. */
     apps: z.number().int().nonnegative(),

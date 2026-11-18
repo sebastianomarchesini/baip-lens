@@ -1,5 +1,15 @@
 # Changelog
 
+## Unreleased
+
+### Security
+
+- **A crafted snapshot can no longer exhaust memory** in `report --from` and `scan --previous`. 0.3.1 said this was still open. A few megabytes of `{}` in one of a snapshot's lists made zod build millions of validation issues: 1.1 to 2.1 GB of memory, then an out-of-memory abort instead of exit code 2. A nested project list overflowed the stack, and evidence nested a million levels deep loaded and then broke the reporters. Such a file is now refused in under a second, with exit code 2 and a message that names the limit:
+  - The file may be at most **128 MB** (was 256 MB).
+  - Before it is parsed, it may nest at most **64** levels and hold at most **4,194,304** values.
+  - Every list has a limit (for example 100,000 apps), and a list stops at its first invalid element, so a snapshot yields at most one element's issues per list.
+  - These limits are set above any real landscape: a snapshot of about 42,000 apps as a scan writes it still loads (50,000 without whitespace), and so do the recorded snapshots, the 0.1.0 one included ([docs/security-review.md](docs/security-review.md) SEC-21). A crafted but valid project record can still keep the project rules busy for minutes; that needs a separate fix.
+
 ## 0.3.1 (2026-11-18)
 
 ### Security

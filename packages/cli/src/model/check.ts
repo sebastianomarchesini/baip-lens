@@ -1,4 +1,5 @@
 import { z } from 'zod';
+import { SNAPSHOT_LIST_LIMITS as LIMITS, list } from './list.js';
 
 /**
  * Cloud Foundry roles a check can need. A check lists every role that is
@@ -35,7 +36,7 @@ export type SkipReasonCode = z.infer<typeof SkipReasonCodeSchema>;
 export const CheckResultSchema = z.object({
   id: z.string(),
   title: z.string(),
-  roles: z.array(CfRoleSchema),
+  roles: list(CfRoleSchema, LIMITS.tags),
   status: CheckStatusSchema,
   reason: z.string().optional(),
   reasonCode: SkipReasonCodeSchema.optional(),

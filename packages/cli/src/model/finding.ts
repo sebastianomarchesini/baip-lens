@@ -1,4 +1,5 @@
 import { z } from 'zod';
+import { SNAPSHOT_LIST_LIMITS as LIMITS, list } from './list.js';
 import { RelativePathSchema } from './paths.js';
 import { SeveritySchema } from './severity.js';
 
@@ -27,7 +28,7 @@ export const FindingSchema = z.object({
   evidence: z.record(z.string(), z.unknown()),
   /** Concrete next step. */
   remediation: z.string(),
-  references: z.array(z.url()),
+  references: list(z.url(), LIMITS.references),
   /** Set by project rules only; CF findings have no file. */
   location: FindingLocationSchema.optional(),
 });

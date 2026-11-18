@@ -1,4 +1,5 @@
 import { z } from 'zod';
+import { SNAPSHOT_LIST_LIMITS as LIMITS, list } from './list.js';
 import { RelativePathSchema } from './paths.js';
 
 /*
@@ -36,7 +37,7 @@ export const RawAppSchema = z.object({
   updatedAt: Timestamp,
   lifecycleType: LifecycleTypeSchema,
   /** Buildpacks requested for the app (names, or URLs with credentials removed). */
-  buildpacks: z.array(z.string()),
+  buildpacks: list(z.string(), LIMITS.buildpacks),
   stack: z.string().nullable(),
 });
 export type RawApp = z.infer<typeof RawAppSchema>;
@@ -57,7 +58,7 @@ export const RawDropletSchema = z.object({
   updatedAt: Timestamp,
   lifecycleType: LifecycleTypeSchema,
   stack: z.string().nullable(),
-  buildpacks: z.array(RawDetectedBuildpackSchema),
+  buildpacks: list(RawDetectedBuildpackSchema, LIMITS.buildpacks),
   /** Docker image reference for docker droplets (credentials removed). */
   image: z.string().nullable(),
 });
@@ -83,10 +84,11 @@ export const RawRouteSchema = z.object({
   kind: RouteKindSchema,
   /**
    * Destination apps, limited to apps in the scanned inventory. CF allows at
-   * most 100 destinations per route; no cap is applied here, because dropping
-   * one would make a reachable app look unrouted.
+   * most 100 destinations per route. The collector drops none, because
+   * dropping one would make a reachable app look unrouted; reading a snapshot
+   * refuses a route with more than ten times that.
    */
-  appGuids: z.array(z.string()),
+  appGuids: list(z.string(), LIMITS.routeDestinations),
 });
 export type RawRoute = z.infer<typeof RawRouteSchema>;
 
@@ -167,7 +169,7 @@ const Identifier = z.string().regex(IDENTIFIER_PATTERN);
 const Role = z.string().regex(ROLE_PATTERN);
 const Line = z.number().int().positive();
 const Count = z.number().int().nonnegative();
-const Roles = z.array(Role).max(50);
+const Roles = list(Role, 50);
 
 export const CdsAuthKindSchema = z.enum([
   'mocked',
@@ -235,8 +237,8 @@ export type RawDependency = z.infer<typeof RawDependencySchema>;
 export const RawPackageJsonSchema = z.object({
   present: z.boolean(),
   name: z.string().regex(PACKAGE_NAME_PATTERN).nullable(),
-  dependencies: z.array(RawDependencySchema).max(500),
-  devDependencies: z.array(RawDependencySchema).max(500),
+  dependencies: list(RawDependencySchema, 500),
+  devDependencies: list(RawDependencySchema, 500),
   nodeEngine: z.string().max(64).nullable(),
 });
 export type RawPackageJson = z.infer<typeof RawPackageJsonSchema>;
@@ -248,7 +250,7 @@ export const RawMtaModuleSchema = z.object({
   /** `parameters.buildpack` with credentials and query removed. */
   buildpack: z.string().max(200).nullable(),
   /** Names of the required resources. */
-  requires: z.array(Identifier).max(50),
+  requires: list(Identifier, 50),
 });
 export type RawMtaModule = z.infer<typeof RawMtaModuleSchema>;
 
@@ -263,8 +265,8 @@ export type RawMtaResource = z.infer<typeof RawMtaResourceSchema>;
 export const RawMtaSchema = z.object({
   file: z.enum(['mta.yaml', 'mta.yml']),
   id: z.string().regex(PROJECT_ID_PATTERN).nullable(),
-  modules: z.array(RawMtaModuleSchema).max(200),
-  resources: z.array(RawMtaResourceSchema).max(200),
+  modules: list(RawMtaModuleSchema, 200),
+  resources: list(RawMtaResourceSchema, 200),
 });
 export type RawMta = z.infer<typeof RawMtaSchema>;
 
@@ -277,7 +279,7 @@ export type RawXsSecurityScope = z.infer<typeof RawXsSecurityScopeSchema>;
 
 export const RawXsSecurityRoleTemplateSchema = z.object({
   name: Identifier,
-  scopeReferences: z.array(Identifier).max(500),
+  scopeReferences: list(Identifier, 500),
 });
 export type RawXsSecurityRoleTemplate = z.infer<typeof RawXsSecurityRoleTemplateSchema>;
 
@@ -285,10 +287,10 @@ export type RawXsSecurityRoleTemplate = z.infer<typeof RawXsSecurityRoleTemplate
 export const RawXsSecuritySchema = z.object({
   file: RelativePathSchema,
   source: z.enum(['xs-security.json', 'mta.yaml']),
-  scopes: z.array(RawXsSecurityScopeSchema).max(500),
-  roleTemplates: z.array(RawXsSecurityRoleTemplateSchema).max(500),
+  scopes: list(RawXsSecurityScopeSchema, 500),
+  roleTemplates: list(RawXsSecurityRoleTemplateSchema, 500),
   /** Attribute names only. */
-  attributes: z.array(Identifier).max(500),
+  attributes: list(Identifier, 500),
 });
 export type RawXsSecurity = z.infer<typeof RawXsSecuritySchema>;
 
@@ -321,7 +323,7 @@ export type RawXsAppRoute = z.infer<typeof RawXsAppRouteSchema>;
 export const RawXsAppSchema = z.object({
   file: RelativePathSchema,
   authenticationMethod: z.enum(['route', 'none', 'other']).nullable(),
-  routes: z.array(RawXsAppRouteSchema).max(200),
+  routes: list(RawXsAppRouteSchema, 200),
 });
 export type RawXsApp = z.infer<typeof RawXsAppSchema>;
 
@@ -359,8 +361,8 @@ export const RawCdsServiceSchema = z.object({
   protocolNone: z.boolean(),
   /** `@cds.external`: an imported remote service. */
   external: z.boolean(),
-  entities: z.array(RawCdsServiceEntitySchema).max(2000),
-  actions: z.array(RawCdsActionSchema).max(500),
+  entities: list(RawCdsServiceEntitySchema, 2000),
+  actions: list(RawCdsActionSchema, 500),
 });
 export type RawCdsService = z.infer<typeof RawCdsServiceSchema>;
 
@@ -375,10 +377,10 @@ export type RawCdsAssociation = z.infer<typeof RawCdsAssociationSchema>;
 export const RawCdsEntitySchema = z.object({
   name: Identifier,
   line: Line,
-  fields: z.array(Identifier).max(200),
+  fields: list(Identifier, 200),
   /** `@PersonalData` on the entity header or on any element inline. */
   personalData: z.boolean(),
-  associations: z.array(RawCdsAssociationSchema).max(200),
+  associations: list(RawCdsAssociationSchema, 200),
 });
 export type RawCdsEntity = z.infer<typeof RawCdsEntitySchema>;
 
@@ -396,10 +398,10 @@ export type RawCdsAnnotate = z.infer<typeof RawCdsAnnotateSchema>;
 export const RawCdsFileSchema = z.object({
   file: RelativePathSchema,
   /** `using X as Y from` within this file (identifiers only). */
-  usings: z.array(RawCdsUsingSchema).max(500),
-  services: z.array(RawCdsServiceSchema).max(500),
-  entities: z.array(RawCdsEntitySchema).max(2000),
-  annotates: z.array(RawCdsAnnotateSchema).max(2000),
+  usings: list(RawCdsUsingSchema, 500),
+  services: list(RawCdsServiceSchema, 500),
+  entities: list(RawCdsEntitySchema, 2000),
+  annotates: list(RawCdsAnnotateSchema, 2000),
 });
 export type RawCdsFile = z.infer<typeof RawCdsFileSchema>;
 
@@ -421,7 +423,7 @@ export const RawSeedDataSchema = z.object({
   /** The header had a field that is not identifier-shaped, so no values were checked. */
   headerRejected: z.boolean(),
   rowsChecked: Count,
-  sensitiveColumns: z.array(RawSeedSensitiveColumnSchema).max(200),
+  sensitiveColumns: list(RawSeedSensitiveColumnSchema, 200),
 });
 export type RawSeedData = z.infer<typeof RawSeedDataSchema>;
 
@@ -458,13 +460,13 @@ export type RawHtmlBootstrap = z.infer<typeof RawHtmlBootstrapSchema>;
 export const RawProjectSchema = z.object({
   id: z.string().regex(PROJECT_ID_PATTERN),
   /** Which optional cds config sources existed and were read. */
-  sourcesRead: z.array(CdsSourceSchema).max(3),
+  sourcesRead: list(CdsSourceSchema, 3),
   /** Files the collector opened (allow-listed names only), sorted. */
-  files: z.array(RelativePathSchema).max(500),
+  files: list(RelativePathSchema, 500),
   filesTruncated: z.boolean(),
   /** How many files inside the project the collector opened (listed or unreadable), whatever the listing cap. */
   filesOpened: Count,
-  unreadable: z.array(RawUnreadableSchema).max(200),
+  unreadable: list(RawUnreadableSchema, 200),
   /** A `.git` entry exists in the root or one of its ancestors (lstat only, never read). */
   repository: z.boolean(),
   gitIgnore: z.object({ present: z.boolean() }),
@@ -477,30 +479,30 @@ export const RawProjectSchema = z.object({
     }),
   }),
   mta: RawMtaSchema.nullable(),
-  xsSecurity: z.array(RawXsSecuritySchema).max(100),
-  xsApps: z.array(RawXsAppSchema).max(100),
-  cdsFiles: z.array(RawCdsFileSchema).max(2000),
-  seedData: z.array(RawSeedDataSchema).max(500),
-  archives: z.array(RawArchiveSchema).max(200),
-  html: z.array(RawHtmlBootstrapSchema).max(200),
+  xsSecurity: list(RawXsSecuritySchema, 100),
+  xsApps: list(RawXsAppSchema, 100),
+  cdsFiles: list(RawCdsFileSchema, 2000),
+  seedData: list(RawSeedDataSchema, 500),
+  archives: list(RawArchiveSchema, 200),
+  html: list(RawHtmlBootstrapSchema, 200),
 });
 export type RawProject = z.infer<typeof RawProjectSchema>;
 
 export const RawDataSchema = z.object({
-  orgs: z.array(RawOrgSchema),
-  spaces: z.array(RawSpaceSchema),
-  apps: z.array(RawAppSchema),
+  orgs: list(RawOrgSchema, LIMITS.orgs),
+  spaces: list(RawSpaceSchema, LIMITS.spaces),
+  apps: list(RawAppSchema, LIMITS.apps),
   /** Current droplet per app; absent when the droplet collector was skipped. */
-  droplets: z.array(RawDropletSchema),
+  droplets: list(RawDropletSchema, LIMITS.droplets),
   /** Routes with a destination in the inventory; empty in snapshots written before 0.3. */
-  routes: z.array(RawRouteSchema).default([]),
+  routes: list(RawRouteSchema, LIMITS.routes).default([]),
   /** `web` processes of the inventory's apps; empty in snapshots written before 0.3. */
-  processes: z.array(RawProcessSchema).default([]),
+  processes: list(RawProcessSchema, LIMITS.processes).default([]),
   /** Last request per app that has an HTTP route, from Log Cache; empty before 0.3. */
-  traffic: z.array(RawTrafficSchema).default([]),
+  traffic: list(RawTrafficSchema, LIMITS.traffic).default([]),
   /** Traffic history per app, this scan included (`scan --previous`); empty before 0.3. */
-  history: z.array(RawHistorySchema).default([]),
+  history: list(RawHistorySchema, LIMITS.history).default([]),
   /** Local projects (`baip-lens project`); empty for a CF scan and in snapshots written before 0.2. */
-  projects: z.array(RawProjectSchema).default([]),
+  projects: list(RawProjectSchema, LIMITS.projects).default([]),
 });
 export type RawData = z.infer<typeof RawDataSchema>;
