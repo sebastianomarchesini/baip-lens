@@ -1,5 +1,16 @@
 # Changelog
 
+## 0.3.1 (2026-11-18)
+
+### Security
+
+- **zod 4.6.7** (was 4.6.5), with the fix for [GHSA-mrhx-c7xc-m3w5](https://github.com/advisories/GHSA-mrhx-c7xc-m3w5): zod checked an array's `.max()` limit only after parsing every element, building one validation issue per bad element first. In a snapshot only the lists inside a project record have such a limit, so `report --from` and `scan --previous` now reject one of them at once when it is over its limit. This does not stop a crafted snapshot from exhausting memory: the list of projects and the other lists have no limit, and the nested limits multiply. The package now requires `zod@^4.6.7`, so npm can no longer satisfy it with an older copy already installed in a project.
+
+### Fixed
+
+- **The logo on the npm page** was a broken image: the prepack step pinned the README's Markdown links and images to the release tag but not its HTML attributes, so npmjs.com looked for the logo under `packages/cli` on the default branch and left the dark variant's `srcset` relative to npmjs.com. Prepack now pins the `src`, `srcset`, `href` and `poster` of HTML tags too, and fails when it finds a relative URL it cannot pin (the target of a link reference definition) instead of packing a README with a broken link. CI now runs `npm pack --dry-run` on every pull request, so this check and the release workflow's file check run before a release, and the file check now also requires the `README.md`, `LICENSE` and `NOTICE` that prepack copies in.
+- **The npm description** no longer promises runtime health and outdated-library checks, which are still planned. It names what ships (app inventory, idle apps, stale deployments, the OWASP-based project checks and the report formats) and says that the project is not affiliated with SAP. The keyword `sbom` is replaced by `cap` and `sarif`.
+
 ## 0.3.0 (2026-11-17)
 
 ### Added

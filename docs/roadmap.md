@@ -74,7 +74,7 @@ Each of these is scoped to one file, one test and one doc line, and a maintainer
 
 1. ~~Print a one-line "reports contain internal details, do not commit them" warning after `scan` (SEC-22).~~ Done 2026-10-03.
 2. Add a fixture-linter test that fails on e-mail addresses, JWTs, real BTP hostnames and IP addresses in `packages/cli/test/fixtures`.
-3. ~~Add `npm pack --dry-run` to CI and assert that only `dist`, `README.md`, `LICENSE` and `NOTICE` ship.~~ Done in the release workflow 2026-10-10; still worth adding to `ci.yml`.
+3. ~~Add `npm pack --dry-run` to CI and assert that only `dist`, `README.md`, `LICENSE` and `NOTICE` ship.~~ Done in the release workflow 2026-10-10 and in `ci.yml` 2026-11-18.
 4. `baip-lens doctor`: add the role check (list spaces visible in the target org when a session exists).
 5. Guided mode: remember the last API endpoint and org in `~/.config/baip-lens/last-scan.json` (never the token) and offer "run the same scan again"; add `baip-lens reset`.
 6. Report: a glossary page (org, space, buildpack, droplet, stack, runtime, EOL, SBOM, CVE, one sentence each).

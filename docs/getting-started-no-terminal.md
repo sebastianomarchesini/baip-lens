@@ -41,7 +41,7 @@ npx baip-lens
 The first time, `npx` asks whether it may download `baip-lens`. Type `y` and press Enter. Then the guided mode starts:
 
 ```
-baip-lens 0.3.0 · read-only health check for your Cloud Foundry landscape
+baip-lens 0.3.1 · read-only health check for your Cloud Foundry landscape
 Nothing is changed in your account, and nothing is sent outside your own Cloud Foundry landscape.
 Press Ctrl+C at any time to stop; nothing is written until the scan starts.
 ```

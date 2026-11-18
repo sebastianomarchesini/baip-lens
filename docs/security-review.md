@@ -42,7 +42,7 @@ Verdicts: **✅ verified** (present in code and covered by a test), **🔧 fixed
 | SC-01 provenance publishing from CI | 👤 / ⏳ | no release workflow yet |
 | SC-02 actions pinned by SHA | ✅ / 🔧 | `security.yml` already pinned; all seven SHAs re-verified against upstream tags today. **Fixed now:** `ci.yml` was on floating `@v7` tags and is pinned; the new `pages.yml` is pinned |
 | SC-03 `npm ci --ignore-scripts`, tiny runtime dependency list | 🔧 / ✅ | CI and Pages install with `--ignore-scripts` (build and tests verified to pass that way). Runtime dependencies: `commander`, `zod` only |
-| SC-04 `files` whitelist | ✅ | `packages/cli/package.json` ships `dist`, `README.md`, `LICENSE`, `NOTICE`; `npm pack --dry-run` check in CI still to add |
+| SC-04 `files` whitelist | ✅ | `packages/cli/package.json` ships `dist`, `README.md`, `LICENSE`, `NOTICE`. CI and the release workflow run `npm pack --dry-run` and fail on any other file or a missing one (2026-11-18) |
 | SC-05 bundled licences | ✅ | `THIRD_PARTY_LICENSES.md` generated and embedded in the report as a leading comment |
 
 ## 2.2 Findings not in Part 1
