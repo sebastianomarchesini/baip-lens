@@ -1,30 +1,77 @@
-import { mkdtemp, writeFile } from 'node:fs/promises';
+import { mkdtemp, open, rm, writeFile } from 'node:fs/promises';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
-import { beforeAll, describe, expect, it } from 'vitest';
+import { afterAll, beforeAll, describe, expect, it } from 'vitest';
+import { ConfigError } from '../../src/http/errors.js';
 import { readSnapshot } from '../../src/snapshot.js';
 import {
   type JsonPath,
   nested,
   readFixture,
   repeated,
+  splitAt,
   withJsonAt,
 } from '../support/snapshotText.js';
 
 /*
- * Crafted snapshots of a few megabytes. Before the limits of SEC-21, each of
- * these made `report --from` and `scan --previous` die out of memory (1.1 to
- * 2.1 GB, then SIGABRT instead of exit code 2), overflow the stack, take 9 to
- * 14 seconds and 1.5 GB to refuse, or load and break the reporters later.
- * Each is now refused at once. Vitest runs every test file in a process of
- * its own, so the growth of this process's peak resident size is what reading
- * these files cost.
+ * Crafted snapshots. Before the limits of SEC-21, most of these made
+ * `report --from` and `scan --previous` die out of memory (1.1 to 2.1 GB,
+ * then SIGABRT instead of exit code 2), overflow the stack, take 8 to 14
+ * seconds and a gigabyte or more, or load and break the reporters later.
+ * Each is now refused, or loaded, within seconds and a few hundred
+ * megabytes.
+ *
+ * Memory is measured as the growth of this process's peak resident size, a
+ * high-water mark: garbage is collected before each read, and the large
+ * files are written a megabyte at a time, so the mark ends at the costliest
+ * read plus what the earlier ones kept. That holds only while this file has
+ * a process of its own, which vitest gives every test file (`isolate`, on by
+ * default); beforeAll checks it.
  */
 
 const cf = readFixture('sample-snapshot.json');
 const project = readFixture('sample-project-snapshot.json');
 const MB = 1024 * 1024;
 const peakRss = (): number => process.resourceUsage().maxRSS * 1024;
+
+type Write = (path: string) => Promise<void>;
+
+/** The snapshot with the value at `at` replaced by the text `json`. */
+const text =
+  (base: typeof cf, at: JsonPath, json: () => string): Write =>
+  (path) =>
+    writeFile(path, withJsonAt(base, at, json()));
+
+/**
+ * The snapshot with the value at `at` replaced by `count` members, `member(i)`
+ * each, between `open` and `close`, written a megabyte at a time, so that
+ * building the file costs the test no more than reading it.
+ */
+const joined =
+  (
+    base: typeof cf,
+    at: JsonPath,
+    [start, end]: [string, string],
+    count: number,
+    member: (i: number) => string,
+  ): Write =>
+  async (path) => {
+    const [head, tail] = splitAt(base, at);
+    const handle = await open(path, 'w');
+    try {
+      let batch = `${head}${start}`;
+      for (let i = 0; i < count; i++) {
+        batch += i === 0 ? member(i) : `,${member(i)}`;
+        if (batch.length > MB) {
+          await handle.write(batch);
+          batch = '';
+        }
+      }
+      await handle.write(`${batch}${end}${tail}`);
+    } finally {
+      await handle.close();
+    }
+  };
 
 /** A project whose CDS files each declare 500 services requiring 50 invalid roles. */
 function projectWithInvalidRoles(cdsFiles: number): string {
@@ -45,29 +92,52 @@ function projectWithInvalidRoles(cdsFiles: number): string {
     entities: [],
     annotates: [],
   }).replace('"\\u0000services"', repeated(service, 500));
-  return withJsonAt(project, ['raw', 'projects', 0, 'cdsFiles'], repeated(file, cdsFiles));
+  return repeated(file, cdsFiles);
 }
 
-const at = (base: typeof cf, path: JsonPath, json: string) => () => withJsonAt(base, path, json);
+/** A distinct key: one the parser has not seen costs the most. */
+const key = (i: number) => `"k${i.toString(36)}":0`;
 
-/** What each file holds, and how it is built (lazily, so only one is in memory at a time). */
-const CRAFTED: [string, () => string][] = [
-  ['4 MB of {} in the inventory', at(cf, ['apps'], repeated('{}', 1_400_000))],
-  ['4 MB of {} in the findings', at(cf, ['findings'], repeated('{}', 1_400_000))],
-  ['4 MB of {} in the checks', at(cf, ['checks'], repeated('{}', 1_400_000))],
-  ['4 MB of {} in raw.apps', at(cf, ['raw', 'apps'], repeated('{}', 1_400_000))],
-  ['4 MB of {} in raw.projects', at(project, ['raw', 'projects'], repeated('{}', 1_400_000))],
-  ['4 MB of 0 in raw.apps', at(cf, ['raw', 'apps'], repeated('0', 2_000_000))],
-  ['4 MB of project services with invalid roles', () => projectWithInvalidRoles(27)],
+/** A finding whose evidence holds 1,000 distinct keys. */
+function wideFinding(i: number): string {
+  const finding = (cf.findings as unknown[])[0] as Record<string, unknown>;
+  let keys = '';
+  for (let k = 0; k < 1_000; k++) keys += k === 0 ? key(i * 1_000) : `,${key(i * 1_000 + k)}`;
+  return JSON.stringify({ ...finding, evidence: '\u0000e' }).replace('"\\u0000e"', `{${keys}}`);
+}
+
+const ARRAY: [string, string] = ['[', ']'];
+const OBJECT: [string, string] = ['{', '}'];
+
+/** What each file holds, and how it is written. */
+const CRAFTED: [string, Write][] = [
+  ['4 MB of {} in the inventory', text(cf, ['apps'], () => repeated('{}', 1_400_000))],
+  ['4 MB of {} in the findings', text(cf, ['findings'], () => repeated('{}', 1_400_000))],
+  ['4 MB of {} in the checks', text(cf, ['checks'], () => repeated('{}', 1_400_000))],
+  ['4 MB of {} in raw.apps', text(cf, ['raw', 'apps'], () => repeated('{}', 1_400_000))],
+  [
+    '4 MB of {} in raw.projects',
+    text(project, ['raw', 'projects'], () => repeated('{}', 1_400_000)),
+  ],
+  ['4 MB of 0 in raw.apps', text(cf, ['raw', 'apps'], () => repeated('0', 2_000_000))],
+  [
+    '4 MB of project services with invalid roles',
+    text(project, ['raw', 'projects', 0, 'cdsFiles'], () => projectWithInvalidRoles(27)),
+  ],
   [
     'a finding with evidence nested a million levels deep',
-    at(cf, ['findings', 0, 'evidence', 'deep'], nested('0', 1_000_000)),
+    text(cf, ['findings', 0, 'evidence', 'deep'], () => nested('0', 1_000_000)),
   ],
-  ['13 MB of [] under a key the schema drops', at(cf, ['junk'], repeated('[]', 4_500_000))],
-  // The most values the limits let through to the parser: the costliest file to refuse.
+  ['13 MB of [] under a key the schema drops', text(cf, ['junk'], () => repeated('[]', 4_500_000))],
   [
-    '12 MB of {} in the inventory, just under the value limit',
-    at(cf, ['apps'], repeated('{}', 4_190_000)),
+    "42 MB of distinct keys in a finding's evidence",
+    joined(cf, ['findings', 0, 'evidence'], OBJECT, 4_190_000, key),
+  ],
+  // The costliest files the limits let through to the parser, both just under the item limit.
+  ['12 MB of {} in the inventory', text(cf, ['apps'], () => repeated('{}', 4_190_000))],
+  [
+    '16 MB of objects with a distinct key each in raw.apps',
+    joined(cf, ['raw', 'apps'], ARRAY, 1_396_000, (i) => `{${key(i)}}`),
   ],
 ];
 
@@ -83,24 +153,54 @@ describe('reading a crafted snapshot', () => {
     dir = await mkdtemp(join(tmpdir(), 'baip-lens-crafted-'));
     collectGarbage();
     before = peakRss();
+    // A fresh process starts near 60 MB; far more means another file ran here first.
+    if (before > 300 * MB) throw new Error('this file needs a process of its own (vitest isolate)');
+  });
+  afterAll(async () => {
+    await rm(dir, { recursive: true, force: true });
   });
 
+  /** Writes the file, then reads it with garbage collected first; returns the outcome. */
+  async function read(name: string, write: Write) {
+    const path = join(dir, `${name.replace(/\W+/g, '-')}.json`);
+    await write(path);
+    collectGarbage();
+    const start = performance.now();
+    const outcome = await readSnapshot(path).then(
+      (snapshot) => ({ snapshot, error: undefined }),
+      (error: unknown) => ({ snapshot: undefined, error }),
+    );
+    const seconds = (performance.now() - start) / 1000;
+    await rm(path);
+    return { ...outcome, seconds };
+  }
+
+  // Measured on a laptop: about 0.2 s for a 4 MB file and 1 to 1.5 s for
+  // the costliest ones, with the mark rising to about 200 MB and then 530
+  // MB. Before the limits, the first case alone passed 1.1 GB or aborted.
+  // The bounds leave room for a busy CI runner with coverage on.
+  const MAX_SECONDS = 10;
+  const MAX_GROWTH_MB = 700;
+
   it.each(CRAFTED)(
-    'refuses %s at once',
-    async (name, build) => {
-      const path = join(dir, `${name.replace(/\W+/g, '-')}.json`);
-      await writeFile(path, build());
-      // What an earlier case left behind is freed, so the peak is one read's.
-      collectGarbage();
-      const start = performance.now();
-      await expect(readSnapshot(path)).rejects.toThrow(/^Snapshot .* is not valid: /);
-      // Measured on a laptop, alone: about 0.2 s and 190 MB for a 4 MB file,
-      // 0.85 s and 425 MB for the file just under the value limit. Before the
-      // limits, 1.1 GB and more, or 9 to 14 s. The time bound leaves room for
-      // a busy CI runner with coverage on; the memory bound is the tight one.
-      expect(performance.now() - start).toBeLessThan(10_000);
-      expect((peakRss() - before) / MB).toBeLessThan(600);
+    'refuses %s',
+    async (name, write) => {
+      const { error, seconds } = await read(name, write);
+      expect(error).toBeInstanceOf(ConfigError);
+      expect((error as ConfigError).message).toMatch(/^Snapshot .* is not valid: /);
+      expect(seconds).toBeLessThan(MAX_SECONDS);
+      expect((peakRss() - before) / MB).toBeLessThan(MAX_GROWTH_MB);
     },
     30_000,
   );
+
+  it('loads a valid snapshot whose findings spend the item limit on wide evidence', async () => {
+    const { snapshot, seconds } = await read(
+      'wide evidence',
+      joined(cf, ['findings'], ARRAY, 2_050, wideFinding),
+    );
+    expect(snapshot?.findings).toHaveLength(2_050);
+    expect(seconds).toBeLessThan(MAX_SECONDS);
+    expect((peakRss() - before) / MB).toBeLessThan(MAX_GROWTH_MB);
+  }, 30_000);
 });
