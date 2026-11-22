@@ -36,10 +36,29 @@ In the BTP cockpit the administrator does this under **Cloud Foundry Environment
 | planned: app usage events | `GET /v3/app_usage_events` | not documented for BTP; skipped on 403 | on |
 | planned: `ENV_SECRET_PLAINTEXT` | `GET /v3/apps/:guid/environment_variables` (names only) | Space Developer or Space Supporter | `--deep` |
 | `collect.project` and the thirteen `rule.CAP_*`, `rule.XSUAA_*`, `rule.APPROUTER_*`, `rule.DEPLOY_*`, `rule.SEED_*`, `rule.UI5_BOOTSTRAP_*` checks | local project files (`baip-lens project --path <dir>`), see [data-sources.md §8](data-sources.md#8-local-project-files-baip-lens-project) | **no CF role**: no login, no network | on, for `project` only |
+| `collect.project` and the same thirteen rules, on a deployed app | the app's files, read over SSH with read-only SFTP (`baip-lens project --cf`), see [data-sources.md §10](data-sources.md#10-deployed-apps-baip-lens-project---cf) | **Space Developer** | on, for `project --cf` only |
 
 ## `baip-lens project`
 
 A project scan reads a local CAP or MTA project directory and needs **no Cloud Foundry role and no BTP login**: it makes no network request. It only needs read permission on the project files; a file it cannot read is recorded as unreadable with a reason code, and the scan continues. The output folder (`--out`) is skipped by the file walk, so a report written into the project is never scanned.
+
+## `baip-lens project --cf`
+
+Reading a **deployed** app needs the **Space Developer** role in its space. Cloud Foundry lets a user open an SSH session to an app only when the user may update it, so Space Auditor and Space Supporter are not enough. BAIP Lens says so before it starts, and it checks your roles (`GET /v3/roles`, your own space roles only) before any SSH attempt: without Space Developer it stops with this message and connects to nothing, because a refused SSH login is recorded as a failed attempt.
+
+Even with that role, BAIP Lens only **reads**: it opens the SFTP file channel and nothing else (no shell, no command, no port forwarding), sends only listing and read requests, opens files read-only, and never changes, restarts or restages the app. Cloud Foundry still records every session as an `audit.app.ssh-authorized` event; tell your security team before you scan production spaces.
+
+SSH must also be on, for the platform, the space and the app. BAIP Lens never turns it on; the app list shows the command for each app it cannot read:
+
+- for one app: `cf enable-ssh <app>`, then `cf restart <app>` (Space Developer);
+- for a space: `cf allow-space-ssh <space>` (Space Manager);
+- for the whole platform: only its operator can.
+
+To ask for the role:
+
+> Hi, could you give my user **<your e-mail>** the **Space Developer** role on the space **<space name>** in the Cloud Foundry org **<org name>**? I need it to run a read-only check of the deployed app **<app name>** with BAIP Lens (open source, https://github.com/sebastianomarchesini/BAIP-Lens). It opens a read-only file session like `cf ssh` and changes nothing. Thank you!
+
+When the role is not possible, scan the project folder instead: `baip-lens project --path <dir>` needs no role at all.
 
 **Not used at all:** `GET /v3/apps/:guid/env` (it returns service credentials) and `GET /v3/service_credential_bindings/:guid/details`.
 

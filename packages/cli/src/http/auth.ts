@@ -28,8 +28,27 @@ const CfCliConfigSchema = z.object({
   Target: z.string().default(''),
   UAAOAuthClient: z.string().default(''),
   UAAOAuthClientSecret: z.string().default(''),
+  // The targeted org and space (`cf target`); read by `project --cf` only, and
+  // parsed leniently in cfTargetNames() so a surprise here never breaks a scan.
+  OrganizationFields: z.unknown().optional(),
+  SpaceFields: z.unknown().optional(),
 });
 export type CfCliConfig = z.infer<typeof CfCliConfigSchema>;
+
+const TargetFieldsSchema = z.object({ Name: z.string().trim().min(1) });
+
+/**
+ * The org and space names `cf target` points at, from `OrganizationFields`
+ * and `SpaceFields` (cloudfoundry/cli `util/configv3/json_config.go`).
+ */
+export function cfTargetNames(config: CfCliConfig): { org?: string; space?: string } {
+  const org = TargetFieldsSchema.safeParse(config.OrganizationFields);
+  const space = TargetFieldsSchema.safeParse(config.SpaceFields);
+  return {
+    ...(org.success ? { org: org.data.Name } : {}),
+    ...(space.success ? { space: space.data.Name } : {}),
+  };
+}
 
 function stripBearer(token: string): string {
   return token.replace(/^bearer\s+/i, '').trim();
@@ -37,15 +56,38 @@ function stripBearer(token: string): string {
 
 /** Reads the JWT `exp` claim locally. Returns undefined when not a JWT. */
 export function jwtExpiryMs(token: string): number | undefined {
-  const payload = token.split('.')[1];
+  const exp = z.object({ exp: z.number() }).safeParse(jwtPayload(token));
+  return exp.success ? exp.data.exp * 1000 : undefined;
+}
+
+/** The decoded JWT payload, read locally without verifying it; undefined when not a JWT. */
+export function jwtPayload(token: string): unknown {
+  const payload = stripBearer(token).split('.')[1];
   if (payload === undefined) return undefined;
   try {
-    const claims: unknown = JSON.parse(Buffer.from(payload, 'base64url').toString('utf8'));
-    const exp = z.object({ exp: z.number() }).safeParse(claims);
-    return exp.success ? exp.data.exp * 1000 : undefined;
+    return JSON.parse(Buffer.from(payload, 'base64url').toString('utf8')) as unknown;
   } catch {
     return undefined;
   }
+}
+
+const UserClaimsSchema = z.object({
+  user_id: z.string().min(1).optional(),
+  scope: z.array(z.string()).optional(),
+});
+
+/**
+ * The UAA user id and scopes of an access token, for local decisions only
+ * (never sent anywhere, never printed). Client-credentials tokens have no
+ * `user_id`.
+ */
+export function tokenUser(token: string): { userId?: string; scopes: string[] } {
+  const parsed = UserClaimsSchema.safeParse(jwtPayload(token));
+  if (!parsed.success) return { scopes: [] };
+  return {
+    ...(parsed.data.user_id === undefined ? {} : { userId: parsed.data.user_id }),
+    scopes: parsed.data.scope ?? [],
+  };
 }
 
 /** Compares two API endpoints ignoring case of the host and trailing slashes. */

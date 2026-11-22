@@ -5,6 +5,19 @@ import type { HttpResponse, ReadOnlyHttp } from './httpClient.js';
 
 const LinkSchema = z.object({ href: z.string() }).nullish();
 
+/** `links.app_ssh`: `host:port` of the SSH proxy, its host key fingerprint and OAuth client. */
+const AppSshLinkSchema = z
+  .object({
+    href: z.string(),
+    meta: z
+      .object({
+        host_key_fingerprint: z.string().nullish(),
+        oauth_client: z.string().nullish(),
+      })
+      .nullish(),
+  })
+  .nullish();
+
 export const CfRootSchema = z.object({
   links: z.object({
     self: LinkSchema,
@@ -12,6 +25,7 @@ export const CfRootSchema = z.object({
     uaa: LinkSchema,
     login: LinkSchema,
     log_cache: LinkSchema,
+    app_ssh: AppSshLinkSchema,
   }),
 });
 export type CfRoot = z.infer<typeof CfRootSchema>;

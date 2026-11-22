@@ -1,0 +1,366 @@
+import { readFile, readdir } from 'node:fs/promises';
+import { join } from 'node:path';
+import { fileURLToPath } from 'node:url';
+import { describe, expect, it } from 'vitest';
+import { collectProjectTree } from '../../../src/collectors/project/index.js';
+import { MAX_FILE_BYTES } from '../../../src/collectors/project/read.js';
+import {
+  type ReadOnlySftp,
+  type RemoteEntry,
+  type RemoteFile,
+  type RemoteStat,
+  RemoteSessionError,
+  Ssh2ReadOnlySftp,
+  type SftpReadRequests,
+  entryType,
+} from '../../../src/remote/sftp.js';
+import { APP_ROOT, SftpProjectTree } from '../../../src/remote/sftpTree.js';
+
+const FILE = 0o100644;
+const DIR = 0o040755;
+const LINK = 0o120777;
+
+type Callback = (error: (Error & { code?: number }) | undefined, ...values: unknown[]) => void;
+
+/**
+ * A stand-in for the ssh2 SFTP client: every method call is recorded, the
+ * seven read requests are answered from `answers`, and anything else throws.
+ * A Proxy, so that a call the wrapper should never make fails loudly.
+ */
+function fakeSftp(answers: Partial<Record<string, (...args: unknown[]) => void>>) {
+  const calls: { method: string; args: unknown[] }[] = [];
+  const sftp = new Proxy(
+    {},
+    {
+      get(_target, method: string) {
+        return (...args: unknown[]) => {
+          calls.push({ method, args });
+          const answer = answers[method];
+          if (answer === undefined) throw new Error(`unexpected SFTP call: ${method}`);
+          answer(...args);
+        };
+      },
+    },
+  ) as SftpReadRequests;
+  return { sftp, calls };
+}
+
+const eof = Object.assign(new Error('End of file'), { code: 1 });
+
+describe('Ssh2ReadOnlySftp', () => {
+  it('maps POSIX file types; links and devices are `other`', () => {
+    expect(entryType(FILE)).toBe('file');
+    expect(entryType(DIR)).toBe('directory');
+    expect(entryType(LINK)).toBe('other');
+    expect(entryType(0o020666)).toBe('other');
+    expect(entryType(undefined)).toBe('other');
+  });
+
+  it('lists a directory in batches until EOF and closes the handle', async () => {
+    let batch = 0;
+    const { sftp, calls } = fakeSftp({
+      opendir: (_path, cb) => (cb as Callback)(undefined, Buffer.from('h1')),
+      readdir: (_handle, cb) => {
+        batch += 1;
+        if (batch === 1) {
+          (cb as Callback)(undefined, [
+            { filename: 'b.cds', longname: '', attrs: { mode: FILE, size: 3, mtime: 7 } },
+            { filename: 'srv', longname: '', attrs: { mode: DIR, size: 0, mtime: 7 } },
+          ]);
+        } else if (batch === 2) {
+          (cb as Callback)(undefined, [
+            { filename: 'a', longname: '', attrs: { mode: LINK, size: 9 } },
+          ]);
+        } else {
+          (cb as Callback)(eof);
+        }
+      },
+      close: (_handle, cb) => (cb as Callback)(undefined),
+    });
+    const reader = new Ssh2ReadOnlySftp(sftp, { isClosed: () => false });
+    expect(await reader.list('/home/vcap/app', 100)).toEqual([
+      { name: 'b.cds', type: 'file', size: 3, mtime: 7 },
+      { name: 'srv', type: 'directory', size: 0, mtime: 7 },
+      { name: 'a', type: 'other', size: 9, mtime: undefined },
+    ]);
+    expect(calls.map((c) => c.method)).toEqual([
+      'opendir',
+      'readdir',
+      'readdir',
+      'readdir',
+      'close',
+    ]);
+  });
+
+  it('stops reading a directory at the limit', async () => {
+    const { sftp, calls } = fakeSftp({
+      opendir: (_path, cb) => (cb as Callback)(undefined, Buffer.from('h1')),
+      readdir: (_handle, cb) =>
+        (cb as Callback)(
+          undefined,
+          ['a', 'b', 'c'].map((filename) => ({
+            filename,
+            longname: '',
+            attrs: { mode: FILE, size: 1 },
+          })),
+        ),
+      close: (_handle, cb) => (cb as Callback)(undefined),
+    });
+    const reader = new Ssh2ReadOnlySftp(sftp, { isClosed: () => false });
+    expect((await reader.list('/d', 2)).map((e) => e.name)).toEqual(['a', 'b']);
+    expect(calls.filter((c) => c.method === 'readdir')).toHaveLength(1);
+  });
+
+  it('opens files with the read flag only', async () => {
+    const { sftp, calls } = fakeSftp({
+      open: (_path, _flags, cb) => (cb as Callback)(undefined, Buffer.from('f1')),
+      fstat: (_handle, cb) => (cb as Callback)(undefined, { mode: FILE, size: 2, mtime: 1 }),
+      read: (_h, buffer, offset, _length, _position, cb) => {
+        (buffer as Buffer).write('hi', offset as number);
+        (cb as Callback)(undefined, 2);
+      },
+      close: (_handle, cb) => (cb as Callback)(undefined),
+    });
+    const reader = new Ssh2ReadOnlySftp(sftp, { isClosed: () => false });
+    const file = await reader.openForReading('/home/vcap/app/package.json');
+    expect(await file.stat()).toEqual({ type: 'file', size: 2, mtime: 1 });
+    const buffer = Buffer.alloc(2);
+    expect(await file.read(buffer, 0, 2, 0)).toBe(2);
+    await file.close();
+    await file.close();
+    expect(calls.map((c) => c.method)).toEqual(['open', 'fstat', 'read', 'close']);
+    expect(calls[0]?.args[1]).toBe('r');
+  });
+
+  it('sends nothing once the session is closed', async () => {
+    const { sftp, calls } = fakeSftp({});
+    const reader = new Ssh2ReadOnlySftp(sftp, { isClosed: () => true });
+    await expect(reader.lstat('/x')).rejects.toBeInstanceOf(RemoteSessionError);
+    await expect(reader.list('/x', 10)).rejects.toBeInstanceOf(RemoteSessionError);
+    await expect(reader.openForReading('/x')).rejects.toBeInstanceOf(RemoteSessionError);
+    expect(calls).toEqual([]);
+  });
+
+  it('treats a request without an answer, or a channel that closed under it, as a lost session', async () => {
+    const silent = fakeSftp({ lstat: () => undefined });
+    const reader = new Ssh2ReadOnlySftp(silent.sftp, { isClosed: () => false, timeoutMs: 20 });
+    await expect(reader.lstat('/x')).rejects.toBeInstanceOf(RemoteSessionError);
+
+    const dropped = fakeSftp({
+      lstat: (_path, cb) => (cb as Callback)(new Error('No response from server')),
+    });
+    const reader2 = new Ssh2ReadOnlySftp(dropped.sftp, { isClosed: () => false });
+    await expect(reader2.lstat('/x')).rejects.toBeInstanceOf(RemoteSessionError);
+  });
+
+  it('passes on an ordinary error (for example permission denied) as is', async () => {
+    const { sftp } = fakeSftp({
+      lstat: (_path, cb) =>
+        (cb as Callback)(Object.assign(new Error('Permission denied'), { code: 3 })),
+    });
+    const reader = new Ssh2ReadOnlySftp(sftp, { isClosed: () => false });
+    const error = await reader.lstat('/x').catch((e: unknown) => e);
+    expect(error).not.toBeInstanceOf(RemoteSessionError);
+  });
+});
+
+describe('the remote code has no write path', () => {
+  const REMOTE = fileURLToPath(new URL('../../../src/remote/', import.meta.url));
+  // SFTP and SSH client calls that write, change or run something.
+  const FORBIDDEN = [
+    /\.write\(/,
+    /\.writeFile\(/,
+    /\.appendFile\(/,
+    /\.fastPut\(/,
+    /\.fastGet\(/,
+    /\.createWriteStream\(/,
+    /\.createReadStream\(/,
+    /\.unlink\(/,
+    /\.rename\(/,
+    /\.mkdir\(/,
+    /\.rmdir\(/,
+    /\.setstat\(/,
+    /\.fsetstat\(/,
+    /\.futimes\(/,
+    /\.utimes\(/,
+    /\.chmod\(/,
+    /\.chown\(/,
+    /\.symlink\(/,
+    /\.ext_openssh/,
+    /\.exec\(/,
+    /\.shell\(/,
+    /\.subsys\(/,
+    /\.forwardIn\(/,
+    /\.forwardOut\(/,
+    /\.openssh_/,
+  ];
+
+  it('never calls a mutating SFTP or SSH method', async () => {
+    const files = (await readdir(REMOTE)).filter((name) => name.endsWith('.ts'));
+    expect(files.length).toBeGreaterThanOrEqual(6);
+    for (const name of files) {
+      const text = await readFile(join(REMOTE, name), 'utf8');
+      for (const pattern of FORBIDDEN)
+        expect(text, `${name} matches ${pattern}`).not.toMatch(pattern);
+    }
+  });
+
+  it('opens files with the read flag and nothing else', async () => {
+    const text = await readFile(join(REMOTE, 'sftp.ts'), 'utf8');
+    expect(text.match(/this\.sftp\.open\(/g)).toHaveLength(1);
+    expect(text).toContain("this.sftp.open(path, 'r', done)");
+  });
+});
+
+/** An in-memory ReadOnlySftp over a map of container paths, recording each request. */
+class MemorySftp implements ReadOnlySftp {
+  readonly requests: string[] = [];
+  gone = false;
+  /** Paths whose content changes between the listing and the read. */
+  readonly swapped = new Set<string>();
+
+  constructor(private readonly files: Record<string, string | { size: number }>) {}
+
+  private stat(path: string): RemoteStat | undefined {
+    const value = this.files[path];
+    if (value !== undefined) {
+      const size = typeof value === 'string' ? Buffer.byteLength(value) : value.size;
+      return { type: 'file', size, mtime: 100 };
+    }
+    const isDir = Object.keys(this.files).some((p) => p.startsWith(`${path}/`));
+    return isDir ? { type: 'directory', size: 0, mtime: 100 } : undefined;
+  }
+
+  list(path: string, max: number): Promise<RemoteEntry[]> {
+    this.requests.push(`list ${path}`);
+    if (this.gone) return Promise.reject(new RemoteSessionError('gone'));
+    const names = new Set<string>();
+    for (const p of Object.keys(this.files)) {
+      if (p.startsWith(`${path}/`)) names.add(p.slice(path.length + 1).split('/')[0] ?? '');
+    }
+    const entries = [...names]
+      .reverse()
+      .map((name) => ({ name, ...this.stat(`${path}/${name}`)! }));
+    return Promise.resolve(entries.slice(0, max));
+  }
+
+  lstat(path: string): Promise<RemoteStat> {
+    this.requests.push(`lstat ${path}`);
+    if (this.gone) return Promise.reject(new RemoteSessionError('gone'));
+    const stat = this.stat(path);
+    return stat ? Promise.resolve(stat) : Promise.reject(new Error('No such file'));
+  }
+
+  openForReading(path: string): Promise<RemoteFile> {
+    this.requests.push(`open ${path}`);
+    if (this.gone) return Promise.reject(new RemoteSessionError('gone'));
+    const value = this.files[path];
+    if (value === undefined) return Promise.reject(new Error('No such file'));
+    const content = Buffer.from(typeof value === 'string' ? value : '');
+    const stat = this.stat(path)!;
+    return Promise.resolve({
+      stat: () => Promise.resolve(this.swapped.has(path) ? { ...stat, mtime: 999 } : stat),
+      read: (buffer: Buffer, offset: number, length: number, position: number) => {
+        this.requests.push(`read ${path}`);
+        // Short reads, as a real server gives them.
+        const n = Math.min(length, 4, content.length - position);
+        if (n <= 0) return Promise.resolve(0);
+        content.copy(buffer, offset, position, position + n);
+        return Promise.resolve(n);
+      },
+      close: () => Promise.resolve(),
+    });
+  }
+}
+
+const app = (files: Record<string, string | { size: number }>) =>
+  Object.fromEntries(Object.entries(files).map(([rel, v]) => [`${APP_ROOT}/${rel}`, v]));
+
+describe('SftpProjectTree', () => {
+  it('feeds the collector the same allow-list as a local folder and never opens the rest', async () => {
+    const sftp = new MemorySftp(
+      app({
+        'package.json': JSON.stringify({ name: 'acme', cds: { requires: { auth: 'mocked' } } }),
+        'xs-app.json': JSON.stringify({ routes: [{ source: '^/(.*)$', localDir: 'resources' }] }),
+        'srv/service.cds': 'service S { entity E { key ID : Integer; } }',
+        'default-env.json': '{"POISON":"secret"}',
+        '.env': 'POISON=1',
+        'node_modules/x/package.json': '{}',
+        'srv/server.js': 'console.log(1)',
+      }),
+    );
+    const tree = new SftpProjectTree(sftp, { rootName: 'acme-srv' });
+    const project = await collectProjectTree(tree, { id: 'acme-srv' });
+    expect(project.id).toBe('acme-srv');
+    expect(project.files).toEqual(['package.json', 'srv/service.cds', 'xs-app.json']);
+    expect(project.repository).toBe(false);
+    expect(project.cds.effective.production.authKind).toBe('mocked');
+    const opened = sftp.requests.filter((r) => r.startsWith('open '));
+    expect(opened.sort()).toEqual([
+      `open ${APP_ROOT}/package.json`,
+      `open ${APP_ROOT}/srv/service.cds`,
+      `open ${APP_ROOT}/xs-app.json`,
+    ]);
+    expect(sftp.requests.some((r) => r.includes('node_modules'))).toBe(false);
+  });
+
+  it('reads a file across short reads and keeps the read limits', async () => {
+    const sftp = new MemorySftp(
+      app({
+        'package.json': '{"name":"acme-long-name"}',
+        'app/index.html': 'abc\u0000def',
+        'db/data/x-Big.csv': { size: MAX_FILE_BYTES + 1 },
+      }),
+    );
+    const tree = new SftpProjectTree(sftp, { rootName: 'acme' });
+    const project = await collectProjectTree(tree);
+    expect(project.packageJson.name).toBe('acme-long-name');
+    expect(project.unreadable).toEqual([
+      { file: 'app/index.html', kind: 'binary' },
+      { file: 'db/data/x-Big.csv', kind: 'too-large' },
+    ]);
+    expect(sftp.requests).not.toContain(`read ${APP_ROOT}/db/data/x-Big.csv`);
+  });
+
+  it('refuses a file that changed between the listing and the read (a swap for a link)', async () => {
+    const sftp = new MemorySftp(app({ 'package.json': '{}', 'srv/a.cds': 'service A {}' }));
+    sftp.swapped.add(`${APP_ROOT}/srv/a.cds`);
+    const project = await collectProjectTree(new SftpProjectTree(sftp, { rootName: 'acme' }));
+    // A refused read is recorded under the file's kind, exactly as for a local folder.
+    expect(project.unreadable).toEqual([{ file: 'srv/a.cds', kind: 'cds' }]);
+    expect(sftp.requests).not.toContain(`read ${APP_ROOT}/srv/a.cds`);
+  });
+
+  it('ends the collection when the session is lost, instead of reporting a half-read app', async () => {
+    const sftp = new MemorySftp(app({ 'package.json': '{}', 'srv/a.cds': 'service A {}' }));
+    const tree = new SftpProjectTree(sftp, { rootName: 'acme' });
+    const listing = tree.list(APP_ROOT, 100);
+    await listing;
+    sftp.gone = true;
+    await expect(collectProjectTree(tree)).rejects.toBeInstanceOf(RemoteSessionError);
+  });
+
+  it('reads ahead only what the collector will read, within the budgets', async () => {
+    const sftp = new MemorySftp(
+      app({
+        'package.json': '{}',
+        'a.mtar': { size: 10 },
+        '.gitignore': '*.mtar',
+        'big.html': { size: MAX_FILE_BYTES + 5 },
+        'srv/server.js': 'x',
+      }),
+    );
+    const tree = new SftpProjectTree(sftp, { rootName: 'acme' });
+    await tree.list(APP_ROOT, 100);
+    await new Promise((resolve) => setTimeout(resolve, 0));
+    const opened = sftp.requests.filter((r) => r.startsWith('open ')).sort();
+    expect(opened).toEqual([`open ${APP_ROOT}/package.json`]);
+  });
+
+  it('says a container is not a repository', async () => {
+    const tree = new SftpProjectTree(new MemorySftp({}), { rootName: 'acme' });
+    expect(await tree.repository()).toBeNull();
+    expect(tree.root).toBe(APP_ROOT);
+    expect(tree.join(APP_ROOT, 'x')).toBe(`${APP_ROOT}/x`);
+  });
+});

@@ -283,6 +283,15 @@ describe('checkPrevious', () => {
     );
     const project = { ...before, scope: { orgs: [], projects: ['p'] } };
     expect(() => checkPrevious(project, { apiUrl: api, scannedAt: NOW })).toThrow(/project scan/);
+    // `project --cf` read a deployed app through the same API: still a project scan, refused
+    // before any request rather than after the org lookup.
+    const deployedApp = {
+      ...before,
+      scope: { apiEndpoint: api.href, orgs: [], projects: ['incidents-srv'] },
+    };
+    expect(() => checkPrevious(deployedApp, { apiUrl: api, scannedAt: NOW })).toThrow(
+      /project scan/,
+    );
     expect(() => checkPrevious(before, { apiUrl: api, scannedAt: daysBefore(7) })).toThrow(
       /not before this scan/,
     );
