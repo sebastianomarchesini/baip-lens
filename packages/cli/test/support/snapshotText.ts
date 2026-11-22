@@ -42,6 +42,14 @@ export function withJsonAt(snapshot: JsonObject, path: JsonPath, json: string): 
   return JSON.stringify(copy).replace(JSON.stringify(PLACEHOLDER), () => json);
 }
 
+/** The JSON text of `snapshot` before and after the value at `path`, for writing one in parts. */
+export function splitAt(snapshot: JsonObject, path: JsonPath): [string, string] {
+  const marker = '\u0000split\u0000';
+  const text = withJsonAt(snapshot, path, marker);
+  const at = text.indexOf(marker);
+  return [text.slice(0, at), text.slice(at + marker.length)];
+}
+
 /** A JSON array of `count` copies of the JSON text `item`. */
 export function repeated(item: string, count: number): string {
   return count === 0 ? '[]' : `[${`${item},`.repeat(count - 1)}${item}]`;

@@ -325,7 +325,7 @@ describe('baip-lens CLI', () => {
       [
         'dense.json',
         withJsonAt(sample, ['junk'], repeated('0', 4_200_000)),
-        'is not valid: it holds more than 4,194,304 values.',
+        'is not valid: it holds more than 4,194,304 keys and values.',
       ],
     ];
     for (const [name, content, message] of cases) {

@@ -1,14 +1,39 @@
 import { execFileSync } from 'node:child_process';
-import { mkdtemp, readFile, stat, symlink, writeFile } from 'node:fs/promises';
+import { mkdtemp, readFile, rm, stat, symlink, writeFile } from 'node:fs/promises';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
-import { describe, expect, it } from 'vitest';
+import { afterAll, describe, expect, it } from 'vitest';
+import { ConfigError } from '../../src/http/errors.js';
 import { ensurePrivateDir, writePrivateFile } from '../../src/io/files.js';
 import { MAX_SNAPSHOT_BYTES, readSnapshot } from '../../src/snapshot.js';
 import { nested, readFixture, repeated, withJsonAt } from '../support/snapshotText.js';
 
 const posix = process.platform !== 'win32';
 const sample = readFixture('sample-snapshot.json');
+
+const created: string[] = [];
+afterAll(async () => {
+  await Promise.all(created.map((dir) => rm(dir, { recursive: true, force: true })));
+});
+
+/** `text` in a file of its own, removed after the tests. */
+async function written(name: string, text: string): Promise<string> {
+  const dir = await mkdtemp(join(tmpdir(), 'baip-lens-read-'));
+  created.push(dir);
+  const path = join(dir, name);
+  await writeFile(path, text);
+  return path;
+}
+
+/** The error reading `path` ends in; it must be the one the CLI turns into exit code 2. */
+async function refusal(path: string): Promise<ConfigError> {
+  const error = await readSnapshot(path).then(
+    () => undefined,
+    (e: unknown) => e,
+  );
+  expect(error).toBeInstanceOf(ConfigError);
+  return error as ConfigError;
+}
 
 describe('private output files', () => {
   it.skipIf(!posix)('creates directories 0700 and files 0600', async () => {
@@ -87,30 +112,52 @@ describe('readSnapshot limits', () => {
   });
 
   it('refuses a snapshot nested deeper than 64 levels before parsing it', async () => {
-    const path = join(await mkdtemp(join(tmpdir(), 'baip-lens-deep-')), 'deep.json');
-    // Under a finding's evidence, which the schema keeps as it is: the
-    // reporters would overflow the stack writing it out.
-    await writeFile(
-      path,
+    const path = await written(
+      'deep.json',
+      // Under a finding's evidence, which the schema keeps as it is: the
+      // reporters would overflow the stack writing it out.
       withJsonAt(sample, ['findings', 0, 'evidence', 'deep'], nested('0', 10_000)),
     );
-    await expect(readSnapshot(path)).rejects.toThrow(
+    expect((await refusal(path)).message).toMatch(
       /^Snapshot .*deep\.json is not valid: it nests more than 64 levels deep\.$/,
     );
   });
 
-  it('refuses a snapshot with more than 4,194,304 values before parsing it', async () => {
-    const path = join(await mkdtemp(join(tmpdir(), 'baip-lens-dense-')), 'dense.json');
-    await writeFile(path, withJsonAt(sample, ['scope', 'orgs'], repeated('0', 4_194_304)));
-    await expect(readSnapshot(path)).rejects.toThrow(
-      /^Snapshot .*dense\.json is not valid: it holds more than 4,194,304 values\.$/,
+  it('refuses a snapshot with more than 4,194,304 keys and values before parsing it', async () => {
+    const path = await written(
+      'dense.json',
+      withJsonAt(sample, ['scope', 'orgs'], repeated('0', 4_194_304)),
+    );
+    expect((await refusal(path)).message).toMatch(
+      /^Snapshot .*dense\.json is not valid: it holds more than 4,194,304 keys and values\.$/,
+    );
+  });
+
+  it('refuses an object with more than 1,000 keys before parsing it', async () => {
+    const keys = Array.from({ length: 1_001 }, (_, i) => `"k${i}":0`).join(',');
+    const path = await written(
+      'wide.json',
+      withJsonAt(sample, ['findings', 0, 'evidence'], `{${keys}}`),
+    );
+    expect((await refusal(path)).message).toMatch(
+      /^Snapshot .*wide\.json is not valid: an object in it has more than 1,000 keys\.$/,
     );
   });
 
   it('rejects unknown schema versions with a clear message', async () => {
-    const base = await mkdtemp(join(tmpdir(), 'baip-lens-ver-'));
-    const path = join(base, 'old.json');
-    await writeFile(path, JSON.stringify({ schemaVersion: 0 }));
-    await expect(readSnapshot(path)).rejects.toThrow(/schema version 0/);
+    const path = await written('old.json', JSON.stringify({ schemaVersion: 0 }));
+    expect((await refusal(path)).message).toMatch(/has schema version 0; this baip-lens reads/);
+  });
+
+  it('never quotes a schema version that is not a number', async () => {
+    // Marked POISON, like every planted secret, so the secret scan lets it through.
+    const secret = await written('secret.json', '{"schemaVersion":"sk_live_51HxQzK9-POISON"}');
+    const quoted = (await refusal(secret)).message;
+    expect(quoted).toMatch(/has a schema version that is not a number/);
+    expect(quoted).not.toContain('sk_live');
+    const odd = await written('odd.json', '{"schemaVersion":{"toString":0}}');
+    expect((await refusal(odd)).message).toMatch(/has a schema version that is not a number/);
+    const none = await written('none.json', '[]');
+    expect((await refusal(none)).message).toMatch(/has no schema version/);
   });
 });
