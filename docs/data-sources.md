@@ -535,3 +535,14 @@ What the rules can see is what was pushed. A CAP service built with `cds build` 
 ### 10.4 Network
 
 SSH does not go through an HTTPS proxy, and company networks often block outbound port 2222. When `links.app_ssh` cannot be reached the command says so and suggests another network or `--path`. The SSH library (`ssh2`, MIT) is loaded only by `project --cf`; every other command runs without it.
+
+### 10.5 Tried on SAP BTP (2026-11-22)
+
+A first run against an SAP BTP Cloud Foundry landscape, with a Space Developer user and the cf CLI session from `cf login`, confirmed:
+
+- `GET /` advertises `links.app_ssh` as `host:port` with a host key fingerprint in one of the cf CLI formats: the host key check passed and the session opened.
+- UAA answers `GET /oauth/authorize?response_type=code&client_id=<oauth_client>`, sent with the access token and `Accept: application/json`, with a redirect that carries the code, and the SSH proxy accepts that code as the password of `cf:<process guid>/<index>`.
+- The SSH proxy serves the SFTP subsystem, and `OPENDIR`, `READDIR`, `LSTAT`, `OPEN` (read), `FSTAT` and `READ` behave as `pkg/sftp` implements them.
+- For an app with SSH turned off, `GET /v3/apps/:guid/ssh_enabled` gave the app-level reason, and the command stopped before connecting, with the `cf enable-ssh` advice. The role check (`GET /v3/roles`) did not stop the Space Developer.
+- A CAP service deployed from a `cds build` output held only `package.json` among the allow-listed files (no `.cds` sources, `.cdsrc.*` or `xs-app.json`), as §10.3 expects. The one finding it produced was confirmed as correct by the app's maintainer.
+- ⚠️ Not yet seen on SAP BTP: a refused login (missing role), an unreachable port 2222, a session that drops mid-scan, and which of the four fingerprint formats the platform publishes.

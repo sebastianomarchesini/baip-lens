@@ -71,8 +71,8 @@ describe('app SSH endpoint from the CF root', () => {
   const fp = 'Y411oivJwZCUQnXHq83mdM5SKCK4ftyoSXI31RRe4Zs';
 
   it('reads host:port as the CF docs show it', () => {
-    expect(sshEndpointFromRoot('ssh.cf.eu10.hana.ondemand.com:2222', fp)).toMatchObject({
-      host: 'ssh.cf.eu10.hana.ondemand.com',
+    expect(sshEndpointFromRoot('ssh.cf.eu10.example.org:2222', fp)).toMatchObject({
+      host: 'ssh.cf.eu10.example.org',
       port: 2222,
       hostKeyFingerprint: fp,
     });
