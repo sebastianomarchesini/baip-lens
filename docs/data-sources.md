@@ -199,6 +199,7 @@ Mitigation for report mode:
 | `endoflife.date` | GET `/api/v1/products/*` | none | fixed |
 | `ui5.sap.com` | GET `/versionoverview.json` | none | fixed |
 | `registry.npmjs.org` | GET `/@sap%2F{cds,approuter,xssec,xsenv}` only | none | fixed (D1) |
+| `registry.npmjs.org` (planned, D10, replaces D1) | GET `/<package>/<version>` and `/<package>/latest`, only for packages the lockfile resolved from this registry (§12) | none | fixed |
 | `links.uaa` host | GET `/oauth/authorize` only (the one-time SSH code); added by `project --cf` only | the CF token, as `cf ssh-code` sends it | CF root |
 | `links.app_ssh` `host:port` | SSH: password authentication with the one-time code, the SFTP subsystem only, read requests only (§10); `project --cf` only | the one-time SSH code, as the SSH password; never the CF token | CF root |
 
@@ -209,6 +210,7 @@ Every rule lists the kinds of `Authorization` header it may receive (`credential
 ## 7. Decisions (resolved 2026-09-29)
 
 - **D1: npm registry allowed.** `registry.npmjs.org` is on the allow-list for GET `/<pkg>` only, restricted to `@sap/cds`, `@sap/approuter`, `@sap/xssec` and `@sap/xsenv`. It is used by `SAP_PKG_OUTDATED` for the current `dist-tags.latest`.
+- **D10 (2026-11-22): package names leave the machine only for public npm packages.** Finding vulnerable (OSV.dev) and deprecated (npm registry) libraries needs the name and version of each package. Only packages whose lockfile `resolved` URL is on `https://registry.npmjs.org/` are sent; a package from any other registry, git, a file or a link is never sent and is counted as "not checked". The registry rule widens from the four `@sap/*` packages of D1 to `GET /<package>/<version>` and `/<package>/latest` for those packages, with no `Authorization` header (§12). Decided by the maintainer; not implemented yet.
 - **D2: both roles documented for `--deep`.** Space Developer or Space Supporter can read `/environment_variables`. `permissions.md` notes that Supporter is narrower but can still restart and scale apps.
 - **D3: route probe on by default.** One unauthenticated GET per app, 5 s timeout, no redirects. `--no-probe-routes` turns it off.
 - **D4: dedicated repository.** BAIP Lens lives at the root of [`sebastianomarchesini/BAIP-Lens`](https://github.com/sebastianomarchesini/BAIP-Lens) as an npm-workspaces monorepo (`packages/cli`, `packages/ui`).
@@ -546,3 +548,81 @@ A first run against an SAP BTP Cloud Foundry landscape, with a Space Developer u
 - For an app with SSH turned off, `GET /v3/apps/:guid/ssh_enabled` gave the app-level reason, and the command stopped before connecting, with the `cf enable-ssh` advice. The role check (`GET /v3/roles`) did not stop the Space Developer.
 - A CAP service deployed from a `cds build` output held only `package.json` among the allow-listed files (no `.cds` sources, `.cdsrc.*` or `xs-app.json`), as §10.3 expects. The one finding it produced was confirmed as correct by the app's maintainer.
 - ⚠️ Not yet seen on SAP BTP: a refused login (missing role), an unreachable port 2222, a session that drops mid-scan, and which of the four fingerprint formats the platform publishes.
+
+---
+
+## 11. Deployed MTA projects (`project --cf` picker) — design, not implemented yet
+
+The picker of `project --cf` will group the apps of a space by the multi-target application (MTA) they were deployed from, so that one choice reads every module of a project (approuter, service, deployer) into one report. Verified 2026-11-22 against `cloudfoundry/multiapps-controller` at `a4501d6` (2026-11-16), the deploy service behind `cf deploy`, and `cloudfoundry/cloud_controller_ng` at `c6d269b`.
+
+### 11.1 What the deploy service writes on each app ✅
+
+`MtaMetadataBuilder` and `ApplicationMetadataBuilder` (`multiapps-controller-core/…/cf/v2/`) set, on every app of an MTA:
+
+| Kind | Key | Value |
+| --- | --- | --- |
+| label | `mta_id` | the MD5 hex digest of the MTA ID (`MtaMetadataUtil.getHashedLabel`) |
+| label | `mta_namespace` | the MD5 of the namespace, only when deployed with one |
+| annotation | `mta_id` | the MTA ID in clear |
+| annotation | `mta_version` | the MTA version |
+| annotation | `mta_namespace` | the namespace in clear, only when set |
+| annotation | `mta_module` | JSON `{"name": "<module name>"}` (`MtaMetadataParser.parseDeployedMtaApplication` reads `name`) |
+
+`mta_module_provided_dependencies` and `mta_bound_services` are written too and are **not** read. The app resource of the CF v3 API carries them as `metadata.labels` and `metadata.annotations` (`docs/v3/source/includes/resources/apps/_object.md.erb`), so the `GET /v3/apps?space_guids=…` the picker already makes (any role) is enough: no new endpoint, no new role.
+
+### 11.2 How BAIP Lens will use it
+
+- Only these keys are read; every other label and annotation is dropped at parse time, because annotations can hold personal data (the acme fixture plants a contact e-mail there).
+- An app belongs to a project when its annotation `mta_id` matches `^[A-Za-z0-9_.-]{1,128}$` and its label `mta_id` is the MD5 of that annotation, as the deploy service writes them; an app whose two values disagree is listed on its own. Two deployments of one MTA in different namespaces are two projects. The module name must match the same pattern; the version is kept when it is at most 64 characters of `[0-9A-Za-z.+-]`.
+- The picker lists projects first (`<mta id> <version> · N apps: <app> (<module>), …`), then the apps not deployed as an MTA. A project can be chosen when at least one of its apps can be read; the others are named with the reason, as today.
+- Reading a project opens one SSH session per app, one after the other (so one `audit.app.ssh-authorized` event per app), and writes one snapshot and one report with one project per app. An app that cannot be read (stopped, SSH off, no project files, refused) is recorded as a skipped check with its reason and the other apps are still read; only when none can be read does the command stop with exit code 2.
+- `--mta <id>` chooses a project without the picker, as `--app` chooses one app.
+- Kept in the snapshot per project: the app name, and the MTA ID, version and module name when present (identifiers only).
+
+---
+
+## 12. npm dependencies: known vulnerabilities and deprecations — design, not implemented yet
+
+`project --path` and `project --cf` will check every npm package of the project, direct and transitive, for known vulnerabilities (OSV.dev, `DEP_KNOWN_CVE`) and for deprecation (npm registry, new rule `DEP_DEPRECATED`). Verified 2026-11-22 against `npm/cli` at `787f152` (`docs/lib/content/configuring-npm/package-lock-json.md`), `cloudfoundry/nodejs-buildpack` at `523ff82`, `google/osv.dev` at `5da6b90`, `ossf/osv-schema` at `091feab` and `npm/registry` at `ae49abf`.
+
+### 12.1 Where the versions come from ✅
+
+- **Lockfile formats.** `lockfileVersion` 1 (npm 5–6: a nested `dependencies` tree), 2 (npm 7–8: `packages` plus the legacy `dependencies`) and 3 (npm 9+: `packages` only). `packages` maps an install location (`""` for the root, `node_modules/a`, `node_modules/a/node_modules/b`) to `version`, `resolved`, `integrity`, `link`, `dev`, `optional`, `devOptional`, `inBundle` and more. `npm-shrinkwrap.json` has the same format and wins over `package-lock.json`.
+- **`--path`:** the root `npm-shrinkwrap.json`, else the root `package-lock.json`. yarn and pnpm lockfiles are not read and are reported as "not supported".
+- **`--cf`:** `node_modules/.package-lock.json`, the hidden lockfile (always `lockfileVersion` 3) that npm 7+ writes after an install. The Node.js buildpack runs `npm install --unsafe-perm --userconfig <app>/.npmrc` (or `npm rebuild` then `npm install` for a pushed `node_modules`, `src/nodejs/npm/npm.go`) with `NODE_ENV=production` and `NPM_CONFIG_PRODUCTION=true` (`src/nodejs/supply/supply.go`), so the hidden lockfile lists the production tree actually installed. Without it, the root `npm-shrinkwrap.json` or `package-lock.json` is read and its `dev` entries are left out. The walk still never enters `node_modules`: only this one file is opened there, and `.npmrc` (which can hold registry tokens) is never opened.
+- ⚠️ npm uses the hidden lockfile only when it was written by the last change to the tree; a later manual change inside `node_modules` is not detected by BAIP Lens.
+- **Limits:** a lockfile of at most 32 MiB (the 2 MiB limit of other project files would refuse real ones), its shape checked before parsing (nesting, number of keys) with the bounded parser that snapshots already use (`io/jsonShape.ts`), and at most 20 000 packages.
+- **Kept per package:** name (`PACKAGE_NAME_PATTERN`), version (semver, at most 64 characters), whether it is a direct dependency of the root, `prod`, `dev` or `optional`, and the source as a class: `npm` (resolved from `https://registry.npmjs.org/`), `other-registry`, `git`, `file`, `link` or `unknown`. The `resolved` URL itself is never kept (it can name an internal host or carry a token), nor `integrity`.
+
+### 12.2 What leaves the machine (D10) ✅ decided
+
+Only packages of source class `npm` are sent to OSV.dev and the npm registry; every other package is counted as "not checked" with its source class, so the report says how much was not looked at. ⚠️ A package published as private on npmjs.com also resolves from `registry.npmjs.org`, so its name would reach OSV.dev; a later `--dependency-exclude <@scope>` can keep a scope at home. `--no-dependency-check` will turn the network part off.
+
+### 12.3 OSV.dev ✅
+
+- `POST https://api.osv.dev/v1/querybatch` with `{"queries": [{"package": {"ecosystem": "npm", "name": …}, "version": …}, …]}`; results come back in the order of the queries with each vulnerability's `id` and `modified` only (`docs/api/post-v1-querybatch.md`).
+- At most 1 000 queries per request: the server answers "too many queries" beyond `maxBatchQueries` (`go/internal/api/query_affected.go`), with a 35 s timeout per batch.
+- A query whose result carries `next_page_token` is asked again with `page_token`; that happens above 1 000 vulnerabilities for one query or 3 000 for the batch.
+- No rate limit, and a 32 MiB response limit over HTTP/1.1 (`docs/api/index.md`).
+- `GET https://api.osv.dev/v1/vulns/{id}` once per distinct id, for `summary`, `aliases` (CVE ids), `severity[]` (`CVSS_V3` or `CVSS_V4` vectors, `docs/schema.md`), `database_specific.severity` (GitHub advisories for npm: `LOW`, `MODERATE`, `HIGH`, `CRITICAL`), `affected[].ranges[].events` (`introduced` / `fixed`, for the fixed version) and `withdrawn` (a withdrawn advisory is ignored). OSV.dev also lists malicious npm packages (`MAL-` ids).
+- The allow-list rule for `api.osv.dev` already exists (§6) and does not change. Nothing but public package names and versions is sent; no credential.
+
+### 12.4 npm registry ✅
+
+- `GET https://registry.npmjs.org/{package}/{version}` returns that version's document (`docs/REGISTRY-API.md`); it holds `deprecated`, the deprecation message, when the version is deprecated (the abbreviated version object lists it, and the full one contains every abbreviated field, `docs/responses/package-metadata.md`). Only `deprecated` is read; the rest (author and maintainer e-mails, readme) is dropped at parse time and never stored.
+- For a deprecated version, `GET /{package}/latest` tells whether a newer version is not deprecated (upgrade) or the whole package is (replace it).
+- Scoped names are sent as `@scope%2fname`. No `Authorization` header, no redirects, at most 4 MiB per response (a readme can be large), concurrency 5 as for every request.
+
+### 12.5 Rules and offline reports
+
+- **`DEP_KNOWN_CVE`** (as already described in [rules.md](rules.md#dep_known_cve)): one finding per package and version, with all its advisory ids and aliases and the fixed version when known. Severity from the CVSS v3 base score computed from the vector (critical ≥ 9.0, high ≥ 7.0, medium ≥ 4.0, else low); without a v3 vector, from the advisory's own `database_specific.severity`; `medium` when there is neither; `critical` for a malicious package.
+- **`DEP_DEPRECATED`** (new): the installed version is deprecated on the npm registry. `medium` when the latest version is deprecated too (the package is abandoned; replace it), `low` when a newer version is not (upgrade). The deprecation message is kept, at most 200 characters.
+- Evidence of both: name, version, direct or transitive, `prod` / `dev` / `optional`. Findings name the package, never a path inside `node_modules`.
+- The answers of OSV.dev and of the registry are stored in the snapshot, so `report --from` re-runs both rules offline, as for every other source. Advisory summaries and deprecation messages are external text: sanitized, length-capped, and shown as text only.
+- Checks: `collect.dependencies` (the lockfile; no role for `--path`, Space Developer for `--cf` as the rest of that scan), `collect.osv` and `collect.npm-deprecations` (skipped with `--no-dependency-check` or when the host cannot be reached; a skipped check means "not checked", never "no findings").
+
+### 12.6 Not covered
+
+- yarn and pnpm lockfiles, Java (`pom.xml`) and other ecosystems.
+- A project without a lockfile: `package.json` holds ranges, not versions, so nothing is checked and the check says why.
+- A company mirror of the public registry (Artifactory, Nexus): its packages resolve from the mirror's host, so nothing is sent and they count as not checked. Allowing named mirror hosts is a possible later option.
