@@ -10,7 +10,7 @@ The first milestone is **v0.1**: a working CLI that a stranger can install with 
 
 ## Non-negotiable constraints
 
-1. **Read-only.** Never call a CF API method other than GET, except the OAuth token endpoint. Enforce this in the HTTP client itself and cover it with a unit test.
+1. **Read-only.** Never call a CF API method other than GET, except the OAuth token endpoint. Enforce this in the HTTP client itself and cover it with a unit test. The one exception, decided 2026-11-22 for `project --cf` only: after a yes at the terminal (or `--enable-ssh`), BAIP Lens may run the **user's own cf CLI** for `cf enable-ssh <app>`, `cf restart <app> --strategy rolling` and `cf disable-ssh <app>` once the scan is over, and, for a Space or Org Manager, `cf set-space-role <self> <org> <space> SpaceDeveloper`. These four shapes are the whole allow-list (`remote/cfCli.ts`, unit-tested); the HTTP client itself stays GET-only.
 2. **Least privilege.** Every check declares the CF role it needs (`OrgAuditor`, `SpaceAuditor`, `SpaceDeveloper`). Checks that need `SpaceDeveloper` are off by default and enabled with `--deep`. If a call returns 403, record the check as `skipped: insufficient role` and continue. Never fail the whole scan.
 3. **No data leaves the machine.** The only outbound calls allowed are to the customer's CF API, UAA and log cache, to `api.osv.dev`, to `endoflife.date`, and to the SAPUI5 version overview. Keep this allow-list in one config file. Add no telemetry.
 4. **Privacy.** Never write user names, emails or IDs to reports. Anything user-level must be hashed with a per-scan random salt and aggregated. User usage ships in v0.2, not v0.1.

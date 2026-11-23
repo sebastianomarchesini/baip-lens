@@ -73,19 +73,29 @@ export function jwtPayload(token: string): unknown {
 
 const UserClaimsSchema = z.object({
   user_id: z.string().min(1).optional(),
+  user_name: z.string().min(1).optional(),
+  origin: z.string().min(1).optional(),
   scope: z.array(z.string()).optional(),
 });
 
 /**
- * The UAA user id and scopes of an access token, for local decisions only
- * (never sent anywhere, never printed). Client-credentials tokens have no
- * `user_id`.
+ * The UAA user id, user name, origin and scopes of an access token, for local
+ * decisions only (never sent anywhere, never written to a report). The user
+ * name and origin appear only in the terminal, in the `cf set-space-role`
+ * command `project --cf` shows. Client-credentials tokens have no `user_id`.
  */
-export function tokenUser(token: string): { userId?: string; scopes: string[] } {
+export function tokenUser(token: string): {
+  userId?: string;
+  userName?: string;
+  origin?: string;
+  scopes: string[];
+} {
   const parsed = UserClaimsSchema.safeParse(jwtPayload(token));
   if (!parsed.success) return { scopes: [] };
   return {
     ...(parsed.data.user_id === undefined ? {} : { userId: parsed.data.user_id }),
+    ...(parsed.data.user_name === undefined ? {} : { userName: parsed.data.user_name }),
+    ...(parsed.data.origin === undefined ? {} : { origin: parsed.data.origin }),
     scopes: parsed.data.scope ?? [],
   };
 }

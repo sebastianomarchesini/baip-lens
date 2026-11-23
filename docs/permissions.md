@@ -44,19 +44,24 @@ A project scan reads a local CAP or MTA project directory and needs **no Cloud F
 
 ## `baip-lens project --cf`
 
-Reading a **deployed** app needs the **Space Developer** role in its space. Cloud Foundry lets a user open an SSH session to an app only when the user may update it, so Space Auditor and Space Supporter are not enough. BAIP Lens says so before it starts, and it checks your roles (`GET /v3/roles`, your own space roles only) before any SSH attempt: without Space Developer it stops with this message and connects to nothing, because a refused SSH login is recorded as a failed attempt.
+Reading a **deployed** app needs the **Space Developer** role in its space. Cloud Foundry lets a user open an SSH session to an app only when the user may update it, so Space Auditor and Space Supporter are not enough. BAIP Lens checks your roles (`GET /v3/roles`, your own roles only) before any SSH attempt, because a refused SSH login is recorded as a failed attempt. Without Space Developer it stops and connects to nothing:
 
-Even with that role, BAIP Lens only **reads**: it opens the SFTP file channel and nothing else (no shell, no command, no port forwarding), sends only listing and read requests, opens files read-only, and never changes, restarts or restages the app. Cloud Foundry still records every session as an `audit.app.ssh-authorized` event; tell your security team before you scan production spaces.
+- if you are a **Space Manager** of the space or an **Org Manager** of the org, it offers to give you the role: after a yes it runs `cf set-space-role <you> <org> <space> SpaceDeveloper` with your cf CLI;
+- otherwise it prints that command for a manager to run.
 
-SSH must also be on, for the platform, the space and the app. BAIP Lens never turns it on; the app list shows the command for each app it cannot read:
+The SSH session itself only **reads**: it opens the SFTP file channel and nothing else (no shell, no command, no port forwarding), sends only listing and read requests and opens files read-only. Cloud Foundry still records every session as an `audit.app.ssh-authorized` event; tell your security team before you scan production spaces.
 
-- for one app: `cf enable-ssh <app>`, then `cf restart <app>` (Space Developer);
-- for a space: `cf allow-space-ssh <space>` (Space Manager);
+SSH must also be on, for the platform, the space and the app:
+
+- **for one app**, BAIP Lens can turn it on, but only after a yes at the terminal (or `--enable-ssh` in a script). It then runs, with your cf CLI and its current target: `cf enable-ssh <app>`, `cf restart <app> --strategy rolling` (Cloud Foundry starts the new instances before stopping the old ones, and runs the app's start command again), and after the scan, whether it succeeded or not, `cf disable-ssh <app>`, which takes effect at once without a restart (the SSH proxy asks Cloud Controller at every login whether SSH is on). It refuses to run them when the cf CLI targets another org or space than the scan, so they can never act on another app of the same name;
+- for a space: `cf allow-space-ssh <space>` (Space Manager), shown in the app list;
 - for the whole platform: only its operator can.
+
+These are the only cf commands BAIP Lens can run (`packages/cli/src/remote/cfCli.ts` refuses any other command line before it starts the cf CLI); its own HTTP client sends nothing but `GET`.
 
 To ask for the role:
 
-> Hi, could you give my user **<your e-mail>** the **Space Developer** role on the space **<space name>** in the Cloud Foundry org **<org name>**? I need it to run a read-only check of the deployed app **<app name>** with BAIP Lens (open source, https://github.com/sebastianomarchesini/BAIP-Lens). It opens a read-only file session like `cf ssh` and changes nothing. Thank you!
+> Hi, could you give my user **<your e-mail>** the **Space Developer** role on the space **<space name>** in the Cloud Foundry org **<org name>**? I need it to run a read-only check of the deployed app **<app name>** with BAIP Lens (open source, https://github.com/sebastianomarchesini/BAIP-Lens). It opens a read-only file session like `cf ssh`. Thank you!
 
 When the role is not possible, scan the project folder instead: `baip-lens project --path <dir>` needs no role at all.
 

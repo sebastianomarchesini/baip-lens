@@ -272,16 +272,13 @@ describe('cf CLI target and token claims', () => {
 
 describe('messages for an app that cannot be read', () => {
   it('tells the three reasons CF gives apart by their phrase, not by a name inside them', async () => {
-    const { sshOffAdvice } = await import('../../../src/remote/scanApp.js');
-    expect(sshOffAdvice('ssh is disabled globally', 'a', 'dev')).toContain('whole platform');
-    expect(sshOffAdvice('Disabled globally', 'a', 'dev')).toContain('whole platform');
-    expect(sshOffAdvice("ssh is disabled for space 'globally'", 'a', 'globally')).toContain(
-      'cf allow-space-ssh globally',
-    );
-    expect(sshOffAdvice('ssh is disabled for app', 'my app', 'dev')).toContain(
-      'cf enable-ssh "my app"',
-    );
-    expect(sshOffAdvice('', 'a', 'dev')).toBe('SSH is off for this app');
+    const { sshOffScope } = await import('../../../src/remote/scanApp.js');
+    expect(sshOffScope('ssh is disabled globally')).toBe('platform');
+    expect(sshOffScope('Disabled globally')).toBe('platform');
+    expect(sshOffScope("ssh is disabled for space 'globally'")).toBe('space');
+    expect(sshOffScope("ssh is disabled for space 'disabled for app'")).toBe('space');
+    expect(sshOffScope('ssh is disabled for app')).toBe('app');
+    expect(sshOffScope('')).toBe('unknown');
   });
 
   it('classifies ssh2 errors by level, never by their text', async () => {

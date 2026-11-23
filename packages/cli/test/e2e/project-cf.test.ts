@@ -6,6 +6,7 @@ import type * as HtmlReporter from '../../src/reporters/html.js';
 import { ScriptedPrompter } from '../../src/guided/prompt.js';
 import { type CliIo, EXIT, main } from '../../src/main.js';
 import { MAX_FILE_BYTES } from '../../src/collectors/project/read.js';
+import { type CfCommand, cfArgs } from '../../src/remote/cfCli.js';
 import { FakeFetch, jsonResponse } from '../support/fakeFetch.js';
 import {
   type FakeSshServer,
@@ -60,9 +61,10 @@ function base64url(value: unknown): string {
 }
 
 /** A JWT-shaped access token with a user id, valid for an hour. */
-function accessToken(userId = USER_GUID): string {
+function accessToken(userId = USER_GUID, userName?: string): string {
   const payload = {
     user_id: userId,
+    ...(userName === undefined ? {} : { user_name: userName, origin: 'sap.ids' }),
     scope: ['cloud_controller.read', 'cloud_controller.write', 'openid'],
     exp: Math.floor(Date.now() / 1000) + 3600,
   };
@@ -89,78 +91,104 @@ function appResource(app: { guid: string; name: string }, state: string) {
 interface Landscape {
   fingerprint: string;
   sshHref: string;
-  /** Roles the user holds in the space (empty: no Space Developer). */
-  roles?: string[];
+  /** Roles the user holds in the space (empty: no Space Developer); changed by `cf set-space-role`. */
+  roles: string[];
+  /** Whether SSH is on for legacy-ui (changed by `cf enable-ssh`), and the reason CF gives when not. */
+  uiSsh: { enabled: boolean; reason: string };
 }
 
 function landscape(options: Landscape): FakeFetch {
-  const roles = options.roles ?? ['space_developer'];
-  const authorizeQuery = 'client_id=ssh-proxy&response_type=code';
-  return new FakeFetch()
-    .on('GET', `${API_HOST}/`, () =>
-      jsonResponse({
-        links: {
-          self: { href: API },
-          cloud_controller_v3: { href: `${API}/v3` },
-          uaa: { href: `https://${UAA_HOST}` },
-          login: { href: 'https://login.cf.example.org' },
-          app_ssh: {
-            href: options.sshHref,
-            meta: { host_key_fingerprint: options.fingerprint, oauth_client: 'ssh-proxy' },
-          },
-        },
-      }),
-    )
-    .on('GET', `${API_HOST}/v3/organizations?names=acme-prod&per_page=5000`, () =>
-      jsonResponse(page([{ guid: ORG_GUID, name: 'acme-prod' }])),
-    )
-    .on('GET', `${API_HOST}/v3/spaces?names=dev&organization_guids=${ORG_GUID}&per_page=5000`, () =>
-      jsonResponse(
-        page([
-          {
-            guid: SPACE_GUID,
-            name: 'dev',
-            relationships: { organization: { data: { guid: ORG_GUID } } },
-          },
-        ]),
-      ),
-    )
-    .on(
-      'GET',
-      `${API_HOST}/v3/roles?per_page=5000&space_guids=${SPACE_GUID}&types=space_developer&user_guids=${USER_GUID}`,
-      () => jsonResponse(page(roles.map((type) => ({ guid: `role-${type}`, type })))),
-    )
-    .on('GET', `${API_HOST}/v3/apps?order_by=name&per_page=5000&space_guids=${SPACE_GUID}`, () =>
-      jsonResponse(
-        page([appResource(DB, 'STOPPED'), appResource(SRV, 'STARTED'), appResource(UI, 'STARTED')]),
-      ),
-    )
-    .on('GET', `${API_HOST}/v3/apps/${SRV.guid}/ssh_enabled`, () =>
-      jsonResponse({ enabled: true, reason: '' }),
-    )
-    .on('GET', `${API_HOST}/v3/apps/${UI.guid}/ssh_enabled`, () =>
-      jsonResponse({ enabled: false, reason: 'ssh is disabled for app' }),
-    )
-    .on('GET', `${API_HOST}/v3/apps/${SRV.guid}/processes/web`, () =>
-      jsonResponse({ guid: PROCESS_GUID, type: 'web', instances: 2 }),
-    )
-    .on('GET', `${API_HOST}/v3/processes/${PROCESS_GUID}/stats`, () =>
-      jsonResponse({
-        resources: [
-          { type: 'web', index: 0, state: 'CRASHED' },
-          { type: 'web', index: 1, state: 'RUNNING', host: '10.0.0.7' },
-        ],
-      }),
-    )
-    .on(
-      'GET',
-      `${UAA_HOST}/oauth/authorize?${authorizeQuery}`,
-      () =>
-        new Response(null, {
-          status: 302,
-          headers: { location: `https://${UAA_HOST}/login?code=${ONE_TIME_CODE}` },
-        }),
+  const roles = options.roles;
+  // Query parameters in the alphabetical order of routeKey.
+  const spaceRoles = (type: string) =>
+    `${API_HOST}/v3/roles?per_page=5000&space_guids=${SPACE_GUID}&types=${type}&user_guids=${USER_GUID}`;
+  const orgRoles = (type: string) =>
+    `${API_HOST}/v3/roles?organization_guids=${ORG_GUID}&per_page=5000&types=${type}&user_guids=${USER_GUID}`;
+  const rolesOf = (type: string) =>
+    jsonResponse(
+      page(roles.filter((r) => r === type).map((r) => ({ guid: `role-${r}`, type: r }))),
     );
+  const authorizeQuery = 'client_id=ssh-proxy&response_type=code';
+  return (
+    new FakeFetch()
+      .on('GET', `${API_HOST}/`, () =>
+        jsonResponse({
+          links: {
+            self: { href: API },
+            cloud_controller_v3: { href: `${API}/v3` },
+            uaa: { href: `https://${UAA_HOST}` },
+            login: { href: 'https://login.cf.example.org' },
+            app_ssh: {
+              href: options.sshHref,
+              meta: { host_key_fingerprint: options.fingerprint, oauth_client: 'ssh-proxy' },
+            },
+          },
+        }),
+      )
+      .on('GET', `${API_HOST}/v3/organizations?names=acme-prod&per_page=5000`, () =>
+        jsonResponse(page([{ guid: ORG_GUID, name: 'acme-prod' }])),
+      )
+      .on(
+        'GET',
+        `${API_HOST}/v3/spaces?names=dev&organization_guids=${ORG_GUID}&per_page=5000`,
+        () =>
+          jsonResponse(
+            page([
+              {
+                guid: SPACE_GUID,
+                name: 'dev',
+                relationships: { organization: { data: { guid: ORG_GUID } } },
+              },
+            ]),
+          ),
+      )
+      .on('GET', spaceRoles('space_developer'), () => rolesOf('space_developer'))
+      .on('GET', spaceRoles('space_manager'), () => rolesOf('space_manager'))
+      .on('GET', orgRoles('organization_manager'), () => rolesOf('organization_manager'))
+      .on('GET', `${API_HOST}/v3/apps?order_by=name&per_page=5000&space_guids=${SPACE_GUID}`, () =>
+        jsonResponse(
+          page([
+            appResource(DB, 'STOPPED'),
+            appResource(SRV, 'STARTED'),
+            appResource(UI, 'STARTED'),
+          ]),
+        ),
+      )
+      .on('GET', `${API_HOST}/v3/apps/${SRV.guid}/ssh_enabled`, () =>
+        jsonResponse({ enabled: true, reason: '' }),
+      )
+      .on('GET', `${API_HOST}/v3/apps/${UI.guid}/ssh_enabled`, () =>
+        jsonResponse(
+          options.uiSsh.enabled
+            ? { enabled: true, reason: '' }
+            : { enabled: false, reason: options.uiSsh.reason },
+        ),
+      )
+      // Both started apps share one web process here, so one SSH server serves either.
+      .on('GET', `${API_HOST}/v3/apps/${SRV.guid}/processes/web`, () =>
+        jsonResponse({ guid: PROCESS_GUID, type: 'web', instances: 2 }),
+      )
+      .on('GET', `${API_HOST}/v3/apps/${UI.guid}/processes/web`, () =>
+        jsonResponse({ guid: PROCESS_GUID, type: 'web', instances: 2 }),
+      )
+      .on('GET', `${API_HOST}/v3/processes/${PROCESS_GUID}/stats`, () =>
+        jsonResponse({
+          resources: [
+            { type: 'web', index: 0, state: 'CRASHED' },
+            { type: 'web', index: 1, state: 'RUNNING', host: '10.0.0.7' },
+          ],
+        }),
+      )
+      .on(
+        'GET',
+        `${UAA_HOST}/oauth/authorize?${authorizeQuery}`,
+        () =>
+          new Response(null, {
+            status: 302,
+            headers: { location: `https://${UAA_HOST}/login?code=${ONE_TIME_CODE}` },
+          }),
+      )
+  );
 }
 
 /** What `cf push` leaves in /home/vcap/app, plus files the scan must never touch. */
@@ -206,7 +234,7 @@ async function containerFixture(): Promise<string> {
   return app;
 }
 
-async function cfHome(token: string, target = API): Promise<string> {
+async function cfHome(token: string, target = API, space = 'dev'): Promise<string> {
   const home = await mkdtemp(join(tmpdir(), 'baip-lens-cfhome-'));
   await mkdir(join(home, '.cf'));
   await writeFile(
@@ -217,7 +245,7 @@ async function cfHome(token: string, target = API): Promise<string> {
       AccessToken: `bearer ${token}`,
       RefreshToken: '',
       OrganizationFields: { GUID: ORG_GUID, Name: 'acme-prod' },
-      SpaceFields: { GUID: SPACE_GUID, Name: 'dev', AllowSSH: true },
+      SpaceFields: { GUID: SPACE_GUID, Name: space, AllowSSH: true },
     }),
   );
   return home;
@@ -232,6 +260,10 @@ interface Run {
   fake: FakeFetch;
   server: FakeSshServer;
   token: string;
+  /** The cf CLI commands run, as argv. */
+  cfRuns: string[][];
+  /** Whether SSH is on for legacy-ui at the end. */
+  uiSsh: { enabled: boolean; reason: string };
 }
 
 const servers: FakeSshServer[] = [];
@@ -247,6 +279,14 @@ interface RunOptions {
   acceptPassword?: string;
   /** Publish the fingerprint of another key in the CF root. */
   wrongHostKey?: boolean;
+  /** Put a user name into the token (needed to offer `cf set-space-role`). */
+  userName?: string;
+  /** Why SSH is off for legacy-ui (default: off for the app only, which BAIP Lens can fix). */
+  uiSshReason?: string;
+  /** The space the cf CLI targets (default: dev). */
+  cfSpace?: string;
+  /** cf commands (by subcommand) that fail; `'missing'` for no cf CLI at all. */
+  cfFails?: string[] | 'missing';
 }
 
 async function run(options: RunOptions = {}): Promise<Run> {
@@ -260,8 +300,22 @@ async function run(options: RunOptions = {}): Promise<Run> {
   const fingerprint = options.wrongHostKey
     ? sha256Fingerprint(newHostKey().public)
     : server.fingerprint;
-  const fake = landscape({ fingerprint, sshHref: server.href, roles: options.roles });
-  const token = accessToken();
+  const roles = [...(options.roles ?? ['space_developer'])];
+  const uiSsh = { enabled: false, reason: options.uiSshReason ?? 'ssh is disabled for app' };
+  const fake = landscape({ fingerprint, sshHref: server.href, roles, uiSsh });
+  const token = accessToken(USER_GUID, options.userName);
+  const cfRuns: string[][] = [];
+  const runCf = (command: CfCommand) => {
+    cfRuns.push(cfArgs(command));
+    if (options.cfFails === 'missing')
+      return Promise.resolve({ ok: false, reason: 'not-installed' } as const);
+    if (options.cfFails?.includes(command.kind))
+      return Promise.resolve({ ok: false, reason: 'failed' } as const);
+    if (command.kind === 'enable-ssh') uiSsh.enabled = true;
+    if (command.kind === 'disable-ssh') uiSsh.enabled = false;
+    if (command.kind === 'set-space-role') roles.push('space_developer');
+    return Promise.resolve({ ok: true } as const);
+  };
   const outDir = await mkdtemp(join(tmpdir(), 'baip-lens-cf-out-'));
   const prompter =
     options.answers === null ? undefined : new ScriptedPrompter(options.answers ?? ['1']);
@@ -270,10 +324,11 @@ async function run(options: RunOptions = {}): Promise<Run> {
   const io: CliIo = {
     stdout: (t) => (out += t),
     stderr: (t) => (err += t),
-    env: { CF_HOME: await cfHome(token) },
+    env: { CF_HOME: await cfHome(token, API, options.cfSpace) },
     isTTY: false,
     prompter,
     fetch: fake.fetch,
+    runCf,
     now: () => NOW,
   };
   const args = [
@@ -286,7 +341,18 @@ async function run(options: RunOptions = {}): Promise<Run> {
     ...(options.args ?? []),
   ];
   const code = await main(args, io);
-  return { code, out, err, transcript: prompter?.transcript ?? [], outDir, fake, server, token };
+  return {
+    code,
+    out,
+    err,
+    transcript: prompter?.transcript ?? [],
+    outDir,
+    fake,
+    server,
+    token,
+    cfRuns,
+    uiSsh,
+  };
 }
 
 async function written(dir: string): Promise<Record<string, string>> {
@@ -300,21 +366,20 @@ describe('baip-lens project --cf', () => {
     const r = await run();
     expect(r.code, r.err).toBe(EXIT.ok);
 
-    // The Space Developer warning and the audit event come first.
-    expect(r.err).toContain('It needs the Space Developer role in the space');
+    // One line on SSH and the audit event; the role is only mentioned when it is missing.
+    expect(r.err).toContain('read-only SSH session');
     expect(r.err).toContain('audit.app.ssh-authorized');
+    expect(r.err).not.toContain('Space Developer');
     expect(r.err).toContain('Reading app "incidents-srv" (instance 1) over SSH, read-only');
 
-    // The picker offers only what can be read, and says why the others cannot.
+    // The picker offers what can be read, including an app with SSH off, and groups the others by reason.
     expect(r.transcript).toContain('Apps in space "dev" of "acme-prod":');
-    expect(r.transcript).toContain(
-      '  - incidents-db: it is stopped: start it with `cf start incidents-db`',
-    );
-    expect(r.transcript).toContain(
-      '  - legacy-ui: SSH is off for this app: turn it on with `cf enable-ssh legacy-ui`, then `cf restart legacy-ui`',
-    );
+    expect(r.transcript).toContain('  - stopped: incidents-db (cf start <app>)');
     expect(r.transcript).toContain('  1) incidents-srv');
-    expect(r.transcript.filter((line) => /^\s+\d\) /.test(line))).toHaveLength(1);
+    expect(r.transcript).toContain('  2) legacy-ui  (SSH off: BAIP Lens turns it on for the scan)');
+    expect(r.transcript.filter((line) => /^\s+\d\) /.test(line))).toHaveLength(2);
+    // An app that SSH already reaches changes nothing.
+    expect(r.cfRuns).toEqual([]);
 
     // One SSH login, password only (no "none" probe), as cf:<process guid>/<running index>.
     expect(r.server.logins).toEqual([
@@ -385,10 +450,149 @@ describe('baip-lens project --cf', () => {
   it('stops before any SSH attempt when the user is not a Space Developer', async () => {
     const r = await run({ roles: [] });
     expect(r.code).toBe(EXIT.error);
-    expect(r.err).toContain('does not have the Space Developer role in space "dev" of "acme-prod"');
+    expect(r.err).toContain(
+      'You do not have the Space Developer role in space "dev" of "acme-prod"',
+    );
     expect(r.server.connections).toBe(0);
     expect(r.fake.calls.some((c) => c.url.pathname === '/oauth/authorize')).toBe(false);
+    expect(r.cfRuns).toEqual([]);
     expect(await readdir(r.outDir)).toEqual([]);
+  });
+
+  it('names the cf command a manager would run when the user cannot give the role', async () => {
+    const r = await run({ roles: [], userName: 'dev@example.org' });
+    expect(r.code).toBe(EXIT.error);
+    expect(r.err).toContain('A Space Manager of "dev" or an Org Manager of "acme-prod"');
+    expect(r.err).toContain(
+      'cf set-space-role dev@example.org acme-prod dev SpaceDeveloper --origin sap.ids',
+    );
+    expect(r.cfRuns).toEqual([]);
+    expect(r.server.connections).toBe(0);
+  });
+
+  it('lets a Space Manager give themselves Space Developer after a yes, then reads the app', async () => {
+    const r = await run({
+      roles: ['space_manager'],
+      userName: 'dev@example.org',
+      answers: ['y', '1'],
+    });
+    expect(r.code, r.err).toBe(EXIT.ok);
+    expect(r.transcript).toContain(
+      '  cf set-space-role dev@example.org acme-prod dev SpaceDeveloper --origin sap.ids',
+    );
+    expect(r.cfRuns).toEqual([
+      [
+        'set-space-role',
+        'dev@example.org',
+        'acme-prod',
+        'dev',
+        'SpaceDeveloper',
+        '--origin',
+        'sap.ids',
+      ],
+    ]);
+    expect(r.server.logins).toHaveLength(1);
+  });
+
+  it('gives no role when the manager says no', async () => {
+    const r = await run({ roles: ['space_manager'], userName: 'dev@example.org', answers: ['n'] });
+    expect(r.code).toBe(EXIT.ok);
+    expect(r.out).toContain('Cancelled');
+    expect(r.cfRuns).toEqual([]);
+    expect(r.server.connections).toBe(0);
+  });
+
+  it('turns SSH on for the chosen app after a yes, restarts it rolling, reads it and turns SSH off again', async () => {
+    const r = await run({ answers: ['2', 'y'] });
+    expect(r.code, r.err).toBe(EXIT.ok);
+    expect(r.transcript).toContain(
+      'SSH is off for "legacy-ui". To read it, BAIP Lens will run with your cf CLI:',
+    );
+    expect(r.transcript).toContain('? Turn SSH on and restart the app? [y/N]');
+    expect(r.cfRuns).toEqual([
+      ['enable-ssh', 'legacy-ui'],
+      ['restart', 'legacy-ui', '--strategy', 'rolling'],
+      ['disable-ssh', 'legacy-ui'],
+    ]);
+    expect(r.uiSsh.enabled).toBe(false);
+    expect(r.server.logins).toHaveLength(1);
+    expect(r.err).toContain('SSH is off again for "legacy-ui".');
+    expect(r.out).toMatch(/^Scanned deployed app legacy-ui:/);
+  });
+
+  it('changes nothing when the user says no to turning SSH on', async () => {
+    const r = await run({ answers: ['2', ''] });
+    expect(r.code).toBe(EXIT.ok);
+    expect(r.out).toContain('Cancelled');
+    expect(r.cfRuns).toEqual([]);
+    expect(r.server.connections).toBe(0);
+    expect(await readdir(r.outDir)).toEqual([]);
+  });
+
+  it('turns SSH on without asking with --app and --enable-ssh in a script', async () => {
+    const r = await run({ args: ['--app', 'legacy-ui', '--enable-ssh'], answers: null });
+    expect(r.code, r.err).toBe(EXIT.ok);
+    expect(r.err).toContain('--enable-ssh given');
+    expect(r.cfRuns.map((a) => a[0])).toEqual(['enable-ssh', 'restart', 'disable-ssh']);
+    expect(r.uiSsh.enabled).toBe(false);
+  });
+
+  it('turns SSH off again when the restart fails', async () => {
+    const r = await run({
+      args: ['--app', 'legacy-ui', '--enable-ssh'],
+      answers: null,
+      cfFails: ['restart'],
+    });
+    expect(r.code).toBe(EXIT.error);
+    expect(r.err).toContain('`cf restart legacy-ui --strategy rolling` did not succeed');
+    expect(r.cfRuns.map((a) => a[0])).toEqual(['enable-ssh', 'restart', 'disable-ssh']);
+    expect(r.uiSsh.enabled).toBe(false);
+    expect(r.server.connections).toBe(0);
+  });
+
+  it('turns SSH off again when reading the app fails', async () => {
+    const r = await run({
+      args: ['--app', 'legacy-ui', '--enable-ssh'],
+      answers: null,
+      wrongHostKey: true,
+    });
+    expect(r.code).toBe(EXIT.error);
+    expect(r.cfRuns.map((a) => a[0])).toEqual(['enable-ssh', 'restart', 'disable-ssh']);
+    expect(r.uiSsh.enabled).toBe(false);
+  });
+
+  it('says how to get the cf CLI when it is missing, and changes nothing', async () => {
+    const r = await run({
+      args: ['--app', 'legacy-ui', '--enable-ssh'],
+      answers: null,
+      cfFails: 'missing',
+    });
+    expect(r.code).toBe(EXIT.error);
+    expect(r.err).toContain('The cf CLI was not found');
+    expect(r.cfRuns.map((a) => a[0])).toEqual(['enable-ssh']);
+  });
+
+  it('never runs cf commands when the cf CLI targets another space', async () => {
+    const r = await run({
+      args: ['--app', 'legacy-ui', '--enable-ssh', '--space', 'dev'],
+      answers: null,
+      cfSpace: 'other',
+    });
+    expect(r.code).toBe(EXIT.error);
+    expect(r.err).toContain('the cf CLI targets another org or space');
+    expect(r.err).toContain('cf target -o acme-prod -s dev');
+    expect(r.cfRuns).toEqual([]);
+  });
+
+  it('picks the only readable app without asking', async () => {
+    const r = await run({ answers: [], uiSshReason: "ssh is disabled for space 'dev'" });
+    expect(r.code, r.err).toBe(EXIT.ok);
+    expect(r.transcript).toContain('Only one app can be read: incidents-srv');
+    expect(r.transcript).toContain('  - stopped: incidents-db (cf start <app>)');
+    expect(r.transcript).toContain(
+      '  - SSH is off for space "dev": legacy-ui (a Space Manager can run `cf allow-space-ssh dev`)',
+    );
+    expect(r.transcript.some((line) => line.startsWith('?'))).toBe(false);
   });
 
   it('explains a refused SSH login as the missing role', async () => {
@@ -413,8 +617,9 @@ describe('baip-lens project --cf', () => {
   it('names the cf command when --app points at an app with SSH turned off', async () => {
     const r = await run({ args: ['--app', 'legacy-ui'], answers: null });
     expect(r.code).toBe(EXIT.error);
-    expect(r.err).toContain('App "legacy-ui" cannot be read');
+    expect(r.err).toContain('App "legacy-ui" cannot be read: SSH is off for it. Pass --enable-ssh');
     expect(r.err).toContain('cf enable-ssh legacy-ui');
+    expect(r.cfRuns).toEqual([]);
     expect(r.server.connections).toBe(0);
   });
 
@@ -455,6 +660,9 @@ describe('project option checks', () => {
     const c = io();
     expect(await main(['project', '--path', '.', '--app', 'x'], c.io)).toBe(EXIT.error);
     expect(c.err()).toContain('--app works only together with --cf');
+    const d = io();
+    expect(await main(['project', '--path', '.', '--enable-ssh'], d.io)).toBe(EXIT.error);
+    expect(d.err()).toContain('--enable-ssh works only together with --cf');
   });
 
   it('asks for a cf login when there is none', async () => {
