@@ -62,16 +62,18 @@ function exitCodeFor(data: ReportData, failOn: FailOn): number {
   return data.findings.some((f) => meetsThreshold(f.severity, threshold)) ? EXIT.findings : EXIT.ok;
 }
 
-/** A snapshot written by `baip-lens project`: no org, one or more local projects. */
+/** A snapshot written by `baip-lens project`: no org, one local project or one project per deployed app. */
 function isProjectScan(data: ReportData): boolean {
   return data.scope.orgs.length === 0 && (data.scope.projects?.length ?? 0) > 0;
 }
 
 function scannedLine(data: ReportData): string {
   if (isProjectScan(data)) {
-    // `project --cf` read the files through a CF API; `project --path` did not.
-    const what = data.scope.apiEndpoint === undefined ? 'project' : 'deployed app';
-    return `Scanned ${what} ${(data.scope.projects ?? []).join(', ')}`;
+    const ids = data.scope.projects ?? [];
+    // `project --cf` read the files through a CF API, one project per app; `project --path` did not.
+    const deployed = ids.length === 1 ? 'deployed app' : 'deployed apps';
+    const what = data.scope.apiEndpoint === undefined ? 'project' : deployed;
+    return `Scanned ${what} ${ids.join(', ')}`;
   }
   return `Scanned ${data.summary.apps} app(s) in ${[data.scope.orgs.join(', '), ...(data.scope.spaces ?? [])].join(' / ')}`;
 }
@@ -136,19 +138,25 @@ function appPrompter(io: CliIo): Prompter | undefined {
   });
 }
 
-/** `project --cf`: one deployed app, picked from the cf target space or named with --app. */
+/**
+ * `project --cf`: one deployed app, or every app of a deployed project (MTA),
+ * picked from the cf target space or named with --app or --mta.
+ */
 async function scanDeployedApp(
   config: ProjectConfig,
   io: CliIo,
   log: (message: string) => void,
 ): Promise<Snapshot> {
-  const prompter = config.app === undefined ? appPrompter(io) : undefined;
+  const named = config.app !== undefined || config.mta !== undefined;
+  const prompter = named ? undefined : appPrompter(io);
   try {
     return await scanApp({
       apiUrl: config.api,
       org: config.org,
       space: config.space,
       app: config.app,
+      mta: config.mta,
+      mtaNamespace: config.mtaNamespace,
       env: io.env,
       prompter,
       fetch: io.fetch,
@@ -276,15 +284,23 @@ function buildProgram(io: CliIo, setExit: (code: number) => void): Command {
   program
     .command('project')
     .description(
-      'scan a CAP or MTA project: a local folder (--path: file reads only, no network) or a deployed app (--cf: read-only over SSH)',
+      'scan a CAP or MTA project: a local folder (--path: file reads only, no network) or a deployed app or project (--cf: read-only over SSH)',
     )
     .option('--path <dir>', 'project directory (contains package.json, mta.yaml or .cdsrc.json)')
     .option(
       '--cf',
-      'read a deployed app instead: pick it from the apps in your `cf target` space (needs Space Developer)',
+      'read a deployed app or project instead: pick it from the apps in your `cf target` space (needs Space Developer)',
       false,
     )
     .option('--app <name>', 'with --cf: the app to read, without asking')
+    .option(
+      '--mta <id>',
+      'with --cf: read every app of this deployed project (MTA), without asking',
+    )
+    .option(
+      '--mta-namespace <name>',
+      'with --cf and --mta: the namespace of the deployment, "" for the one without',
+    )
     .option('--api <url>', 'with --cf: CF API endpoint or region (default: the cf CLI target)')
     .option('--org <name>', 'with --cf: org (default: the cf CLI target)')
     .option('--space <name>', 'with --cf: space (default: the cf CLI target)')

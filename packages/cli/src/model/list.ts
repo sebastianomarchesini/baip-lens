@@ -82,7 +82,7 @@ export const SNAPSHOT_LIST_LIMITS = {
   traffic: 100_000,
   /** Apps out of a scan's sight keep their entry. */
   history: 200_000,
-  /** A project scan writes one. */
+  /** A scan of a local folder writes one; a scan of a deployed project one per app read, at most 50. */
   projects: 1_000,
   findings: 1_000_000,
   checks: 1_000,

@@ -13,11 +13,13 @@ import {
 
 /*
  * A real SSH server on 127.0.0.1 standing in for the platform's app SSH
- * proxy and one container: it serves a local folder at /home/vcap/app over
- * SFTP and records everything a client asks for: logins, channels and every
- * SFTP request. Only the read requests BAIP Lens is allowed to send are
+ * proxy and the containers behind it: each SSH user (`cf:<process>/<index>`)
+ * gets its own local folder served at /home/vcap/app over SFTP, and a
+ * one-time code is accepted as the password once. Everything a client asks
+ * for is recorded: logins, channels and every SFTP request with the user it
+ * came from. Only the read requests BAIP Lens is allowed to send are
  * implemented; anything else is answered "unsupported" and recorded, so a
- * test can prove that nothing but reads ever reached the container.
+ * test can prove that nothing but reads ever reached a container.
  */
 
 export const CONTAINER_ROOT = '/home/vcap/app';
@@ -59,6 +61,8 @@ export const READ_REQUESTS = new Set([
 
 export interface SftpRequest {
   type: string;
+  /** The SSH user of the session the request came on. */
+  username: string;
   /** The container path, for path requests and for requests on a handle opened from one. */
   path?: string;
   /** For OPEN: the flags as ssh2 spells them ('r', 'w', 'a+', ...). */
@@ -80,11 +84,30 @@ export interface FakeSshServer {
   close(): Promise<void>;
 }
 
-export interface FakeSshOptions {
+/** One app: one SSH user, its folder, and the one password accepted (once). */
+export interface FakeSshApp {
   /** The folder served at /home/vcap/app. */
   appDir: string;
   username: string;
   password: string;
+}
+
+/** Several apps behind one proxy. */
+export interface FakeSshApps {
+  /** The folder served at /home/vcap/app to each SSH user. */
+  users: Record<string, string>;
+  /** The one-time codes accepted as a password, each of them once, by any user. */
+  codes: string[];
+  /** Users whose connection is cut at their first OPEN request: a session lost mid-scan. */
+  dropOnOpen?: string[];
+}
+
+export type FakeSshOptions = FakeSshApp | FakeSshApps;
+
+function severalApps(options: FakeSshOptions): FakeSshApps {
+  return 'users' in options
+    ? options
+    : { users: { [options.username]: options.appDir }, codes: [options.password] };
 }
 
 /** The SHA-256 base64 fingerprint (43 characters) of a public key, OpenSSH style. */
@@ -93,9 +116,19 @@ export function sha256Fingerprint(publicKey: string): string {
   return createHash('sha256').update(parsed.getPublicSSH()).digest('base64').replace(/=+$/, '');
 }
 
-/** A fresh ed25519 key pair in OpenSSH format. */
+/**
+ * A fresh ed25519 key pair in OpenSSH format. About one key in 250 that ssh2
+ * generates comes out a byte short (a key that starts with a zero byte) and
+ * ssh2 cannot read it back, so a pair is only handed out when both halves parse.
+ */
 export function newHostKey(): { private: string; public: string } {
-  return utils.generateKeyPairSync('ed25519');
+  for (;;) {
+    const key = utils.generateKeyPairSync('ed25519');
+    const readable = [key.public, key.private].every(
+      (half) => !(utils.parseKey(half) instanceof Error),
+    );
+    if (readable) return key;
+  }
 }
 
 async function attrsOf(path: string): Promise<Attributes> {
@@ -110,7 +143,13 @@ async function attrsOf(path: string): Promise<Attributes> {
   };
 }
 
-function serveSftp(sftp: SFTPWrapper, appDir: string, record: (r: SftpRequest) => void): void {
+function serveSftp(
+  sftp: SFTPWrapper,
+  appDir: string,
+  record: (r: Omit<SftpRequest, 'username'>) => void,
+  /** Called at the first OPEN instead of answering it, when the session is to be lost there. */
+  cut?: () => void,
+): void {
   const files = new Map<string, { file: FileHandle; path: string }>();
   const dirs = new Map<string, { path: string; done: boolean }>();
   let next = 0;
@@ -134,6 +173,7 @@ function serveSftp(sftp: SFTPWrapper, appDir: string, record: (r: SftpRequest) =
   sftp.on('OPEN', (reqid, filename, flags) => {
     const flagText = utils.sftp.flagsToString(flags) ?? String(flags);
     record({ type: 'OPEN', path: filename, flags: flagText });
+    if (cut !== undefined) return cut();
     const path = local(filename);
     if (path === null || flagText !== 'r') return sftp.status(reqid, STATUS.FAILURE);
     open(path, 'r').then(
@@ -238,6 +278,8 @@ function serveSftp(sftp: SFTPWrapper, appDir: string, record: (r: SftpRequest) =
 }
 
 export async function startFakeSsh(options: FakeSshOptions): Promise<FakeSshServer> {
+  const apps = severalApps(options);
+  const unusedCodes = new Set(apps.codes);
   const key = newHostKey();
   const state: Omit<FakeSshServer, 'host' | 'port' | 'href' | 'close'> = {
     fingerprint: sha256Fingerprint(key.public),
@@ -250,16 +292,19 @@ export async function startFakeSsh(options: FakeSshOptions): Promise<FakeSshServ
   const server = new Server({ hostKeys: [key.private] }, (client) => {
     state.connections += 1;
     clients.add(client);
+    // Many small answers in a row: without this, Nagle's algorithm holds them back and a read takes twice as long.
+    (client as Connection & { setNoDelay?: (noDelay: boolean) => void }).setNoDelay?.(true);
+    // Who signed in on this connection, and the folder that user is served.
+    let login: { username: string; appDir: string } | undefined;
     client.on('close', () => clients.delete(client));
     client.on('error', () => undefined);
     client.on('authentication', (ctx) => {
       const password = ctx.method === 'password' ? ctx.password : undefined;
       state.logins.push({ method: ctx.method, username: ctx.username, password });
-      if (
-        ctx.method === 'password' &&
-        ctx.username === options.username &&
-        ctx.password === options.password
-      ) {
+      const appDir = apps.users[ctx.username];
+      // A code is spent by the login that presents it, as UAA's one-time codes are.
+      if (ctx.method === 'password' && appDir !== undefined && unusedCodes.delete(ctx.password)) {
+        login = { username: ctx.username, appDir };
         ctx.accept();
       } else {
         ctx.reject(['password']);
@@ -278,7 +323,14 @@ export async function startFakeSsh(options: FakeSshOptions): Promise<FakeSshServ
         const session = accept();
         session.on('sftp', (acceptSftp) => {
           state.channels.push('sftp');
-          serveSftp(acceptSftp(), options.appDir, (r) => state.requests.push(r));
+          if (login === undefined) return;
+          const { username, appDir } = login;
+          serveSftp(
+            acceptSftp(),
+            appDir,
+            (r) => state.requests.push({ ...r, username }),
+            apps.dropOnOpen?.includes(username) ? () => client.end() : undefined,
+          );
         });
         for (const name of ['exec', 'shell', 'pty', 'env', 'subsystem', 'x11'] as const) {
           session.on(name as 'exec', (_accept: unknown, reject: () => void) => {

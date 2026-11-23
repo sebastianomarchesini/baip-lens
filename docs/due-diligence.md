@@ -77,7 +77,7 @@ The token never appears in a report, snapshot or log line. Everything printed go
 
 ### Does it process personal data? What about GDPR?
 
-BAIP Lens writes no user names, e-mail addresses or user IDs to any output. It does not collect app labels and annotations, which often hold owner e-mails. When a later release reads audit events, it drops the `actor` fields as it reads them ([privacy.md](privacy.md)). The reports contain org, space and app names and technical facts such as buildpacks, stacks and dates.
+BAIP Lens writes no user names, e-mail addresses or user IDs to any output. It does not collect app labels and annotations, which often hold owner e-mails; the one exception is `project --cf`, which reads the six keys the deploy service writes to mark an app as part of an MTA project, keeps only pattern-checked identifiers and drops every other key ([privacy.md](privacy.md#deployed-app-scans)). When a later release reads audit events, it drops the `actor` fields as it reads them ([privacy.md](privacy.md)). The reports contain org, space and app names and technical facts such as buildpacks, stacks and dates.
 
 The program runs on your machine and sends nothing to the project, so the project never receives or processes your data. It does not act as a processor for you, and there is no data processing agreement to sign with it. The snapshot and the reports are files under your control and your policies. This describes how the software works; it is not legal advice. Your data protection officer decides how it fits your records of processing.
 

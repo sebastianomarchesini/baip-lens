@@ -1,3 +1,4 @@
+import { truncate } from './collectors/sanitize.js';
 import { CfAuthError, CfForbiddenError, ConfigError } from './http/errors.js';
 import type { CfRole, CheckResult, SkipReasonCode } from './model/check.js';
 
@@ -44,9 +45,12 @@ export const COLLECTOR_CHECKS = {
     roles: [],
   },
   /**
-   * The same collection from a deployed app (`baip-lens project --cf`). It
-   * keeps the id `collect.project`, which every project rule requires; only
-   * the way the files were read differs.
+   * The same collection from deployed apps (`baip-lens project --cf`): one
+   * app, or every app of a deployed project. It keeps the id
+   * `collect.project`, which every project rule requires; only the way the
+   * files were read differs. It is recorded once per scan, as ran when at
+   * least one app was read; an app that was not read gets a check of its own
+   * (`deployedAppNotRead`).
    */
   deployedApp: {
     id: 'collect.project',
@@ -55,6 +59,24 @@ export const COLLECTOR_CHECKS = {
     roles: ['SpaceDeveloper'],
   },
 } as const satisfies Record<string, CheckDefinition>;
+
+/** How much of an app name the title of a check repeats. */
+const MAX_APP_NAME_IN_TITLE = 80;
+
+/**
+ * The check of one app of a deployed project that was not read; it is only
+ * ever recorded as skipped. The id starts with `collect.`, so that
+ * `report --from` keeps it, and is never `collect.project` itself: a skip
+ * under that id would turn every project rule into "dependency skipped" and
+ * lose the findings of the apps that were read.
+ */
+export function deployedAppNotRead(projectId: string, appName: string): CheckDefinition {
+  return {
+    id: `${COLLECTOR_CHECKS.deployedApp.id}.${projectId}`,
+    title: `Files of deployed app ${truncate(appName, MAX_APP_NAME_IN_TITLE) ?? ''}`,
+    roles: [...COLLECTOR_CHECKS.deployedApp.roles],
+  };
+}
 
 /**
  * A check that cannot run and knows why better than a generic message: the

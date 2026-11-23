@@ -151,9 +151,11 @@ export type RawHistory = z.infer<typeof RawHistorySchema>;
  * URLs with credentials or absolute paths. Every string has a maximum
  * length, every array a maximum size, and enum-shaped values have an
  * `other` bucket, so a hostile project cannot grow or poison a snapshot.
+ * A project read from a deployed app also records which app it was
+ * (`deployment`): the app name and the identifiers of its MTA.
  */
 
-/** Project ids: the mta ID, the package name without scope, or the directory name. */
+/** Project ids: the mta ID, the package name without scope, or the directory name; for a deployed app, derived from the app name. */
 export const PROJECT_ID_PATTERN = /^[A-Za-z0-9._-]{1,64}$/;
 /** Names of entities, services, scopes, roles, attributes, modules, resources, columns and targets. */
 export const IDENTIFIER_PATTERN = /^[A-Za-z_$][\w.$:-]{0,127}$/;
@@ -164,6 +166,12 @@ export const PACKAGE_NAME_PATTERN = /^(@[a-z0-9._-]+\/)?[a-z0-9._-]{1,214}$/i;
 /** A dependency range or engine range; anything else is stored as this placeholder. */
 export const NON_REGISTRY_RANGE = '[non-registry]';
 export const RANGE_PATTERN = /^[\s0-9A-Za-z.*^~<>=|+-]{0,64}$/;
+/** MTA ids and module names, as the deploy service writes them on an app (docs/data-sources.md §11). */
+export const MTA_NAME_PATTERN = /^[A-Za-z0-9_.-]{1,128}$/;
+/** An MTA version as the deploy service writes it on an app. */
+export const MTA_VERSION_PATTERN = /^[0-9A-Za-z.+-]{1,64}$/;
+/** The namespace of an MTA deployment; the deploy service allows at most 36 characters. */
+export const MTA_NAMESPACE_PATTERN = /^[A-Za-z0-9_.-]{1,36}$/;
 
 const Identifier = z.string().regex(IDENTIFIER_PATTERN);
 const Role = z.string().regex(ROLE_PATTERN);
@@ -457,8 +465,35 @@ export const RawHtmlBootstrapSchema = z.object({
 });
 export type RawHtmlBootstrap = z.infer<typeof RawHtmlBootstrapSchema>;
 
+const MtaName = z.string().regex(MTA_NAME_PATTERN);
+
+/**
+ * Where the files of a project were read from, for `baip-lens project --cf`:
+ * the deployed app and, when the deploy service marked the app as a module of
+ * an MTA, that identity (docs/data-sources.md §11). The MTA values are set by
+ * whoever may update the app, so only pattern-checked identifiers are kept.
+ */
+export const RawDeploymentSchema = z.object({
+  /** The Cloud Foundry app name, as the API returned it (at most 255 characters there). */
+  app: z.string().min(1).max(255),
+  /** null for an app that was not deployed as part of an MTA. */
+  mta: z
+    .object({
+      id: MtaName,
+      version: z.string().regex(MTA_VERSION_PATTERN).nullable(),
+      /** The module of the MTA this app was built from. */
+      module: MtaName.nullable(),
+      /** null for a deployment without a namespace. */
+      namespace: z.string().regex(MTA_NAMESPACE_PATTERN).nullable(),
+    })
+    .nullable(),
+});
+export type RawDeployment = z.infer<typeof RawDeploymentSchema>;
+
 export const RawProjectSchema = z.object({
   id: z.string().regex(PROJECT_ID_PATTERN),
+  /** Set for a deployed app (`project --cf`); absent for a local folder and in snapshots written before the field existed. */
+  deployment: RawDeploymentSchema.optional(),
   /** Which optional cds config sources existed and were read. */
   sourcesRead: list(CdsSourceSchema, 3),
   /** Files the collector opened (allow-listed names only), sorted. */

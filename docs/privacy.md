@@ -24,7 +24,7 @@ BAIP Lens runs on your machine and writes files to your disk. This page lists wh
 | `registry.npmjs.org` | current `@sap/*` versions | four fixed package names | planned |
 | Your app routes | the UI5 version served | one unauthenticated `GET /resources/sap-ui-version.json` per app, with no redirects; `--no-probe-routes` will turn it off | planned; 0.1.0 makes no request to app routes |
 | Your UAA server (from the CF root) | the one-time SSH code, for `project --cf` only | `GET /oauth/authorize` with your token, as `cf ssh-code` does | `project --cf` |
-| Your app SSH proxy (`links.app_ssh` from the CF root) | the files of the one app you picked, for `project --cf` only | the one-time code as SSH password; then SFTP listing and read requests only | `project --cf` |
+| Your app SSH proxy (`links.app_ssh` from the CF root) | the files of the app you picked, or of each app of the project you picked, for `project --cf` only | one new one-time code per app as SSH password; then SFTP listing and read requests only | `project --cf` |
 
 Your CF token is sent to the CF API and its log cache only, and with `project --cf` also to the UAA authorize endpoint, which hands out the one-time SSH code (as `cf ssh-code` asks for it). The allow-list knows which credential each host may receive: the CF token for those, the OAuth client id and secret for the token endpoint (never the CF token), and nothing for any other host. The SSH proxy receives the one-time code as the SSH password, never the CF token. Unit tests check that no other host receives it, and that a credential a host may not receive is refused before anything is sent.
 
@@ -52,7 +52,7 @@ The snapshot and reports contain only allow-listed fields. The parsers drop ever
 - **User identities:**
   - User names, emails and IDs are never stored.
   - Audit-event `actor` fields are dropped when the events are read.
-  - App annotations and labels (which often hold owner emails) are not collected.
+  - App annotations and labels (which often hold owner emails) are not collected. The one exception is `project --cf`, which reads the six keys the deploy service writes to mark an app as part of a project and drops every other one (see [Deployed-app scans](#deployed-app-scans)).
 - **Secrets:**
   - Tokens, refresh tokens and client secrets.
   - Environment variable **values**; with `--deep`, only variable names are kept.
@@ -85,19 +85,21 @@ The acme-incidents fixture plants a poison value in every one of those places, a
 
 ## Deployed-app scans
 
-`baip-lens project --cf` applies the project scan above to a deployed app: the same files are opened (and the same ones never are), the same values are kept, and the same ones never are. The difference is where the files come from: they are read live from one running instance of the app over SSH, with the SFTP file channel and read requests only ([data-sources.md §10](data-sources.md#10-deployed-apps-baip-lens-project---cf)).
+`baip-lens project --cf` applies the project scan above to a deployed app, or to every app of a deployed MTA project: the same files are opened (and the same ones never are), the same values are kept, and the same ones never are. The difference is where the files come from: they are read live from one running instance of each app over SSH, with the SFTP file channel and read requests only ([data-sources.md §10](data-sources.md#10-deployed-apps-baip-lens-project---cf) and [§11](data-sources.md#11-deployed-mta-projects-project---cf-picker)).
 
 - **Nothing is downloaded to disk.** File contents are held in memory until the parsers have reduced them to names and counts; only the snapshot and the reports are written.
-- **The one-time SSH code** is used once as the password and never printed or stored. Your CF token goes to the CF API and to the UAA authorize endpoint only; `project --cf` does not read Log Cache.
-- **The paths are relative** to the app folder (`/home/vcap/app`), as for a local project; the container path is never written to a report.
-- **The app list** shown in the terminal (app names and why some cannot be read) is not written anywhere.
+- **The one-time SSH code** is used once as the password and never printed or stored; each app of a project gets a new one. Your CF token goes to the CF API and to the UAA authorize endpoint only; `project --cf` does not read Log Cache.
+- **The paths are relative** to the app folder (`/home/vcap/app`), as for a local project; the container path is never written to a report, and no reason of a skipped check names it.
+- **Which app it was.** Per app read, the snapshot keeps the app name and, when the app was deployed as part of an MTA project, the MTA ID, version, module name and namespace (`raw.projects[].deployment`). The reports name the app by its project id: the app name, or an id derived from it when the name has characters an id cannot have.
+- **Labels and annotations.** Of each app in the list, only six keys are read: the labels `mta_id` and `mta_namespace` and the annotations `mta_id`, `mta_version`, `mta_namespace` and `mta_module`. Every other label and annotation is dropped when the list is parsed, and a value is used only when it matches a strict pattern (identifiers, no free text), because anyone who may update an app can write these values. A test plants an e-mail address in another annotation and fails if it reaches the terminal, the snapshot or a report.
+- **The app list** shown in the terminal (app and project names, and why some apps cannot be read) is not written anywhere, with one exception: when you read a project, each of its apps that was not read is recorded as a skipped check, with the app name in its title and a fixed reason (for example that it is stopped), so that the report says what it does not cover. The reason repeats no name and no cf command: the space name and the advice on what to do (`cf start <app>`, `cf allow-space-ssh <space>`) stay in the terminal.
 
 ## Side effects in your landscape
 
 `GET` requests do not change anything. Two kinds of read are audited by Cloud Foundry:
 
 - With `--deep`, reading an app's environment variables creates an `audit.app.environment_variables.show` event for that app.
-- `project --cf` opens an SSH session to the app you pick, which Cloud Foundry records as `audit.app.ssh-authorized` (a refused login as `audit.app.ssh-unauthorized`, which BAIP Lens avoids by checking your role first).
+- `project --cf` opens an SSH session to the app you pick, or one session to each readable app of the project you pick, one after the other. Cloud Foundry records each as `audit.app.ssh-authorized` (a refused login as `audit.app.ssh-unauthorized`, which BAIP Lens avoids by checking your role first, and by stopping a project run when the first login is refused instead of trying every app).
 
 Tell your security team before you run `--deep` or `project --cf` scans.
 

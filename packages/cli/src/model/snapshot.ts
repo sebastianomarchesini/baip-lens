@@ -118,11 +118,11 @@ export const RuleMetaSchema = z.object({
 export type RuleMeta = z.infer<typeof RuleMetaSchema>;
 
 export const ScopeSchema = z.object({
-  /** Absent for a project scan. */
+  /** Absent for a scan of a local project folder; set when deployed apps were read (`project --cf`). */
   apiEndpoint: z.url().optional(),
   orgs: list(z.string(), LIMITS.orgs),
   spaces: list(z.string(), LIMITS.spaces).optional(),
-  /** Ids of the local projects scanned with `baip-lens project`. */
+  /** Ids of the projects scanned with `baip-lens project`: one local folder, or one per deployed app read. */
   projects: list(z.string(), LIMITS.projects).optional(),
 });
 

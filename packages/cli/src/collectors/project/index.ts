@@ -5,6 +5,7 @@ import {
   type CdsSource,
   type CdsView,
   PROJECT_ID_PATTERN,
+  type RawDeployment,
   type RawProject,
   RawProjectSchema,
   type RawUnreadable,
@@ -53,9 +54,11 @@ export interface CollectTreeOptions {
   excludeDirs?: string[];
   /**
    * The project id to use instead of the mta ID, package name or folder name,
-   * when it is a valid id (for a deployed app: the app name the user picked).
+   * when it is a valid id (for a deployed app: the id derived from its name).
    */
   id?: string;
+  /** For a deployed app: the app and its MTA identity, recorded with the project. */
+  deployment?: RawDeployment;
 }
 
 export const DEFAULT_PROJECT_ID = 'project';
@@ -418,6 +421,7 @@ export async function collectProjectTree(
       options.id !== undefined && PROJECT_ID_PATTERN.test(options.id)
         ? options.id
         : projectId(tree.rootName, collection),
+    ...(options.deployment === undefined ? {} : { deployment: options.deployment }),
     sourcesRead: sources.map((s) => s.source),
     files: files.slice(0, MAX_FILES_LISTED),
     filesTruncated: collection.truncated || files.length > MAX_FILES_LISTED,

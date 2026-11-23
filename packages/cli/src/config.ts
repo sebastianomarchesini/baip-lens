@@ -1,6 +1,7 @@
 import { z } from 'zod';
 import { toApiEndpoint } from './guided/regions.js';
 import { ConfigError } from './http/errors.js';
+import { MTA_NAME_PATTERN, MTA_NAMESPACE_PATTERN } from './model/raw.js';
 import { SEVERITIES, type Severity } from './model/severity.js';
 import { type ReportFormat, parseFormats } from './reporters/index.js';
 
@@ -88,7 +89,15 @@ export const ReportConfigSchema = CommonSchema.extend({
 });
 export type ReportConfig = z.infer<typeof ReportConfigSchema>;
 
-const CF_ONLY_FLAGS = ['app', 'api', 'org', 'space'] as const;
+/** The options that only mean something with --cf, each with the flag as the user types it. */
+const CF_ONLY_FLAGS = [
+  ['app', '--app'],
+  ['mta', '--mta'],
+  ['mtaNamespace', '--mta-namespace'],
+  ['api', '--api'],
+  ['org', '--org'],
+  ['space', '--space'],
+] as const;
 
 export const ProjectConfigSchema = CommonSchema.extend({
   /** A local project folder. */
@@ -96,6 +105,20 @@ export const ProjectConfigSchema = CommonSchema.extend({
   /** Read a deployed app instead (`--cf`). */
   cf: z.boolean().default(false),
   app: z.string().trim().min(1, '--app needs an app name').optional(),
+  /** Read every app of this deployed project (MTA); only a value an MTA id can have is accepted. */
+  mta: z
+    .string()
+    .trim()
+    .regex(MTA_NAME_PATTERN, '--mta needs a project id (letters, digits, ".", "_" and "-")')
+    .optional(),
+  /** Which deployment of the project; the empty string is the one without a namespace. */
+  mtaNamespace: z
+    .string()
+    .refine((value) => value === '' || MTA_NAMESPACE_PATTERN.test(value), {
+      error:
+        '--mta-namespace needs a namespace (at most 36 letters, digits, ".", "_" and "-"), or "" for the deployment without one',
+    })
+    .optional(),
   api: ApiUrlSchema.optional(),
   org: z.string().trim().min(1, '--org needs an org name').optional(),
   space: z.string().trim().min(1, '--space needs a space name').optional(),
@@ -114,11 +137,20 @@ export const ProjectConfigSchema = CommonSchema.extend({
     });
   }
   if (!value.cf) {
-    for (const flag of CF_ONLY_FLAGS) {
-      if (value[flag] !== undefined) {
-        ctx.addIssue({ code: 'custom', message: `--${flag} works only together with --cf` });
+    for (const [key, flag] of CF_ONLY_FLAGS) {
+      if (value[key] !== undefined) {
+        ctx.addIssue({ code: 'custom', message: `${flag} works only together with --cf` });
       }
     }
+  }
+  if (value.app !== undefined && value.mta !== undefined) {
+    ctx.addIssue({
+      code: 'custom',
+      message: 'Use either --app (one app) or --mta (every app of a project), not both.',
+    });
+  }
+  if (value.mtaNamespace !== undefined && value.mta === undefined) {
+    ctx.addIssue({ code: 'custom', message: '--mta-namespace works only together with --mta' });
   }
 });
 export type ProjectConfig = z.infer<typeof ProjectConfigSchema>;

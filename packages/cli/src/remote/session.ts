@@ -118,5 +118,9 @@ export const connectSsh: SshConnect = async (target) => {
       },
     };
     client.connect(config);
+    // Without its native add-on ssh2 writes a packet in pieces (length, payload, tag). With Nagle's
+    // algorithm a later piece waits for the acknowledgement of the first, which the other side
+    // delays: about 40 ms lost per SFTP request (measured, docs/data-sources.md §10.2).
+    client.setNoDelay(true);
   });
 };
