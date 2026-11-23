@@ -88,7 +88,14 @@ export const ReportConfigSchema = CommonSchema.extend({
 });
 export type ReportConfig = z.infer<typeof ReportConfigSchema>;
 
-const CF_ONLY_FLAGS = ['app', 'api', 'org', 'space'] as const;
+const CF_ONLY_FLAGS = ['app', 'api', 'org', 'space', 'enableSsh'] as const;
+const FLAG_NAMES: Record<(typeof CF_ONLY_FLAGS)[number], string> = {
+  app: '--app',
+  api: '--api',
+  org: '--org',
+  space: '--space',
+  enableSsh: '--enable-ssh',
+};
 
 export const ProjectConfigSchema = CommonSchema.extend({
   /** A local project folder. */
@@ -99,6 +106,8 @@ export const ProjectConfigSchema = CommonSchema.extend({
   api: ApiUrlSchema.optional(),
   org: z.string().trim().min(1, '--org needs an org name').optional(),
   space: z.string().trim().min(1, '--space needs a space name').optional(),
+  /** `--enable-ssh`: turn SSH on for the app with the cf CLI (rolling restart), off again after. */
+  enableSsh: z.boolean().optional(),
   quiet: z.boolean(),
 }).superRefine((value, ctx) => {
   if (value.cf && value.path !== undefined) {
@@ -116,7 +125,10 @@ export const ProjectConfigSchema = CommonSchema.extend({
   if (!value.cf) {
     for (const flag of CF_ONLY_FLAGS) {
       if (value[flag] !== undefined) {
-        ctx.addIssue({ code: 'custom', message: `--${flag} works only together with --cf` });
+        ctx.addIssue({
+          code: 'custom',
+          message: `${FLAG_NAMES[flag]} works only together with --cf`,
+        });
       }
     }
   }

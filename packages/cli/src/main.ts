@@ -23,6 +23,7 @@ import { meetsThreshold } from './model/severity.js';
 import type { ReportData, Snapshot } from './model/snapshot.js';
 import { scanProject } from './project.js';
 import type { SshConnect } from './remote/session.js';
+import { type RunCf, cfRunner } from './remote/cfCli.js';
 import { scanApp } from './remote/scanApp.js';
 import { writeReports } from './reporters/index.js';
 import { toReportData } from './reporters/reportData.js';
@@ -46,6 +47,8 @@ export interface CliIo {
   fetch?: FetchLike;
   /** Injected in tests: no SSH connection to a real app. */
   sshConnect?: SshConnect;
+  /** Injected in tests: the cf CLI is never run. */
+  runCf?: RunCf;
   /** Injected in tests. */
   now?: () => Date;
 }
@@ -123,17 +126,12 @@ async function runScan(config: ScanConfig, io: CliIo): Promise<number> {
   return exitCodeFor(data, config.failOn);
 }
 
-/** The picker for `project --cf`: scripted in tests, the terminal when a person is there. */
-function appPrompter(io: CliIo): Prompter | undefined {
+/** The picker and questions of `project --cf`: scripted in tests, the terminal when a person is there. */
+function appPrompter(io: CliIo, onInterrupt: () => void): Prompter | undefined {
   if (io.prompter) return io.prompter;
   if (!isInteractive(io)) return undefined;
-  return new TerminalPrompter(process.stdin, process.stdout, {
-    // Ctrl+C while connecting or reading: stop now; nothing has been written yet.
-    onInterrupt: () => {
-      io.stdout('\nCancelled.\n');
-      process.exit(130);
-    },
-  });
+  // Ctrl+C while connecting or reading: stop now; nothing has been written yet.
+  return new TerminalPrompter(process.stdin, process.stdout, { onInterrupt });
 }
 
 /** `project --cf`: one deployed app, picked from the cf target space or named with --app. */
@@ -142,21 +140,34 @@ async function scanDeployedApp(
   io: CliIo,
   log: (message: string) => void,
 ): Promise<Snapshot> {
-  const prompter = config.app === undefined ? appPrompter(io) : undefined;
+  // Set once SSH was turned on for the scan, so that Ctrl+C turns it off again before leaving.
+  let restore: (() => Promise<void>) | undefined;
+  const interrupt = (): void => {
+    io.stdout('\nCancelled.\n');
+    void (restore?.() ?? Promise.resolve()).finally(() => process.exit(130));
+  };
+  const prompter = appPrompter(io, interrupt);
+  // Without a terminal prompter (scripts), readline does not catch Ctrl+C: catch it here.
+  const onSigint = prompter === undefined && io.prompter === undefined ? interrupt : undefined;
+  if (onSigint) process.once('SIGINT', onSigint);
   try {
     return await scanApp({
       apiUrl: config.api,
       org: config.org,
       space: config.space,
       app: config.app,
+      enableSsh: config.enableSsh,
       env: io.env,
       prompter,
       fetch: io.fetch,
       sshConnect: io.sshConnect,
+      runCf: io.runCf ?? cfRunner({ env: io.env, output: (text) => log(text.replace(/\n$/, '')) }),
+      onRestore: (fn) => (restore = fn),
       now: io.now,
       log,
     });
   } finally {
+    if (onSigint) process.off('SIGINT', onSigint);
     prompter?.close();
   }
 }
@@ -285,6 +296,10 @@ function buildProgram(io: CliIo, setExit: (code: number) => void): Command {
       false,
     )
     .option('--app <name>', 'with --cf: the app to read, without asking')
+    .option(
+      '--enable-ssh',
+      'with --cf: if SSH is off for the app, turn it on with your cf CLI (rolling restart) and off again after the scan, without asking',
+    )
     .option('--api <url>', 'with --cf: CF API endpoint or region (default: the cf CLI target)')
     .option('--org <name>', 'with --cf: org (default: the cf CLI target)')
     .option('--space <name>', 'with --cf: space (default: the cf CLI target)')

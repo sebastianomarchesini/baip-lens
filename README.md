@@ -59,7 +59,9 @@ cf login --sso                                     # once; target the org and sp
 npx baip-lens project --cf                         # lists the apps there, you pick one
 ```
 
-The same project rules, run on what is actually deployed: BAIP Lens reads the app's files live from a running instance over the platform's SSH proxy (the SFTP file channel only, read requests only), nothing is downloaded or changed, and only the reports are written. It needs the **Space Developer** role in the space and SSH turned on for the app; the command says so before it starts, checks your role first, and shows the `cf` command to run for an app it cannot read. Cloud Foundry records the session as an `audit.app.ssh-authorized` event. A deployed CAP service usually ships its compiled model instead of the `.cds` sources, so the CDS-model rules find less there than with `--path` (see [docs/data-sources.md §10](docs/data-sources.md#10-deployed-apps-baip-lens-project---cf)). In scripts, name the app with `--app <name>`.
+The same project rules, run on what is actually deployed: BAIP Lens reads the app's files live from a running instance over the platform's SSH proxy (the SFTP file channel only, read requests only), nothing is downloaded, and only the reports are written. Cloud Foundry records the session as an `audit.app.ssh-authorized` event.
+
+It needs the **Space Developer** role and SSH on for the app. When SSH is off for the app, BAIP Lens offers to turn it on for you: after a yes it runs, with your cf CLI, `cf enable-ssh <app>`, `cf restart <app> --strategy rolling` (new instances start before the old ones stop) and, once the scan is over, `cf disable-ssh <app>`, so the app ends as it was. This is the only time BAIP Lens changes anything; in scripts, `--enable-ssh` gives the same consent. When the role is missing it says so, and if you are a Space or Org Manager it offers to run `cf set-space-role` for you; otherwise it prints the command for a manager. A deployed CAP service usually ships its compiled model instead of the `.cds` sources, so the CDS-model rules find less there than with `--path` (see [docs/data-sources.md §10](docs/data-sources.md#10-deployed-apps-baip-lens-project---cf)). In scripts, name the app with `--app <name>`.
 
 To run the latest development version from source (Node.js 22.12 or later):
 
@@ -92,7 +94,7 @@ baip-lens scan   --api <cf api url> --org <name> [--space <name>] [--deep]
                 [--no-traffic-check] [--min-traffic-window 12] [--traffic-pages 5]
                 [--previous <snapshot.json>] [--quiet]
 baip-lens project --path <dir> [--out ./reports] [--format html,json,csv,sarif] [--fail-on <severity>] [--quiet]
-baip-lens project --cf [--app <name>] [--api <url>] [--org <name>] [--space <name>]
+baip-lens project --cf [--app <name>] [--enable-ssh] [--api <url>] [--org <name>] [--space <name>]
                 [--out ./reports] [--format html,json,csv,sarif] [--fail-on <severity>] [--quiet]
 baip-lens report --from <snapshot.json> [--format html,json,csv,sarif] [--out ./reports] [--fail-on <severity>]
 baip-lens version
@@ -101,7 +103,7 @@ baip-lens version
 - With no arguments on a terminal, guided mode starts; in a script it prints usage and exits 2.
 - `--api` takes the API endpoint or just the region: `--api eu10` is `https://api.cf.eu10.hana.ondemand.com`. `baip-lens regions` lists the regions.
 - `project` scans a local CAP or MTA project folder for the thirteen configuration and model rules in [docs/rules.md](docs/rules.md#project-rules) (mocked authentication in production, unrestricted services, missing audit logging, open approuter routes, seed data with card numbers, and more), each tagged with its OWASP Top 10 (2025) category. It reads files only: no login, no network, no child process, and it never opens `.env`, `.cdsrc-private.json`, `default-env.json`, keys or `*.mtaext` files.
-- `project --cf` runs the same rules on a deployed app instead of a folder: it takes the API, login, org and space from the cf CLI (`--api`, `--org` and `--space` override them), lists the apps of the space, and reads the one you pick (or name with `--app`) over SSH with read-only SFTP. It needs Space Developer and SSH enabled for the app, and records an audit event in Cloud Foundry.
+- `project --cf` runs the same rules on a deployed app instead of a folder: it takes the API, login, org and space from the cf CLI (`--api`, `--org` and `--space` override them), lists the apps of the space, and reads the one you pick (or name with `--app`) over SSH with read-only SFTP. It needs Space Developer and records an audit event in Cloud Foundry. For an app with SSH off it asks before turning SSH on with your cf CLI (a rolling restart) and turns it off again after the scan; `--enable-ssh` answers yes in scripts.
 - Guided mode signs in the way `cf login --sso` does (one-time code from your company login) or with username and password, keeps the session in memory only, and writes to `./baip-lens-reports/<date-time>/`.
 - `scan` and `project` write one snapshot (`snapshot-<time>.json`) and the requested reports.
 - `report --from` re-runs every rule on a snapshot **offline**, for example after you upgrade BAIP Lens.
@@ -128,7 +130,7 @@ The Cloud Foundry list endpoints answer with what your user may see rather than 
 
 ## Privacy
 
-- **Read-only:** the HTTP client refuses any method other than `GET` to the CF API and its log cache. The only `POST` request goes to the OAuth token endpoint.
+- **Read-only:** the HTTP client refuses any method other than `GET` to the CF API and its log cache. The only `POST` request goes to the OAuth token endpoint. The one exception is `project --cf`, and only after you say yes (or pass `--enable-ssh`): your own cf CLI turns SSH on for the app you picked, restarts it (rolling) and turns SSH off again after the scan.
 - **No data leaves your machine:** a Cloud Foundry scan talks to your CF API, its login server (UAA) and its log cache, and to nothing else. The log cache address comes from your CF API, and `--no-traffic-check` leaves it out. The egress allow-list also names `api.osv.dev`, `endoflife.date`, `ui5.sap.com` and `registry.npmjs.org` for the version and vulnerability rules of the next releases; none of them is contacted yet. There is no telemetry.
 - **No personal data:** user names, emails and IDs are never written. Audit-event actors are dropped when the events are read.
 - **No secrets:** tokens, environment variable values and service credentials are never printed or stored. Credentials in buildpack URLs are stripped, everything printed to the terminal passes through a redaction filter, and the endpoints that return credentials (`/v3/apps/:guid/env`, binding `details`) are refused by the allow-list even for `GET`.

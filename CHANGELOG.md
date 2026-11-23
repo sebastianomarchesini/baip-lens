@@ -18,6 +18,7 @@
 
 ### Changed
 
+- **`project --cf` can turn SSH on for you.** An app with SSH off for the app can now be picked: after a yes (or `--enable-ssh` in a script) BAIP Lens runs, with your cf CLI, `cf enable-ssh <app>` and `cf restart <app> --strategy rolling`, reads the app, and then runs `cf disable-ssh <app>`, also when the scan fails or is interrupted. It refuses when the cf CLI targets another org or space. Without Space Developer, a Space or Org Manager is offered `cf set-space-role` for themselves; anyone else gets the command for a manager. The Space Developer note is shown only when the role is missing. The app list groups the apps that cannot be read by reason, and an only readable app is picked without asking. The cf commands are limited to these four shapes (`remote/cfCli.ts`); the HTTP client stays GET-only ([docs/permissions.md](docs/permissions.md#baip-lens-project---cf)).
 - The project collector reads through a `ProjectTree` interface (`collectors/project/tree.ts`); a local folder (`localTree.ts`) keeps exactly the previous behaviour, and the deployed app (`remote/sftpTree.ts`) is the second implementation.
 - The CLI depends on `ssh2` (MIT) for `project --cf` only; it is loaded on demand, so every other command runs without it. Its install script tries to build an optional native crypto add-on and falls back to pure JavaScript; CI keeps installing with `--ignore-scripts`, and the tests pass that way.
 - The egress allow-list gains `GET /oauth/authorize` on UAA and the `links.app_ssh` endpoint, both added to the policy by `project --cf` only.

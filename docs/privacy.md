@@ -4,7 +4,7 @@ BAIP Lens runs on your machine and writes files to your disk. This page lists wh
 
 ## Principles
 
-1. **Read-only.** The HTTP client allows only `GET` to the CF API. This is enforced per host by the egress allow-list in `packages/cli/src/net/allowlist.ts`, and unit tests prove it. A project scan of a folder (`baip-lens project --path`) only reads files and makes no request at all; a project scan of a deployed app (`--cf`) sends only SFTP read requests over its SSH session.
+1. **Read-only.** The HTTP client allows only `GET` to the CF API. This is enforced per host by the egress allow-list in `packages/cli/src/net/allowlist.ts`, and unit tests prove it. A project scan of a folder (`baip-lens project --path`) only reads files and makes no request at all; a project scan of a deployed app (`--cf`) sends only SFTP read requests over its SSH session. With your consent, `--cf` may also run your own cf CLI to turn SSH on for the app and off again, or to give you Space Developer; the cf command it shows you then contains your user name, in the terminal only.
 2. **No data leaves the machine.** The allow-list is the only way out, and redirects are never followed. There is no telemetry.
 3. **No personal data** in any output.
 4. **No secret values** in any output.
