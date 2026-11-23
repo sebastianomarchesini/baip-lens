@@ -131,11 +131,12 @@ describe('report UI', () => {
     embed(projectSample);
     renderAt('#/findings');
     expect(await screen.findByText('srv/services.cds:4')).toBeInTheDocument();
-    expect(screen.getAllByRole('article')).toHaveLength(17);
+    expect(screen.getAllByRole('article')).toHaveLength(18);
     const locations = [...document.querySelectorAll('code.finding-location')].map(
       (el) => el.textContent,
     );
-    // Panels follow the rule order; the line is left out when the rule does not know it.
+    // Panels follow the rule order; the line is left out when the rule does not know it,
+    // and the finding about packages that were not checked has no location at all.
     expect(locations).toEqual([
       'package.json',
       'package.json',
@@ -175,7 +176,7 @@ describe('report UI', () => {
     expect(
       await screen.findByText(/Showing findings for project acme-incidents\./),
     ).toBeInTheDocument();
-    expect(screen.getAllByRole('article')).toHaveLength(17);
+    expect(screen.getAllByRole('article')).toHaveLength(18);
   });
 
   it('lists projects without app-only columns or grouping', async () => {

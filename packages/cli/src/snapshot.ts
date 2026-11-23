@@ -30,7 +30,7 @@ export const MAX_SNAPSHOT_DEPTH = 64;
  * second and 400 MB.
  */
 export const MAX_SNAPSHOT_ITEMS = 4 * 1024 * 1024;
-/** Keys of one object: a snapshot's objects hold 17 at most, and a huge object costs far more per key. */
+/** Keys of one object: a snapshot's objects hold 19 at most (a project record), and a huge object costs far more per key. */
 export const MAX_SNAPSHOT_MEMBERS = 1_000;
 const CHUNK_BYTES = 1024 * 1024;
 

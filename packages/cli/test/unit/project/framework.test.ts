@@ -1,4 +1,5 @@
 import { describe, expect, it } from 'vitest';
+import { DEPENDENCY_ANALYZERS } from '../../../src/analyzers/dependencies/index.js';
 import { ANALYZERS, analyze, compareFindings, reanalyze } from '../../../src/analyzers/index.js';
 import { noRecentDeploy } from '../../../src/analyzers/noRecentDeploy.js';
 import { PROJECT_ANALYZERS } from '../../../src/analyzers/project/index.js';
@@ -12,6 +13,8 @@ import {
   type Snapshot,
 } from '../../../src/model/snapshot.js';
 import {
+  DEPENDENCIES_COLLECTOR,
+  DEPENDENCIES_COLLECTOR_SKIPPED,
   NOW,
   PROJECT_COLLECTOR,
   PROJECT_COLLECTOR_SKIPPED,
@@ -120,11 +123,49 @@ describe('analyze: which rules run', () => {
     expect(result.apps.map((a) => a.guid)).toEqual(['project:acme']);
   });
 
-  it('lists the CF rules before the project rules', () => {
+  it('lists the CF rules before the project rules, and the dependency rules last', () => {
     expect(ANALYZERS.map((a) => a.rule.id)).toEqual([
       'APP_NO_RECENT_DEPLOY',
       'APP_IDLE',
       ...PROJECT_ANALYZERS.map((a) => a.rule.id),
+      ...DEPENDENCY_ANALYZERS.map((a) => a.rule.id),
+    ]);
+  });
+
+  it('runs the dependency rules only for a scan that read lockfiles', () => {
+    // A snapshot written before lockfiles were read has no `collect.dependencies`.
+    const before = analyze(rawData(rawProject()), NOW, [PROJECT_COLLECTOR]);
+    expect(before.ruleChecks.some((c) => c.id.startsWith('rule.DEP_'))).toBe(false);
+
+    const ran = analyze(rawData(rawProject()), NOW, [PROJECT_COLLECTOR, DEPENDENCIES_COLLECTOR]);
+    expect(ran.ruleChecks).toHaveLength(PROJECT_ANALYZERS.length + DEPENDENCY_ANALYZERS.length);
+    expect(ran.ruleChecks.slice(PROJECT_ANALYZERS.length).map((c) => [c.id, c.status])).toEqual([
+      ['rule.DEP_LOCKFILE_MISSING', 'ran'],
+      ['rule.DEP_NOT_CHECKED', 'ran'],
+    ]);
+
+    const skipped = analyze(rawData(rawProject()), NOW, [
+      PROJECT_COLLECTOR_SKIPPED,
+      DEPENDENCIES_COLLECTOR_SKIPPED,
+    ]);
+    expect(skipped.findings).toEqual([]);
+    expect(
+      skipped.ruleChecks
+        .filter((c) => c.id.startsWith('rule.DEP_'))
+        .map((c) => [c.id, c.status, c.reasonCode, c.reason]),
+    ).toEqual([
+      [
+        'rule.DEP_LOCKFILE_MISSING',
+        'skipped',
+        'dependency_skipped',
+        'needs collect.dependencies, which did not run',
+      ],
+      [
+        'rule.DEP_NOT_CHECKED',
+        'skipped',
+        'dependency_skipped',
+        'needs collect.dependencies, which did not run',
+      ],
     ]);
   });
 });

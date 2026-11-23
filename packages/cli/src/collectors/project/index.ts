@@ -6,7 +6,9 @@ import {
   type CdsView,
   PROJECT_ID_PATTERN,
   type RawDeployment,
+  type RawLockfile,
   type RawProject,
+  type RawProjectDependencies,
   RawProjectSchema,
   type RawUnreadable,
   type UnreadableKind,
@@ -18,12 +20,34 @@ import {
   effectiveCdsViews,
   exceedsConfigDepth,
 } from './cdsConfig.js';
+import {
+  MAX_LOCKFILE_TOTAL_BYTES,
+  PackageTable,
+  chooseLockfiles,
+  inProjectRoot,
+  npmLockfileKind,
+  packageBudget,
+  sortLockfiles,
+} from './dependencies.js';
 import { type GitignoreLayer, isIgnored, parseGitignore } from './gitignore.js';
 import { scanHtml } from './html.js';
 import { LocalProjectTree } from './localTree.js';
+import {
+  type LockfileSource,
+  type ParsedLockfile,
+  excludeMatcher,
+  lockfileRecord,
+  parseLockfile,
+} from './lockfile.js';
 import { parseMta } from './mta.js';
 import { emptyPackageJson, parsePackageJson } from './packageJson.js';
-import { isPlainObject, parseJson, parseYaml } from './read.js';
+import {
+  MAX_LOCKFILE_BYTES,
+  type ReadResult,
+  isPlainObject,
+  parseJson,
+  parseYaml,
+} from './read.js';
 import { scanSeedCsv } from './seedData.js';
 import type { ProjectTree } from './tree.js';
 import { type FileKind, type WalkedFile, walkTree } from './walk.js';
@@ -39,17 +63,33 @@ import { parseXsSecurity } from './xsSecurity.js';
  * (docs/data-sources.md, "Local project files"). Outside the root only a
  * `.git` entry is looked for (lstat) and the `.gitignore` files between the
  * repository root and the project root are read for their archive decision;
- * nothing about them is stored. A tree that disappears during the walk (a
- * closed connection to a deployed app) rejects with its own error; that is
- * the only error the tree collector lets through.
+ * nothing about them is stored. The npm lockfiles are read last, with limits
+ * of their own on their number, size and bytes; of their packages only those
+ * resolved from the public npm registry are kept by name (`lockfile.ts`). A tree that
+ * disappears during the walk (a closed connection to a deployed app) rejects
+ * with its own error; that is the only error the tree collector lets through.
  */
 
-export interface CollectProjectOptions {
+export interface DependencyOptions {
+  /**
+   * Patterns of package names that are never kept (`--dependency-exclude`):
+   * a package of a lockfile that matches one is counted as excluded and its
+   * name does not enter the result. `*` stands for any run of characters.
+   */
+  dependencyExclude?: string[];
+  /**
+   * The most packages of the lockfiles to keep: what is left of the scan's
+   * budget when several projects share it. Default, and upper limit: 20 000.
+   */
+  maxPackages?: number;
+}
+
+export interface CollectProjectOptions extends DependencyOptions {
   /** Real paths of directories the walk must not enter (e.g. the resolved --out). */
   excludeDirs?: string[];
 }
 
-export interface CollectTreeOptions {
+export interface CollectTreeOptions extends DependencyOptions {
   /** Locations, in the tree's syntax, of directories the walk must not enter. */
   excludeDirs?: string[];
   /**
@@ -155,6 +195,7 @@ function parseKindOf(kind: FileKind): UnreadableKind {
     case 'cdsrc.json':
     case 'xs-security':
     case 'xs-app':
+    case 'lockfile':
       return 'json';
     case 'cdsrc.yaml':
     case 'mta':
@@ -167,6 +208,7 @@ function parseKindOf(kind: FileKind): UnreadableKind {
       return 'html';
     case 'gitignore':
     case 'mtar':
+    case 'foreign-lockfile':
       return 'binary';
   }
 }
@@ -180,8 +222,12 @@ class Collection {
   truncated = false;
   opened = 0;
   bytes = 0;
+  /** Bytes of the lockfiles read; they do not count in `bytes`. */
+  lockfileBytes = 0;
   cdsSources: Partial<Record<CdsSource, unknown>> = {};
   packageJson = emptyPackageJson();
+  /** The dependency names of the root package.json, for the lockfiles; never stored. */
+  directNames: ReadonlySet<string> = new Set();
   mta: RawProject['mta'] = null;
   xsSecurity: RawProject['xsSecurity'] = [];
   xsApps: RawProject['xsApps'] = [];
@@ -212,6 +258,28 @@ class Collection {
     }
     this.bytes += result.bytes;
     return result.text;
+  }
+
+  /**
+   * Reads one lockfile, or returns undefined when it is not opened because
+   * the lockfiles have used up their bytes. A lockfile counts as a file
+   * opened, but the limits of the other files do not apply to it. Its bytes
+   * have a total of their own: two large lockfiles would otherwise use up
+   * what every other file shares. And it is read even after
+   * `MAX_FILES_OPENED` other files: a project with that many files would
+   * otherwise be reported as one without a lockfile. The step has limits of
+   * its own (`MAX_LOCKFILES`, `MAX_LOCKFILE_TOTAL_BYTES`). The caller records
+   * the outcome.
+   */
+  async readLockfile(entry: WalkedFile): Promise<ReadResult | undefined> {
+    const left = MAX_LOCKFILE_TOTAL_BYTES - this.lockfileBytes;
+    if (left <= 0) return undefined;
+    this.opened += 1;
+    const result = await this.tree.read(entry.abs, {
+      maxBytes: Math.min(MAX_LOCKFILE_BYTES, left),
+    });
+    if (result.ok) this.lockfileBytes += result.bytes;
+    return result;
   }
 
   /** Reads and parses one file; a parse failure is recorded under the file's kind. */
@@ -299,6 +367,7 @@ async function collectEntry(entry: WalkedFile, collection: Collection): Promise<
       });
       if (result === null) return;
       collection.packageJson = result.packageJson;
+      collection.directNames = result.directNames;
       if (result.cds !== undefined) collection.cdsSources['package.json'] = result.cds;
       return;
     }
@@ -347,8 +416,86 @@ async function collectEntry(entry: WalkedFile, collection: Collection): Promise<
     }
     case 'gitignore':
     case 'mtar':
+    case 'lockfile':
+    case 'foreign-lockfile':
+      // Not read here: a `.gitignore` is read with the archives, an npm lockfile in a
+      // step of its own after every other file; the other two are never opened.
       return;
   }
+}
+
+/** A lockfile's text reduced to its packages; a parser that throws is a lockfile that cannot be read. */
+function parsedLockfile(
+  text: string,
+  source: LockfileSource,
+  options: { exclude: (name: string) => boolean; maxPackages: number },
+): ParsedLockfile {
+  try {
+    return parseLockfile(text, source, options);
+  } catch {
+    return { lockfile: lockfileRecord(source, 'unreadable'), packages: [] };
+  }
+}
+
+/**
+ * Reads one lockfile into the table and returns its record, or undefined
+ * when it was not opened. It is listed in `files` when it was read and
+ * parsed, else under `unreadable`, like every other file the collector opens.
+ */
+async function collectLockfile(
+  entry: WalkedFile,
+  collection: Collection,
+  table: PackageTable,
+  options: { exclude: (name: string) => boolean; maxPackages: number },
+): Promise<RawLockfile | undefined> {
+  const source: LockfileSource = {
+    file: entry.rel,
+    kind: npmLockfileKind(entry.rel),
+    // Only the root lockfile is described by the root package.json.
+    rootDirectNames: inProjectRoot(entry.rel) ? collection.directNames : null,
+  };
+  const result = await collection.readLockfile(entry);
+  if (result === undefined) return undefined;
+  if (!result.ok) {
+    const tooLarge = result.reason === 'too-large';
+    collection.markUnreadable(entry.rel, result.reason === 'unreadable' ? 'json' : result.reason);
+    return lockfileRecord(source, tooLarge ? 'too-large' : 'unreadable');
+  }
+  const { lockfile, packages } = parsedLockfile(result.text, source, options);
+  if (lockfile.status === 'unreadable' || lockfile.status === 'too-large') {
+    collection.markUnreadable(entry.rel, lockfile.status === 'too-large' ? 'too-large' : 'json');
+    return lockfile;
+  }
+  collection.files.push(entry.rel);
+  if (lockfile.status !== 'read' || !table.add(entry.rel, packages)) {
+    return lockfileRecord(source, 'too-many-packages', lockfile.lockfileVersion);
+  }
+  return lockfile;
+}
+
+/**
+ * The lockfile step: the npm lockfiles the walk listed, one per directory,
+ * read after every other file, and the lockfiles of other package managers,
+ * which are only listed. A lockfile that is not opened (beyond the limit on
+ * lockfiles, or on their bytes) is counted, so that it cannot go unnoticed.
+ */
+async function collectDependencies(
+  walked: readonly WalkedFile[],
+  collection: Collection,
+  options: DependencyOptions,
+): Promise<RawProjectDependencies> {
+  const choice = chooseLockfiles(walked);
+  const maxPackages = packageBudget(options.maxPackages);
+  const table = new PackageTable(maxPackages);
+  const parseOptions = { exclude: excludeMatcher(options.dependencyExclude ?? []), maxPackages };
+  const lockfiles = [...choice.foreign];
+  let lockfilesNotRead = choice.notRead;
+  for (const entry of choice.toRead) {
+    const lockfile = await collectLockfile(entry, collection, table, parseOptions);
+    if (lockfile === undefined) lockfilesNotRead += 1;
+    else lockfiles.push(lockfile);
+  }
+  return { lockfiles: sortLockfiles(lockfiles), lockfilesNotRead, packages: table.list() };
 }
 
 async function realPaths(dirs: string[]): Promise<string[]> {
@@ -370,7 +517,12 @@ export async function collectProject(
 ): Promise<RawProject> {
   const root = await resolveProjectRoot(path);
   const excludeDirs = await realPaths(options.excludeDirs ?? []);
-  return collectProjectTree(new LocalProjectTree(root), { excludeDirs });
+  const { dependencyExclude, maxPackages } = options;
+  return collectProjectTree(new LocalProjectTree(root), {
+    excludeDirs,
+    dependencyExclude,
+    maxPackages,
+  });
 }
 
 /** Collects a project from any tree: a local folder or a deployed app's container. */
@@ -410,6 +562,9 @@ export async function collectProjectTree(
     });
   }
 
+  // Last, so that the root package.json is parsed and no other file waits for a large lockfile.
+  const dependencies = await collectDependencies(walk.files, collection, options);
+
   const sources: CdsSourceValue[] = (['.cdsrc.yaml', '.cdsrc.json', 'package.json'] as const)
     .filter((source) => collection.cdsSources[source] !== undefined)
     .map((source) => ({ source, value: collection.cdsSources[source] }));
@@ -438,6 +593,7 @@ export async function collectProjectTree(
     seedData: collection.seedData.slice(0, LIST_CAPS.seedData),
     archives: collection.archives,
     html: collection.html.slice(0, LIST_CAPS.html),
+    dependencies,
   };
   const parsed = RawProjectSchema.safeParse(project);
   // A fixed sentence: a zod issue could name a value from the project.

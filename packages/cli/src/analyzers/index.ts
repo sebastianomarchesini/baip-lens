@@ -9,6 +9,7 @@ import {
   type Snapshot,
   type SnapshotOptions,
 } from '../model/snapshot.js';
+import { DEPENDENCY_ANALYZERS } from './dependencies/index.js';
 import { idleApps } from './idleApps.js';
 import { noRecentDeploy } from './noRecentDeploy.js';
 import { PROJECT_ANALYZERS } from './project/index.js';
@@ -21,8 +22,13 @@ import {
   ruleCheck,
 } from './types.js';
 
-/** Every rule, in report order: Cloud Foundry rules first, then project rules. */
-export const ANALYZERS: readonly Analyzer[] = [noRecentDeploy, idleApps, ...PROJECT_ANALYZERS];
+/** Every rule, in report order: Cloud Foundry rules first, then project rules, then dependency rules. */
+export const ANALYZERS: readonly Analyzer[] = [
+  noRecentDeploy,
+  idleApps,
+  ...PROJECT_ANALYZERS,
+  ...DEPENDENCY_ANALYZERS,
+];
 
 /** Weights used to rank apps by risk (docs/rules.md). */
 export const RISK_WEIGHTS: Record<Severity, number> = {

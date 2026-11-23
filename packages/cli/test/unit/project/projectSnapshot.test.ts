@@ -1,9 +1,16 @@
 import { describe, expect, it } from 'vitest';
+import { DEPENDENCY_ANALYZERS } from '../../../src/analyzers/dependencies/index.js';
 import { PROJECT_ANALYZERS } from '../../../src/analyzers/project/index.js';
 import { COLLECTOR_CHECKS, deployedAppNotRead } from '../../../src/checks.js';
 import { SnapshotSchema } from '../../../src/model/snapshot.js';
 import { type NotRead, type ProjectCollection, projectSnapshot } from '../../../src/project.js';
-import { cdsEffective, rawProject } from '../../support/project.js';
+import {
+  cdsEffective,
+  dependencies,
+  lockedPackage,
+  lockfile,
+  rawProject,
+} from '../../support/project.js';
 
 /*
  * `projectSnapshot` turns what a collection hands over (one project for a
@@ -47,11 +54,18 @@ describe('projectSnapshot with several projects', () => {
 
   it('records the collection as ran, then one skipped check per app not read, then the rules', async () => {
     const snapshot = await snapshotOf(collection);
-    expect(snapshot.checks.slice(0, 3)).toEqual([
+    expect(snapshot.checks.slice(0, 4)).toEqual([
       {
         id: 'collect.project',
         title: COLLECTOR_CHECKS.deployedApp.title,
         roles: ['SpaceDeveloper'],
+        status: 'ran',
+      },
+      // The lockfiles are read with the other files; `snapshotOf` names no check for them.
+      {
+        id: 'collect.dependencies',
+        title: 'npm lockfiles (package-lock.json, npm-shrinkwrap.json)',
+        roles: [],
         status: 'ran',
       },
       {
@@ -71,8 +85,8 @@ describe('projectSnapshot with several projects', () => {
         reason: 'it has no web process',
       },
     ]);
-    const rules = snapshot.checks.slice(3);
-    expect(rules).toHaveLength(PROJECT_ANALYZERS.length);
+    const rules = snapshot.checks.slice(4);
+    expect(rules).toHaveLength(PROJECT_ANALYZERS.length + DEPENDENCY_ANALYZERS.length);
     // A skipped app does not stop the rules on the apps that were read.
     expect(rules.every((check) => check.id.startsWith('rule.') && check.status === 'ran')).toBe(
       true,
@@ -122,6 +136,10 @@ describe('projectSnapshot with several projects', () => {
     await expect(snapshotOf({ projects: [mocked('acme-srv')], notRead: [own] })).rejects.toThrow(
       'two checks of one project scan have the same id',
     );
+    const lockfiles: NotRead = { ...own, check: COLLECTOR_CHECKS.deployedDependencies };
+    await expect(
+      snapshotOf({ projects: [mocked('acme-srv')], notRead: [lockfiles] }),
+    ).rejects.toThrow('two checks of one project scan have the same id');
     const twice = [notRead('acme-db', 'a', 'it is stopped'), notRead('acme-db', 'b', 'stopped')];
     await expect(snapshotOf({ projects: [mocked('acme-srv')], notRead: twice })).rejects.toThrow(
       'two checks of one project scan have the same id',
@@ -140,6 +158,118 @@ describe('projectSnapshot with several projects', () => {
       reasonCode: 'error',
       reason: 'error: boom',
     });
+  });
+});
+
+describe('the lockfile check of a project scan', () => {
+  const one = (): ProjectCollection => ({ projects: [rawProject({ id: 'acme' })], notRead: [] });
+
+  it('is recorded right after collect.project, for a local folder without a CF role', async () => {
+    const snapshot = await projectSnapshot(() => Promise.resolve(one()), {
+      check: COLLECTOR_CHECKS.project,
+      dependenciesCheck: COLLECTOR_CHECKS.dependencies,
+      now: () => NOW,
+    });
+    expect(snapshot.checks.slice(0, 2)).toEqual([
+      { id: 'collect.project', title: COLLECTOR_CHECKS.project.title, roles: [], status: 'ran' },
+      {
+        id: 'collect.dependencies',
+        title: 'npm lockfiles (package-lock.json, npm-shrinkwrap.json)',
+        roles: [],
+        status: 'ran',
+      },
+    ]);
+  });
+
+  it('carries the title and the role of a deployed app when the files were read over SSH', async () => {
+    const snapshot = await projectSnapshot(() => Promise.resolve(one()), {
+      check: COLLECTOR_CHECKS.deployedApp,
+      dependenciesCheck: COLLECTOR_CHECKS.deployedDependencies,
+      apiEndpoint: API,
+      now: () => NOW,
+    });
+    expect(snapshot.checks[1]).toEqual({
+      id: 'collect.dependencies',
+      title:
+        'npm lockfiles of the deployed app (node_modules/.package-lock.json, package-lock.json)',
+      roles: ['SpaceDeveloper'],
+      status: 'ran',
+    });
+    // One id for both, so the dependency rules need not know how the files were read.
+    expect(COLLECTOR_CHECKS.deployedDependencies.id).toBe(COLLECTOR_CHECKS.dependencies.id);
+  });
+
+  it('is skipped with the collection it depends on, and the dependency rules with it', async () => {
+    const log: string[] = [];
+    const snapshot = await projectSnapshot(() => Promise.reject(new Error('boom')), {
+      check: COLLECTOR_CHECKS.project,
+      now: () => NOW,
+      log: (line) => log.push(line),
+    });
+    expect(snapshot.checks[1]).toEqual({
+      id: 'collect.dependencies',
+      title: COLLECTOR_CHECKS.dependencies.title,
+      roles: [],
+      status: 'skipped',
+      reasonCode: 'dependency_skipped',
+      reason: 'needs collect.project, which did not run',
+    });
+    expect(log).toEqual([
+      'skipped collect.project: error: boom',
+      'skipped collect.dependencies: needs collect.project, which did not run',
+    ]);
+    const rules = snapshot.checks.filter((check) => check.id.startsWith('rule.DEP_'));
+    expect(rules.map((check) => [check.id, check.status, check.reason])).toEqual([
+      ['rule.DEP_LOCKFILE_MISSING', 'skipped', 'needs collect.dependencies, which did not run'],
+      ['rule.DEP_NOT_CHECKED', 'skipped', 'needs collect.dependencies, which did not run'],
+    ]);
+    expect(snapshot.findings).toEqual([]);
+  });
+
+  it('logs one line per project that has npm lockfiles: counts, never a name', async () => {
+    const withLockfiles = rawProject({
+      id: 'acme-srv',
+      dependencies: dependencies(
+        [
+          lockfile('package-lock.json', { kept: 2, notKept: { otherRegistry: 3, git: 1 } }),
+          lockfile('app/package-lock.json', { kept: 1, notKept: { link: 2 } }),
+          lockfile('db/package-lock.json', { status: 'unreadable' }),
+          lockfile('yarn.lock', { kind: 'yarn', status: 'unsupported' }),
+        ],
+        {
+          packages: [
+            lockedPackage('baip-fixture-server', '2.4.1'),
+            lockedPackage('baip-fixture-merge', '4.17.20'),
+          ],
+        },
+      ),
+    });
+    const foreignOnly = rawProject({
+      id: 'acme-yarn',
+      dependencies: dependencies(lockfile('yarn.lock', { kind: 'yarn', status: 'unsupported' })),
+    });
+    const notOpened = rawProject({
+      id: 'acme-many',
+      dependencies: dependencies([], { lockfilesNotRead: 2 }),
+    });
+    const before = rawProject({ id: 'acme-old', dependencies: null });
+    const log: string[] = [];
+    await snapshotOf(
+      {
+        projects: [withLockfiles, foreignOnly, notOpened, before, mocked('acme-none')],
+        notRead: [],
+      },
+      log,
+    );
+    expect(log).toEqual([
+      'Read 0 project file(s) in project acme-srv',
+      'Read 2 npm lockfile(s): 2 package(s) from the public npm registry, 6 other package(s) not checked',
+      'Read 0 project file(s) in project acme-yarn',
+      'Read 0 project file(s) in project acme-many',
+      'Read 0 npm lockfile(s): 0 package(s) from the public npm registry, 0 other package(s) not checked',
+      'Read 0 project file(s) in project acme-old',
+      'Read 0 project file(s) in project acme-none',
+    ]);
   });
 });
 

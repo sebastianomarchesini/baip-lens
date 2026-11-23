@@ -10,7 +10,8 @@ import type { ProjectTree } from './tree.js';
  * directories: symlinks, FIFOs, sockets and devices are skipped and never
  * listed. A file is listed only when its name is on the allow-list below;
  * everything else, including the deny-listed names, is invisible to the rest
- * of the collector.
+ * of the collector. `node_modules` is never entered, so the lockfiles listed
+ * are the ones a project commits, at any depth the walk reaches.
  */
 
 export type FileKind =
@@ -24,7 +25,11 @@ export type FileKind =
   | 'cds'
   | 'csv'
   | 'html'
-  | 'mtar';
+  | 'mtar'
+  /** `package-lock.json` or `npm-shrinkwrap.json`, read by the lockfile step. */
+  | 'lockfile'
+  /** `yarn.lock` or `pnpm-lock.yaml` in the root: listed by name, never opened. */
+  | 'foreign-lockfile';
 
 export interface WalkedFile {
   kind: FileKind;
@@ -77,6 +82,8 @@ export function isDenied(name: string): boolean {
     name === '.cdsrc.js' ||
     name === 'default-env.json' ||
     name === 'manifest.json' ||
+    // Can hold registry tokens; the lockfiles are read without it.
+    name === '.npmrc' ||
     name.startsWith('.env') ||
     name.endsWith('.mtaext') ||
     name.endsWith('-key.json') ||
@@ -97,7 +104,9 @@ export function classify(rel: string): FileKind | null {
     if (name === '.cdsrc.json') return 'cdsrc.json';
     if (name === '.cdsrc.yaml') return 'cdsrc.yaml';
     if (name === 'mta.yaml' || name === 'mta.yml') return 'mta';
+    if (name === 'yarn.lock' || name === 'pnpm-lock.yaml') return 'foreign-lockfile';
   }
+  if (name === 'package-lock.json' || name === 'npm-shrinkwrap.json') return 'lockfile';
   if (name === '.gitignore') return 'gitignore';
   if (name === 'xs-security.json') return 'xs-security';
   if (name === 'xs-app.json') return 'xs-app';

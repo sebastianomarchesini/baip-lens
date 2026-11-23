@@ -45,6 +45,9 @@ const RULE_PHRASES: Record<string, (n: number) => string> = {
     `${count(n, 'seed data column')} ${contain(n)} card numbers, IBANs or secrets`,
   UI5_BOOTSTRAP_EXTERNAL: (n) =>
     `${count(n, 'page')} ${load(n)} SAPUI5 from an external CDN without integrity protection`,
+  DEP_LOCKFILE_MISSING: (n) =>
+    `dependencies are declared but no npm lockfile could be read${inProjects(n)}`,
+  DEP_NOT_CHECKED: (n) => `some packages of the npm lockfiles were not checked${inProjects(n)}`,
 };
 
 const run = (n: number) => (n === 1 ? 'runs' : 'run');

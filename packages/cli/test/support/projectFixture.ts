@@ -3,14 +3,18 @@ import { cp, mkdir, mkdtemp, rm, symlink, writeFile } from 'node:fs/promises';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 import { fileURLToPath } from 'node:url';
+import { acmeLockfile, cleanLockfile } from './lockfileFixture.js';
 
 /**
  * The project fixtures (test/fixtures/projects) are copied to a temporary
  * directory before a scan, and the pieces that cannot live in the repository
  * are added there: a deployment archive, a `.git` file, symlinks pointing
- * outside, a FIFO, an oversized file, and the files the repository's
- * .gitignore would drop (`.env`, `*.pem`). Every scan of a fixture, including
- * the golden-file generation, uses the materialized copy.
+ * outside, a FIFO, an oversized file, the files the repository's .gitignore
+ * would drop (`.env`, `*.pem`), and the npm lockfile, which is written here
+ * with invented package names instead of being committed (a committed
+ * lockfile is a manifest to every dependency scanner that reads the
+ * repository). Every scan of a fixture, including the golden-file
+ * generation, uses the materialized copy.
  */
 
 export type FixtureName = 'acme-incidents' | 'clean-cap';
@@ -50,11 +54,15 @@ async function addAcmeExtras(root: string): Promise<void> {
   const big = Buffer.alloc(BIG_FILE_BYTES, 0x20);
   big.write('// POISON_big\n', 0, 'utf8');
   await writeFile(join(root, 'db', 'big.cds'), big);
+  await writeFile(join(root, 'package-lock.json'), acmeLockfile());
+  // Can hold a registry token: never opened, like `.env`.
+  await writeFile(join(root, '.npmrc'), '//registry.npmjs.org/:_authToken=POISON_lock_token\n');
 }
 
 async function addCleanExtras(root: string): Promise<void> {
   await mkdir(join(root, 'mta_archives'), { recursive: true });
   await writeFile(join(root, 'mta_archives', 'clean-cap_1.0.0.mtar'), Buffer.alloc(64, 0x50));
+  await writeFile(join(root, 'package-lock.json'), cleanLockfile());
 }
 
 export async function materializeFixture(name: FixtureName): Promise<MaterializedFixture> {

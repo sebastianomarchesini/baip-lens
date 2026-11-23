@@ -448,6 +448,7 @@ function deploymentOf(app: CfApp): RawDeployment {
 function snapshotOptions(context: ReadContext): ProjectSnapshotOptions {
   return {
     check: COLLECTOR_CHECKS.deployedApp,
+    dependenciesCheck: COLLECTOR_CHECKS.deployedDependencies,
     apiEndpoint: context.session.apiUrl,
     now: context.options.now,
     log: context.log,

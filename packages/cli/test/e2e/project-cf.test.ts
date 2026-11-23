@@ -490,13 +490,21 @@ describe('baip-lens project --cf', () => {
 
     const report = JSON.parse(await readFile(join(r.outDir, 'baip-lens-report.json'), 'utf8')) as {
       scope: { orgs: string[]; projects: string[]; apiEndpoint?: string };
-      checks: { id: string; status: string; roles: string[] }[];
+      checks: { id: string; title: string; status: string; roles: string[] }[];
       findings: { id: string }[];
     };
     expect(report.scope).toEqual({ apiEndpoint: `${API}/`, orgs: [], projects: ['incidents-srv'] });
     expect(report.checks.find((c) => c.id === 'collect.project')).toMatchObject({
       status: 'ran',
       roles: ['SpaceDeveloper'],
+    });
+    // The lockfiles are read in the same session, so their check needs the same role.
+    expect(report.checks.find((c) => c.id === 'collect.dependencies')).toEqual({
+      id: 'collect.dependencies',
+      title:
+        'npm lockfiles of the deployed app (node_modules/.package-lock.json, package-lock.json)',
+      roles: ['SpaceDeveloper'],
+      status: 'ran',
     });
     const ids = report.findings.map((f) => f.id);
     expect(ids).toContain('CAP_MOCKED_AUTH_IN_PROD');

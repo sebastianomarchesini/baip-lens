@@ -27,6 +27,12 @@
       "status": "ran"
     },
     {
+      "id": "collect.dependencies",
+      "title": "npm lockfiles (package-lock.json, npm-shrinkwrap.json)",
+      "roles": [],
+      "status": "ran"
+    },
+    {
       "id": "rule.CAP_MOCKED_AUTH_IN_PROD",
       "title": "Mocked authentication is configured for production",
       "roles": [],
@@ -103,6 +109,18 @@
       "title": "SAPUI5 loaded from an external CDN without integrity protection",
       "roles": [],
       "status": "ran"
+    },
+    {
+      "id": "rule.DEP_LOCKFILE_MISSING",
+      "title": "No npm lockfile could be read for the declared dependencies",
+      "roles": [],
+      "status": "ran"
+    },
+    {
+      "id": "rule.DEP_NOT_CHECKED",
+      "title": "Some packages of the npm lockfiles were not checked",
+      "roles": [],
+      "status": "ran"
     }
   ],
   "raw": {
@@ -134,6 +152,7 @@
           "db/data/acme.incidents-Status.csv",
           "db/schema.cds",
           "mta.yaml",
+          "package-lock.json",
           "package.json",
           "srv/external/ExternalService.cds",
           "srv/services.cds",
@@ -142,7 +161,7 @@
           "xs-security.json"
         ],
         "filesTruncated": false,
-        "filesOpened": 18,
+        "filesOpened": 19,
         "unreadable": [
           {
             "file": "db/big.cds",
@@ -745,7 +764,112 @@
             "versionForm": "evergreen",
             "testPage": false
           }
-        ]
+        ],
+        "dependencies": {
+          "lockfiles": [
+            {
+              "file": "package-lock.json",
+              "kind": "package-lock",
+              "lockfileVersion": 3,
+              "status": "read",
+              "kept": 9,
+              "notKept": {
+                "otherRegistry": 1,
+                "git": 1,
+                "file": 1,
+                "link": 2,
+                "bundled": 1,
+                "unknown": 1,
+                "excluded": 0,
+                "invalid": 1
+              }
+            }
+          ],
+          "lockfilesNotRead": 0,
+          "packages": [
+            {
+              "name": "@baip-fixture/odata",
+              "version": "3.1.0",
+              "direct": true,
+              "scope": "prod",
+              "lockfiles": [
+                "package-lock.json"
+              ]
+            },
+            {
+              "name": "baip-fixture-legacy-http",
+              "version": "1.9.3",
+              "direct": true,
+              "scope": "prod",
+              "lockfiles": [
+                "package-lock.json"
+              ]
+            },
+            {
+              "name": "baip-fixture-merge",
+              "version": "3.10.1",
+              "direct": false,
+              "scope": "prod",
+              "lockfiles": [
+                "package-lock.json"
+              ]
+            },
+            {
+              "name": "baip-fixture-merge",
+              "version": "4.17.20",
+              "direct": false,
+              "scope": "prod",
+              "lockfiles": [
+                "package-lock.json"
+              ]
+            },
+            {
+              "name": "baip-fixture-mkdir",
+              "version": "0.5.1",
+              "direct": false,
+              "scope": "dev",
+              "lockfiles": [
+                "package-lock.json"
+              ]
+            },
+            {
+              "name": "baip-fixture-queue",
+              "version": "5.0.2",
+              "direct": true,
+              "scope": "prod",
+              "lockfiles": [
+                "package-lock.json"
+              ]
+            },
+            {
+              "name": "baip-fixture-server",
+              "version": "2.4.1",
+              "direct": true,
+              "scope": "prod",
+              "lockfiles": [
+                "package-lock.json"
+              ]
+            },
+            {
+              "name": "baip-fixture-test-kit",
+              "version": "7.0.0",
+              "direct": true,
+              "scope": "dev",
+              "lockfiles": [
+                "package-lock.json"
+              ]
+            },
+            {
+              "name": "baip-fixture-watcher",
+              "version": "2.3.3",
+              "direct": true,
+              "scope": "optional",
+              "lockfiles": [
+                "package-lock.json"
+              ]
+            }
+          ]
+        }
       }
     ]
   },
@@ -774,7 +898,7 @@
         "high": 2,
         "medium": 9,
         "low": 4,
-        "info": 0
+        "info": 1
       },
       "highestSeverity": "critical",
       "riskScore": 299
@@ -1308,6 +1432,35 @@
       "location": {
         "file": "xs-security.json"
       }
+    },
+    {
+      "id": "DEP_NOT_CHECKED",
+      "severity": "info",
+      "title": "Some packages of the npm lockfiles were not checked",
+      "app": {
+        "guid": "project:acme-incidents",
+        "name": "acme-incidents",
+        "space": "project",
+        "org": "local"
+      },
+      "evidence": {
+        "subject": "dependencies",
+        "otherRegistry": 1,
+        "git": 1,
+        "file": 1,
+        "link": 2,
+        "bundled": 1,
+        "unknown": 1,
+        "excluded": 0,
+        "invalid": 1,
+        "lockfilesNotRead": 0,
+        "checked": 9
+      },
+      "remediation": "A package is kept by name, and can be looked up for known vulnerabilities and deprecation, only when its lockfile entry was resolved from the public npm registry (`https://registry.npmjs.org`), so that no private package name is taken from a lockfile or sent anywhere. The evidence counts the others by reason, without their names. `otherRegistry`: resolved from a company registry or a mirror; check these with the audit that registry offers. `git`, `file` and `link`: taken from a repository, a local tarball or folder, or a workspace; review them where their source lives. `bundled`: shipped inside another package, and fixed by upgrading that package. `unknown`: the lockfile records no `resolved` address (for example with `omit-lockfile-registry-resolved`); recreate the lockfile with addresses to have these checked. `excluded`: held back on purpose with `--dependency-exclude`. `invalid`: a name or version that is not a plain npm one; look at the lockfile entry itself. `lockfilesNotRead`: lockfiles that were found but not read (more than 50 lockfiles or 64 MiB of them in one project, a lockfile that is not valid or too large, or more packages than one scan keeps); scan their folders on their own with `--path`.",
+      "references": [
+        "https://docs.npmjs.com/cli/v11/configuring-npm/package-lock-json",
+        "https://owasp.org/Top10/2025/A03_2025-Software_Supply_Chain_Failures/"
+      ]
     }
   ]
 }

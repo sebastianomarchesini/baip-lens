@@ -43,3 +43,48 @@ describe('0.1.0 snapshot compatibility', () => {
     expect(data.summary).toMatchObject({ apps: 8, projects: 0, findings: 3 });
   });
 });
+
+/**
+ * A project snapshot written before the npm lockfiles were read (the sample of
+ * 0.3.1, frozen, never regenerated). It has neither `collect.dependencies`
+ * nor `raw.projects[].dependencies`, so reading it again must not make it
+ * look as if its dependencies had been checked.
+ */
+const legacyProject: unknown = JSON.parse(
+  readFileSync(new URL('../fixtures/legacy/project-snapshot-0.3.1.json', import.meta.url), 'utf8'),
+);
+
+describe('0.3.1 project snapshot compatibility', () => {
+  it('still parses, with the dependencies of its project defaulted to "not collected"', () => {
+    const parsed = SnapshotSchema.safeParse(legacyProject);
+    expect(parsed.success).toBe(true);
+    const snapshot = parsed.data as Snapshot;
+    expect(snapshot.schemaVersion).toBe(1);
+    expect(snapshot.tool).toEqual({ name: 'baip-lens', version: '0.3.1' });
+    expect(snapshot.raw.projects).toHaveLength(1);
+    expect(snapshot.raw.projects[0]?.dependencies).toBeNull();
+    expect(snapshot.checks.some((check) => check.id === 'collect.dependencies')).toBe(false);
+  });
+
+  it('re-analyzes to the same findings, and gains no dependency rule', () => {
+    const snapshot = SnapshotSchema.parse(legacyProject);
+    const result = reanalyze(snapshot);
+    expect(result.findings).toHaveLength(17);
+    expect(result.findings).toEqual(snapshot.findings);
+    expect(result.apps).toEqual(snapshot.apps);
+    // The same checks as when it was written: the collector and the thirteen project rules.
+    expect(result.checks).toEqual(snapshot.checks);
+    expect(result.checks).toHaveLength(14);
+    expect(result.checks.some((check) => check.id.startsWith('rule.DEP_'))).toBe(false);
+    expect(result.findings.some((finding) => finding.id.startsWith('DEP_'))).toBe(false);
+  });
+
+  it('produces valid report data that lists the dependency rules without having run them', () => {
+    const data = toReportData(reanalyze(SnapshotSchema.parse(legacyProject)));
+    expect(ReportDataSchema.safeParse(data).success).toBe(true);
+    expect(data.summary).toMatchObject({ apps: 0, projects: 1, findings: 17, checksSkipped: 0 });
+    // Every report names every rule this version knows; whether one ran is in `checks`.
+    expect(data.rules.map((rule) => rule.id)).toContain('DEP_LOCKFILE_MISSING');
+    expect(data.checks.map((check) => check.id)).not.toContain('rule.DEP_LOCKFILE_MISSING');
+  });
+});

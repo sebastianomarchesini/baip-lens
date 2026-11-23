@@ -152,7 +152,10 @@ export type RawHistory = z.infer<typeof RawHistorySchema>;
  * length, every array a maximum size, and enum-shaped values have an
  * `other` bucket, so a hostile project cannot grow or poison a snapshot.
  * A project read from a deployed app also records which app it was
- * (`deployment`): the app name and the identifiers of its MTA.
+ * (`deployment`): the app name and the identifiers of its MTA. Of the npm
+ * lockfiles (`dependencies`) the name and version of a package are kept only
+ * when it was resolved from the public npm registry; every other package is
+ * a count.
  */
 
 /** Project ids: the mta ID, the package name without scope, or the directory name; for a deployed app, derived from the app name. */
@@ -163,6 +166,16 @@ export const IDENTIFIER_PATTERN = /^[A-Za-z_$][\w.$:-]{0,127}$/;
 export const ROLE_PATTERN = /^[A-Za-z0-9_.$:-]{1,64}$/;
 /** npm package names, as `package.json#name` and dependency keys. */
 export const PACKAGE_NAME_PATTERN = /^(@[a-z0-9._-]+\/)?[a-z0-9._-]{1,214}$/i;
+/**
+ * Names of packages read from an npm lockfile. Stricter than
+ * PACKAGE_NAME_PATTERN, because these names go into request URLs: no leading
+ * `.` or `_`, and no segment that could be read as a path. At most 214
+ * characters (docs/data-sources.md §12.1).
+ */
+export const LOCKED_PACKAGE_NAME_PATTERN =
+  /^(?:@[a-z0-9~-][a-z0-9._~-]*\/)?[a-z0-9~-][a-z0-9._~-]*$/i;
+/** An exact version as npm locks it. At most 64 characters. */
+export const PACKAGE_VERSION_PATTERN = /^\d+\.\d+\.\d+(?:[-+][0-9A-Za-z.+-]*)?$/;
 /** A dependency range or engine range; anything else is stored as this placeholder. */
 export const NON_REGISTRY_RANGE = '[non-registry]';
 export const RANGE_PATTERN = /^[\s0-9A-Za-z.*^~<>=|+-]{0,64}$/;
@@ -465,6 +478,98 @@ export const RawHtmlBootstrapSchema = z.object({
 });
 export type RawHtmlBootstrap = z.infer<typeof RawHtmlBootstrapSchema>;
 
+const PackageName = z.string().max(214).regex(LOCKED_PACKAGE_NAME_PATTERN);
+const PackageVersion = z.string().max(64).regex(PACKAGE_VERSION_PATTERN);
+
+/**
+ * Which lockfile it is: `package-lock.json`, `npm-shrinkwrap.json`, the
+ * hidden lockfile npm writes into `node_modules` (deployed apps only), or the
+ * lockfile of another package manager, which is listed and never opened.
+ */
+export const LockfileKindSchema = z.enum(['package-lock', 'shrinkwrap', 'hidden', 'yarn', 'pnpm']);
+export type LockfileKind = z.infer<typeof LockfileKindSchema>;
+
+/**
+ * What became of a lockfile. `unsupported` is a yarn or pnpm lockfile;
+ * `unreadable` one that could not be opened or is not an npm lockfile;
+ * `too-large` one over the size or shape limits; `too-many-packages` one
+ * whose packages did not fit into the package budget of the scan. Only a
+ * lockfile that was `read` has packages in the project's list.
+ */
+export const LockfileStatusSchema = z.enum([
+  'read',
+  'unsupported',
+  'unreadable',
+  'too-large',
+  'too-many-packages',
+]);
+export type LockfileStatus = z.infer<typeof LockfileStatusSchema>;
+
+/**
+ * Why entries of a lockfile are not in the project's package list, as counts:
+ * the name of such a package is never kept (D10). The first six are where the
+ * entry was resolved from; `excluded` matched `--dependency-exclude`;
+ * `invalid` has a name or version that is not a plain npm one.
+ */
+export const RawNotKeptSchema = z.object({
+  /** Resolved from any http(s) host other than `https://registry.npmjs.org`. */
+  otherRegistry: Count,
+  git: Count,
+  /** A local tarball or folder. */
+  file: Count,
+  /** A linked folder or a workspace: `link: true`, or an entry that is not under `node_modules/`. */
+  link: Count,
+  /** Shipped inside another package's tarball (`inBundle`, `bundled`). */
+  bundled: Count,
+  /** No `resolved` at all, so where it came from is not known. */
+  unknown: Count,
+  excluded: Count,
+  invalid: Count,
+});
+export type RawNotKept = z.infer<typeof RawNotKeptSchema>;
+
+/** One lockfile the collector saw (docs/data-sources.md §12.1). */
+export const RawLockfileSchema = z.object({
+  file: RelativePathSchema,
+  kind: LockfileKindSchema,
+  /** null when the file was not read, or names no version this tool knows. */
+  lockfileVersion: z.literal([1, 2, 3]).nullable(),
+  status: LockfileStatusSchema,
+  /** Packages of this lockfile that are in the project's `packages`: resolved from the public npm registry. */
+  kept: Count,
+  notKept: RawNotKeptSchema,
+});
+export type RawLockfile = z.infer<typeof RawLockfileSchema>;
+
+export const PackageScopeSchema = z.enum(['prod', 'dev', 'optional']);
+export type PackageScope = z.infer<typeof PackageScopeSchema>;
+
+/**
+ * A package the lockfiles pin, resolved from the public npm registry: one
+ * entry per name and version per project. Neither the `resolved` URL nor
+ * `integrity` nor any other field of the lockfile entry is kept.
+ */
+export const RawLockedPackageSchema = z.object({
+  name: PackageName,
+  version: PackageVersion,
+  /** Installed at the top level and listed by the root manifest, in any lockfile. */
+  direct: z.boolean(),
+  /** `prod` when any lockfile installs it for production, else `optional`, else `dev`. */
+  scope: PackageScopeSchema,
+  /** The lockfiles that pin it, sorted: the first 20, or fewer of them when their paths are long. */
+  lockfiles: list(RelativePathSchema, 20),
+});
+export type RawLockedPackage = z.infer<typeof RawLockedPackageSchema>;
+
+/** The npm lockfiles of a project and the packages they pin (docs/data-sources.md §12.1). */
+export const RawProjectDependenciesSchema = z.object({
+  lockfiles: list(RawLockfileSchema, 50),
+  /** Lockfiles found and not opened: beyond the 50, or beyond the bytes lockfiles may take. */
+  lockfilesNotRead: Count,
+  packages: list(RawLockedPackageSchema, 20_000),
+});
+export type RawProjectDependencies = z.infer<typeof RawProjectDependenciesSchema>;
+
 const MtaName = z.string().regex(MTA_NAME_PATTERN);
 
 /**
@@ -520,6 +625,8 @@ export const RawProjectSchema = z.object({
   seedData: list(RawSeedDataSchema, 500),
   archives: list(RawArchiveSchema, 200),
   html: list(RawHtmlBootstrapSchema, 200),
+  /** The npm lockfiles and the packages they pin; null in snapshots written before they were read. */
+  dependencies: RawProjectDependenciesSchema.nullable().default(null),
 });
 export type RawProject = z.infer<typeof RawProjectSchema>;
 

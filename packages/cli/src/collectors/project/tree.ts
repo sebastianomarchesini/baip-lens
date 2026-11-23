@@ -1,5 +1,5 @@
 import type { GitignoreLayer } from './gitignore.js';
-import type { ReadResult } from './read.js';
+import type { ReadOptions, ReadResult } from './read.js';
 
 /*
  * Where a project's files come from. The collector walks and reads only
@@ -42,8 +42,12 @@ export interface ProjectTree {
    * (for example a closed connection), never for one unreadable entry.
    */
   list(dir: string, max: number): Promise<TreeEntry[] | null>;
-  /** Reads one file within the read limits (size, binary); a failure is a reason code. */
-  read(location: string): Promise<ReadResult>;
+  /**
+   * Reads one file within the read limits (size, binary); a failure is a
+   * reason code. The size limit is that of an ordinary project file unless
+   * the options name another one (a lockfile).
+   */
+  read(location: string, options?: ReadOptions): Promise<ReadResult>;
   /** Whether a regular file exists at the location (`lstat`, links not followed). */
   isFile(location: string): Promise<boolean>;
   /** The git context of the root; null when it is not inside a repository. */

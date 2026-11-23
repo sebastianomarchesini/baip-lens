@@ -48,6 +48,7 @@ describe('deny-list', () => {
     'requests.http',
     'manifest.json',
     'README.md',
+    '.npmrc',
   ])('never lists %s', (name) => {
     expect(isDenied(name)).toBe(true);
     expect(classify(name)).toBeNull();
@@ -76,8 +77,34 @@ describe('deny-list', () => {
     expect(classify('a.csv')).toBeNull();
     expect(classify('db/a.csv')).toBeNull();
     expect(classify('srv/server.js')).toBeNull();
-    expect(classify('package-lock.json')).toBeNull();
+    expect(classify('package-lock.json')).toBe('lockfile');
     expect(classify('xs-security.yaml')).toBeNull();
+  });
+
+  it('lists npm lockfiles at any depth, and the lockfiles of other package managers in the root only', () => {
+    expect(classify('package-lock.json')).toBe('lockfile');
+    expect(classify('npm-shrinkwrap.json')).toBe('lockfile');
+    expect(classify('app/router/package-lock.json')).toBe('lockfile');
+    expect(classify('srv/npm-shrinkwrap.json')).toBe('lockfile');
+    expect(classify('yarn.lock')).toBe('foreign-lockfile');
+    expect(classify('pnpm-lock.yaml')).toBe('foreign-lockfile');
+    expect(classify('app/yarn.lock')).toBeNull();
+    expect(classify('app/pnpm-lock.yaml')).toBeNull();
+    // Near misses, and the hidden lockfile, which the walk never lists.
+    for (const name of [
+      'package-lock.json.bak',
+      'package-lock.yaml',
+      'my-package-lock.json',
+      'Package-Lock.json',
+      '.package-lock.json',
+      'npm-shrinkwrap.json~',
+      'yarn.lock.orig',
+      'pnpm-lock.yml',
+      'bun.lockb',
+    ]) {
+      expect(classify(name), name).toBeNull();
+      expect(classify(`srv/${name}`), name).toBeNull();
+    }
   });
 });
 
@@ -96,6 +123,23 @@ describe('walk', () => {
     if (fifo) expect(listed).not.toContain('db/pipe.cds');
     const project = await collectProject(root);
     expect(JSON.stringify(project)).not.toMatch(/link|pipe/);
+  });
+
+  it('never lists a lockfile below node_modules or another skipped directory', async () => {
+    const root = await tmp();
+    await file(root, 'package.json', '{}');
+    await file(root, 'package-lock.json', '{}');
+    await file(root, 'app/router/package-lock.json', '{}');
+    await file(root, 'node_modules/.package-lock.json', '{}');
+    await file(root, 'node_modules/x/package-lock.json', '{}');
+    await file(root, 'app/router/node_modules/y/npm-shrinkwrap.json', '{}');
+    await file(root, 'gen/srv/package-lock.json', '{}');
+    await file(root, '.npmrc', '//registry.example.org/:_authToken=POISON');
+    expect(await rels(root)).toEqual([
+      'app/router/package-lock.json',
+      'package-lock.json',
+      'package.json',
+    ]);
   });
 
   it('does not enter skipped, hidden or excluded directories', async () => {

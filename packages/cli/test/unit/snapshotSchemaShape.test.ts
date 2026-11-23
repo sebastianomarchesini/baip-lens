@@ -95,9 +95,12 @@ describe('the snapshot schema', () => {
         'snapshot.raw.routes',
         'snapshot.raw.routes[].appGuids',
         'snapshot.raw.projects[].cdsFiles[].services[].entities[].requires',
+        'snapshot.raw.projects[].dependencies.lockfiles',
+        'snapshot.raw.projects[].dependencies.packages',
+        'snapshot.raw.projects[].dependencies.packages[].lockfiles',
       ]),
     );
-    // Every list of the model: 7 outside the project record, 32 inside it.
-    expect(found.lists.length).toBeGreaterThanOrEqual(39);
+    // Every list of the model: 21 outside the project record, 39 inside it.
+    expect(found.lists.length).toBeGreaterThanOrEqual(60);
   });
 });

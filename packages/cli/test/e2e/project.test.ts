@@ -1,4 +1,4 @@
-import { mkdtemp, readFile, readdir, symlink, writeFile } from 'node:fs/promises';
+import { mkdtemp, readFile, readdir, rm, symlink, writeFile } from 'node:fs/promises';
 import { tmpdir } from 'node:os';
 import { basename, join, resolve, sep } from 'node:path';
 import { afterAll, beforeAll, describe, expect, it, vi } from 'vitest';
@@ -9,6 +9,13 @@ import { isSafeRelativePath } from '../../src/model/paths.js';
 import type { RawProject } from '../../src/model/raw.js';
 import type { Snapshot } from '../../src/model/snapshot.js';
 import { ABSOLUTE_PATH, expectNoLeaks } from '../support/leak.js';
+import {
+  ACME_NOT_KEPT,
+  ACME_PUBLIC_PACKAGES,
+  CLEAN_PUBLIC_PACKAGES,
+  lockfileV3,
+  registryEntry,
+} from '../support/lockfileFixture.js';
 import { POISON } from '../support/project.js';
 import { type MaterializedFixture, materializeFixture } from '../support/projectFixture.js';
 
@@ -160,6 +167,10 @@ describe('baip-lens project on the acme-incidents fixture', () => {
     expect(c.err()).toMatch(
       /^Read \d+ project file\(s\), \d+ unreadable in project acme-incidents\n/,
     );
+    // The lockfile line carries counts only.
+    expect(c.err()).toContain(
+      'Read 1 npm lockfile(s): 9 package(s) from the public npm registry, 8 other package(s) not checked\n',
+    );
   });
 
   it('(1) leaks no poison value, personal data, secret or absolute path into any output', () => {
@@ -181,6 +192,7 @@ describe('baip-lens project on the acme-incidents fixture', () => {
       '.md',
       '.pem',
       '.env',
+      '.npmrc',
       '.mtaext',
       '.cdsrc-private.json',
       'default-env.json',
@@ -206,6 +218,7 @@ describe('baip-lens project on the acme-incidents fixture', () => {
       'db/data/acme.incidents-Status.csv',
       'db/schema.cds',
       'mta.yaml',
+      'package-lock.json',
       'package.json',
       'srv/external/ExternalService.cds',
       'srv/services.cds',
@@ -274,6 +287,9 @@ describe('baip-lens project on the acme-incidents fixture', () => {
     // InternalService, ExternalService, the ui5/MTX/logout routes, $XSAPPNAME.callback
     // and the header-less test/data export stay silent (docs/rules.md). The header-less
     // file whose first row looks like a header fires by column position, never by name.
+    // Of the dependency rules, DEP_NOT_CHECKED counts the packages of the lockfile that
+    // do not come from the public npm registry; the lockfile is there, so
+    // DEP_LOCKFILE_MISSING stays silent.
     expect(snapshot.findings.map((f) => [f.id, f.severity, f.evidence.subject])).toEqual([
       ['CAP_MOCKED_AUTH_IN_PROD', 'critical', 'requires.auth'],
       ['CAP_SERVICE_NO_RESTRICTION', 'critical', 'AdminService'],
@@ -292,6 +308,7 @@ describe('baip-lens project on the acme-incidents fixture', () => {
       ['UI5_BOOTSTRAP_EXTERNAL', 'low', 'app/incidents/webapp/test/flpSandbox.html'],
       ['UI5_BOOTSTRAP_EXTERNAL', 'low', 'app/launchpage.html'],
       ['XSUAA_SCOPE_UNUSED', 'low', '$XSAPPNAME.unused'],
+      ['DEP_NOT_CHECKED', 'info', 'dependencies'],
     ]);
     // The facts a reader checks first: title branch, view and location of the one-per-project rules.
     const byId = new Map(
@@ -327,9 +344,45 @@ describe('baip-lens project on the acme-incidents fixture', () => {
       host: 'cdn.example.com',
       versionForm: 'evergreen',
     });
+    expect(byId.get('DEP_NOT_CHECKED:dependencies')?.evidence).toEqual({
+      subject: 'dependencies',
+      ...ACME_NOT_KEPT,
+      lockfilesNotRead: 0,
+      checked: ACME_PUBLIC_PACKAGES.length,
+    });
+    expect(byId.get('DEP_NOT_CHECKED:dependencies')?.location).toBeUndefined();
     for (const finding of snapshot.findings) {
       expect(typeof finding.evidence.subject, finding.id).toBe('string');
     }
+  });
+
+  it('(9b) keeps the lockfile packages from the public npm registry by name, the others as counts', () => {
+    expect(project.dependencies).toEqual({
+      lockfiles: [
+        {
+          file: 'package-lock.json',
+          kind: 'package-lock',
+          lockfileVersion: 3,
+          status: 'read',
+          kept: ACME_PUBLIC_PACKAGES.length,
+          notKept: ACME_NOT_KEPT,
+        },
+      ],
+      lockfilesNotRead: 0,
+      packages: ACME_PUBLIC_PACKAGES.map((item) => ({ ...item, lockfiles: ['package-lock.json'] })),
+    });
+    // Nothing else of a lockfile entry is kept: no address, hash, licence or message.
+    const kept = JSON.stringify(project.dependencies);
+    for (const never of ['registry.npmjs.org', 'resolved', 'integrity', 'sha512', 'deprecated']) {
+      expect(kept, never).not.toContain(never);
+    }
+    const checks = snapshot.checks.map((check) => [check.id, check.status]);
+    expect(checks.slice(0, 2)).toEqual([
+      ['collect.project', 'ran'],
+      ['collect.dependencies', 'ran'],
+    ]);
+    expect(checks).toContainEqual(['rule.DEP_LOCKFILE_MISSING', 'ran']);
+    expect(checks).toContainEqual(['rule.DEP_NOT_CHECKED', 'ran']);
   });
 
   it('(10) honours --fail-on', async () => {
@@ -446,11 +499,218 @@ describe('baip-lens project on the clean-cap fixture', () => {
       const { code, out, c, snapshot } = await scanFixture(fixture);
       expect(code).toBe(EXIT.ok);
       expect(snapshot.findings).toEqual([]);
+      // Its lockfile holds public packages only, so nothing is left unchecked.
+      expect(snapshot.raw.projects[0]?.dependencies?.packages).toEqual(
+        CLEAN_PUBLIC_PACKAGES.map((item) => ({ ...item, lockfiles: ['package-lock.json'] })),
+      );
       expect(snapshot.raw.projects[0]?.archives).toEqual([
         { file: 'mta_archives/clean-cap_1.0.0.mtar', bytes: 64, ignored: true },
       ]);
       expect(snapshot.raw.projects[0]?.unreadable).toEqual([]);
       expectCleanOutputs(await readOutputs(out), terminalText(c, out), fixture);
+    } finally {
+      await fixture.cleanup();
+    }
+  });
+});
+
+describe('baip-lens project and the npm lockfile of the root', () => {
+  const lockfileFindings = (snapshot: Snapshot) =>
+    snapshot.findings
+      .filter((f) => f.id.startsWith('DEP_'))
+      .map((f) => [f.id, f.severity, f.evidence.subject, f.evidence.cause, f.location?.file]);
+
+  it('(14) reports dependencies without a lockfile, and says so offline too', async () => {
+    const fixture = await materializeFixture('clean-cap');
+    try {
+      await rm(join(fixture.root, 'package-lock.json'));
+      const { code, out, c, snapshot } = await scanFixture(fixture);
+      expect(code).toBe(EXIT.ok);
+      expect(lockfileFindings(snapshot)).toEqual([
+        ['DEP_LOCKFILE_MISSING', 'low', 'package.json', 'none', 'package.json'],
+      ]);
+      expect(snapshot.raw.projects[0]?.dependencies).toEqual({
+        lockfiles: [],
+        lockfilesNotRead: 0,
+        packages: [],
+      });
+      // No lockfile, no line about lockfiles.
+      expect(c.err()).not.toContain('npm lockfile');
+
+      const again = await tmp();
+      const d = capture();
+      const args = [
+        'report',
+        '--from',
+        join(out, SNAPSHOT_FILE),
+        '--out',
+        again,
+        '--format',
+        'json',
+      ];
+      expect(await main(args, d.io)).toBe(EXIT.ok);
+      const offline = JSON.parse(
+        await readFile(join(again, 'baip-lens-report.json'), 'utf8'),
+      ) as Snapshot;
+      expect(offline.findings).toEqual(snapshot.findings);
+      expectCleanOutputs(await readOutputs(out), terminalText(c, out), fixture);
+    } finally {
+      await fixture.cleanup();
+    }
+  });
+
+  it('(15) says that a yarn lockfile pins the versions but is not read, without opening it', async () => {
+    const fixture = await materializeFixture('clean-cap');
+    try {
+      await rm(join(fixture.root, 'package-lock.json'));
+      await writeFile(join(fixture.root, 'yarn.lock'), '# POISON_lock_token\n');
+      const { snapshot } = await scanFixture(fixture);
+      expect(lockfileFindings(snapshot)).toEqual([
+        ['DEP_LOCKFILE_MISSING', 'info', 'yarn.lock', 'unsupported', 'yarn.lock'],
+      ]);
+      const project = snapshot.raw.projects[0]!;
+      expect(project.dependencies?.lockfiles.map((l) => [l.file, l.kind, l.status])).toEqual([
+        ['yarn.lock', 'yarn', 'unsupported'],
+      ]);
+      // Listed by name only: not among the files opened.
+      expect(project.files).not.toContain('yarn.lock');
+      expect(project.filesOpened).toBe(project.files.length + project.unreadable.length);
+    } finally {
+      await fixture.cleanup();
+    }
+  });
+
+  it('(16) reports a lockfile that is not valid as unreadable, never as a clean project', async () => {
+    const fixture = await materializeFixture('clean-cap');
+    try {
+      await writeFile(join(fixture.root, 'package-lock.json'), '<<<<<<< POISON_lock_token\n{');
+      const { c, out, snapshot } = await scanFixture(fixture);
+      expect(lockfileFindings(snapshot)).toEqual([
+        ['DEP_LOCKFILE_MISSING', 'low', 'package-lock.json', 'unreadable', 'package-lock.json'],
+        ['DEP_NOT_CHECKED', 'info', 'dependencies', undefined, undefined],
+      ]);
+      const project = snapshot.raw.projects[0]!;
+      expect(project.unreadable).toEqual([{ file: 'package-lock.json', kind: 'json' }]);
+      expect(project.filesOpened).toBe(project.files.length + project.unreadable.length);
+      expect(c.err()).toContain(
+        'Read 0 npm lockfile(s): 0 package(s) from the public npm registry, 0 other package(s) not checked\n',
+      );
+      expectCleanOutputs(await readOutputs(out), terminalText(c, out), fixture);
+    } finally {
+      await fixture.cleanup();
+    }
+  });
+});
+
+describe('baip-lens project and a private package the root package.json lists', () => {
+  /*
+   * The lockfile step keeps nothing of a package that is not from the public
+   * npm registry. The names the root package.json lists under `dependencies`
+   * and `devDependencies` are kept by the project collector, as they were
+   * before lockfiles were read: the one place where the name of a private
+   * direct dependency is stored (docs/privacy.md).
+   */
+  const PRIVATE = ['acme-private-ledger', '@acme-private/billing', 'acme-private-devtool'];
+  const MARK = 'acme-private';
+
+  it('(17) keeps its name in the snapshot manifest only: not among the packages, in no report, not in the terminal', async () => {
+    const fixture = await materializeFixture('clean-cap');
+    try {
+      const manifest = JSON.parse(
+        await readFile(join(fixture.root, 'package.json'), 'utf8'),
+      ) as Record<string, Record<string, string>>;
+      manifest.dependencies = {
+        ...manifest.dependencies,
+        'acme-private-ledger': '^1.0.0',
+        '@acme-private/billing': '^2.0.0',
+      };
+      manifest.devDependencies = {
+        ...manifest.devDependencies,
+        'acme-private-devtool': '^3.0.0',
+      };
+      // Used for `direct` only, and not stored.
+      manifest.optionalDependencies = { 'acme-private-optional': '^1.0.0' };
+      manifest.peerDependencies = { 'acme-private-peer': '^1.0.0' };
+      await writeFile(join(fixture.root, 'package.json'), JSON.stringify(manifest, null, 2));
+      const from = (resolved: string) => ({ version: '1.0.0', resolved });
+      await writeFile(
+        join(fixture.root, 'package-lock.json'),
+        lockfileV3(
+          {
+            name: 'clean-cap',
+            dependencies: {
+              'acme-private-ledger': '^1.0.0',
+              '@acme-private/billing': '^2.0.0',
+              'baip-fixture-server': '^2.5.0',
+            },
+            devDependencies: { 'acme-private-devtool': '^3.0.0' },
+            optionalDependencies: { 'acme-private-optional': '^1.0.0' },
+            peerDependencies: { 'acme-private-peer': '^1.0.0' },
+          },
+          {
+            // A company registry, and the public one with credentials in the address.
+            'node_modules/acme-private-ledger': from(
+              'https://npm.acme-private.example/acme-private-ledger/-/acme-private-ledger-1.0.0.tgz',
+            ),
+            'node_modules/@acme-private/billing': from(
+              'https://ci:acme-private-token@registry.npmjs.org/@acme-private/billing/-/billing-1.0.0.tgz',
+            ),
+            'node_modules/acme-private-devtool': {
+              version: '3.0.0',
+              resolved: 'git+ssh://git@github.com/acme/acme-private-devtool.git#0123abc',
+              dev: true,
+            },
+            'node_modules/acme-private-optional': { version: '1.0.0', optional: true },
+            'node_modules/acme-private-peer': {
+              version: '1.0.0',
+              resolved: 'file:vendor/acme-private-peer-1.0.0.tgz',
+              peer: true,
+            },
+            'node_modules/baip-fixture-server': registryEntry('baip-fixture-server', '2.5.0'),
+          },
+        ),
+      );
+
+      const { code, out, c, snapshot } = await scanFixture(fixture);
+      expect(code).toBe(EXIT.ok);
+      const project = snapshot.raw.projects[0]!;
+
+      // The lockfile step: counted by reason, never named.
+      expect(project.dependencies?.packages.map((p) => p.name)).toEqual(['baip-fixture-server']);
+      expect(project.dependencies?.lockfiles).toMatchObject([
+        {
+          file: 'package-lock.json',
+          status: 'read',
+          kept: 1,
+          notKept: { otherRegistry: 2, git: 1, file: 1, unknown: 1 },
+        },
+      ]);
+      expect(JSON.stringify(project.dependencies)).not.toContain(MARK);
+      expect(JSON.stringify(snapshot.findings)).not.toContain(MARK);
+      expect(JSON.stringify(snapshot.checks)).not.toContain(MARK);
+
+      // The exception: the root manifest's own two lists, as before lockfiles were read.
+      const listed = [
+        ...project.packageJson.dependencies,
+        ...project.packageJson.devDependencies,
+      ].map((dependency) => dependency.name);
+      expect(listed.filter((name) => name.includes(MARK)).sort()).toEqual([...PRIVATE].sort());
+      // And nowhere else in the snapshot: each name once, the other two sections not at all.
+      const texts = await readOutputs(out);
+      const snapshotText = texts[SNAPSHOT_FILE]!;
+      expect(snapshotText.split(MARK)).toHaveLength(PRIVATE.length + 1);
+      for (const name of PRIVATE) expect(snapshotText).toContain(`"name": "${name}"`);
+
+      // No report and no line of the terminal names one.
+      for (const file of REPORT_FILES) {
+        expect(texts[file], file).toBeDefined();
+        expect(texts[file], file).not.toContain(MARK);
+      }
+      expect(terminalText(c, out)).not.toContain(MARK);
+      expect(c.err()).toContain(
+        'Read 1 npm lockfile(s): 1 package(s) from the public npm registry, 5 other package(s) not checked\n',
+      );
+      expectCleanOutputs(texts, terminalText(c, out), fixture);
     } finally {
       await fixture.cleanup();
     }

@@ -632,6 +632,26 @@
         "A08:2025"
       ],
       "helpUri": "https://github.com/sebastianomarchesini/BAIP-Lens/blob/main/docs/rules.md#ui5_bootstrap_external"
+    },
+    {
+      "id": "DEP_LOCKFILE_MISSING",
+      "title": "No npm lockfile could be read for the declared dependencies",
+      "description": "The root package.json declares dependencies, but no npm lockfile (package-lock.json or npm-shrinkwrap.json) could be read for it. Without one the installed versions are not known, and no package can be checked for known vulnerabilities or deprecation.",
+      "roles": [],
+      "owasp": [
+        "A03:2025"
+      ],
+      "helpUri": "https://github.com/sebastianomarchesini/BAIP-Lens/blob/main/docs/rules.md#dep_lockfile_missing"
+    },
+    {
+      "id": "DEP_NOT_CHECKED",
+      "title": "Some packages of the npm lockfiles were not checked",
+      "description": "Packages that were not resolved from the public npm registry (another registry, git, a local file or link, bundled, unknown source), that were excluded, or that sit in a lockfile that was not read are never looked up. They are counted by reason, and nothing of their lockfile entries is kept, not even a name.",
+      "roles": [],
+      "owasp": [
+        "A03:2025"
+      ],
+      "helpUri": "https://github.com/sebastianomarchesini/BAIP-Lens/blob/main/docs/rules.md#dep_not_checked"
     }
   ],
   "summary": {

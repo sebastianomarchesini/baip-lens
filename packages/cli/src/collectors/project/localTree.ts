@@ -1,7 +1,7 @@
 import { lstat, readdir } from 'node:fs/promises';
 import { basename, dirname, join, relative, resolve, sep } from 'node:path';
 import { type GitignoreLayer, parseGitignore } from './gitignore.js';
-import { type ReadResult, readProjectFile } from './read.js';
+import { type ReadOptions, type ReadResult, readProjectFile } from './read.js';
 import type { ProjectTree, RepositoryContext, TreeEntry } from './tree.js';
 
 /*
@@ -97,8 +97,8 @@ export class LocalProjectTree implements ProjectTree {
     return entries;
   }
 
-  read(location: string): Promise<ReadResult> {
-    return readProjectFile(location);
+  read(location: string, options?: ReadOptions): Promise<ReadResult> {
+    return readProjectFile(location, options);
   }
 
   async isFile(location: string): Promise<boolean> {

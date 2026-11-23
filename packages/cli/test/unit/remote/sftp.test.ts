@@ -3,7 +3,11 @@ import { join } from 'node:path';
 import { fileURLToPath } from 'node:url';
 import { describe, expect, it } from 'vitest';
 import { collectProjectTree } from '../../../src/collectors/project/index.js';
-import { MAX_FILE_BYTES } from '../../../src/collectors/project/read.js';
+import {
+  MAX_FILE_BYTES,
+  MAX_LOCKFILE_BYTES,
+  NUL_SCAN_BYTES,
+} from '../../../src/collectors/project/read.js';
 import {
   type ReadOnlySftp,
   type RemoteEntry,
@@ -15,6 +19,7 @@ import {
   entryType,
 } from '../../../src/remote/sftp.js';
 import { APP_ROOT, SftpProjectTree } from '../../../src/remote/sftpTree.js';
+import { lockfileV3, registryEntry } from '../../support/lockfileFixture.js';
 
 const FILE = 0o100644;
 const DIR = 0o040755;
@@ -273,6 +278,17 @@ class MemorySftp implements ReadOnlySftp {
   }
 }
 
+const ZERO = {
+  otherRegistry: 0,
+  git: 0,
+  file: 0,
+  link: 0,
+  bundled: 0,
+  unknown: 0,
+  excluded: 0,
+  invalid: 0,
+};
+
 const app = (files: Record<string, string | { size: number }>) =>
   Object.fromEntries(Object.entries(files).map(([rel, v]) => [`${APP_ROOT}/${rel}`, v]));
 
@@ -355,6 +371,206 @@ describe('SftpProjectTree', () => {
     await new Promise((resolve) => setTimeout(resolve, 0));
     const opened = sftp.requests.filter((r) => r.startsWith('open ')).sort();
     expect(opened).toEqual([`open ${APP_ROOT}/package.json`]);
+  });
+
+  it('does not read lockfiles ahead: an npm lockfile only on request, a foreign one never', async () => {
+    const sftp = new MemorySftp(
+      app({
+        'package.json': '{}',
+        'package-lock.json': '{}',
+        'npm-shrinkwrap.json': '{}',
+        'yarn.lock': '# yarn',
+        'pnpm-lock.yaml': 'lockfileVersion: 9',
+        'srv/package-lock.json': '{}',
+      }),
+    );
+    const tree = new SftpProjectTree(sftp, { rootName: 'acme' });
+    await tree.list(APP_ROOT, 100);
+    await tree.list(`${APP_ROOT}/srv`, 100);
+    await new Promise((resolve) => setTimeout(resolve, 0));
+    const opened = sftp.requests.filter((r) => r.startsWith('open ')).sort();
+    expect(opened).toEqual([`open ${APP_ROOT}/package.json`]);
+  });
+
+  it('reads a file up to the size limit the caller names, not the one of an ordinary file', async () => {
+    const sftp = new MemorySftp(
+      app({
+        'package.json': '{}',
+        'package-lock.json': '0123456789',
+        'app/package-lock.json': { size: MAX_FILE_BYTES + 1 },
+        'srv/package-lock.json': { size: MAX_LOCKFILE_BYTES + 1 },
+      }),
+    );
+    const tree = new SftpProjectTree(sftp, { rootName: 'acme' });
+    const small = `${APP_ROOT}/package-lock.json`;
+    expect(await tree.read(small, { maxBytes: 9 })).toEqual({ ok: false, reason: 'too-large' });
+    expect(await tree.read(small, { maxBytes: 10 })).toEqual({
+      ok: true,
+      text: '0123456789',
+      bytes: 10,
+    });
+    expect(await tree.read(small)).toEqual({ ok: true, text: '0123456789', bytes: 10 });
+
+    // Over the limit of an ordinary file: refused by default, read with the limit of a lockfile.
+    const medium = `${APP_ROOT}/app/package-lock.json`;
+    expect(await tree.read(medium)).toEqual({ ok: false, reason: 'too-large' });
+    expect(sftp.requests).not.toContain(`read ${medium}`);
+    const result = await tree.read(medium, { maxBytes: MAX_LOCKFILE_BYTES });
+    expect(result).not.toEqual({ ok: false, reason: 'too-large' });
+    expect(sftp.requests).toContain(`read ${medium}`);
+
+    // Over the limit of a lockfile: refused from its size, never read.
+    const large = `${APP_ROOT}/srv/package-lock.json`;
+    expect(await tree.read(large, { maxBytes: MAX_LOCKFILE_BYTES })).toEqual({
+      ok: false,
+      reason: 'too-large',
+    });
+    expect(sftp.requests).not.toContain(`read ${large}`);
+  });
+
+  it('reads the lockfiles of a deployed app through the same step as a local folder', async () => {
+    const lockfile = lockfileV3(
+      { name: 'acme', dependencies: { 'baip-server': '^2' } },
+      {
+        'node_modules/baip-server': registryEntry('baip-server', '2.4.1'),
+        'node_modules/POISON-private': {
+          version: '1.0.0',
+          resolved: 'https://npm.POISON.example.com/POISON-private/-/POISON-private-1.0.0.tgz',
+        },
+      },
+    );
+    const sftp = new MemorySftp(
+      app({
+        'package.json': '{ "name": "acme", "dependencies": { "baip-server": "^2" } }',
+        'package-lock.json': '{ the loser next to a shrinkwrap file is not opened',
+        'npm-shrinkwrap.json': lockfile,
+        'yarn.lock': '# POISON_yarn',
+        '.npmrc': '//registry.npmjs.org/:_authToken=POISON_token',
+        'node_modules/x/package-lock.json': '{}',
+      }),
+    );
+    const project = await collectProjectTree(new SftpProjectTree(sftp, { rootName: 'acme' }));
+    expect(project.dependencies).toEqual({
+      lockfiles: [
+        {
+          file: 'npm-shrinkwrap.json',
+          kind: 'shrinkwrap',
+          lockfileVersion: 3,
+          status: 'read',
+          kept: 1,
+          notKept: { ...ZERO, otherRegistry: 1 },
+        },
+        {
+          file: 'yarn.lock',
+          kind: 'yarn',
+          lockfileVersion: null,
+          status: 'unsupported',
+          kept: 0,
+          notKept: ZERO,
+        },
+      ],
+      lockfilesNotRead: 0,
+      packages: [
+        {
+          name: 'baip-server',
+          version: '2.4.1',
+          direct: true,
+          scope: 'prod',
+          lockfiles: ['npm-shrinkwrap.json'],
+        },
+      ],
+    });
+    expect(project.files).toEqual(['npm-shrinkwrap.json', 'package.json']);
+    expect(project.filesOpened).toBe(2);
+    const opened = sftp.requests.filter((r) => r.startsWith('open ')).sort();
+    expect(opened).toEqual([
+      `open ${APP_ROOT}/npm-shrinkwrap.json`,
+      `open ${APP_ROOT}/package.json`,
+    ]);
+    expect(sftp.requests.some((r) => r.includes('node_modules'))).toBe(false);
+    expect(JSON.stringify(project)).not.toContain('POISON');
+  });
+
+  it('gives up a binary file after its first 8 KiB instead of fetching all of it', async () => {
+    const binary = `{"lockfileVersion":3,\u0000${'x'.repeat(100_000)}`;
+    const sftp = new MemorySftp(
+      app({
+        'package.json': '{ "name": "acme", "dependencies": { "baip-server": "^2" } }',
+        'package-lock.json': binary,
+      }),
+    );
+    const location = `${APP_ROOT}/package-lock.json`;
+    const tree = new SftpProjectTree(sftp, { rootName: 'acme' });
+    expect(await tree.read(location, { maxBytes: MAX_LOCKFILE_BYTES })).toEqual({
+      ok: false,
+      reason: 'binary',
+    });
+    // The fake answers four bytes per request: the head and not one request more.
+    const requests = () => sftp.requests.filter((r) => r === `read ${location}`).length;
+    expect(requests()).toBe(NUL_SCAN_BYTES / 4);
+
+    // And through the collector: the lockfile is recorded as one that could not be read.
+    const project = await collectProjectTree(new SftpProjectTree(sftp, { rootName: 'acme' }));
+    expect(requests()).toBe(2 * (NUL_SCAN_BYTES / 4));
+    expect(project.dependencies?.lockfiles.map((l) => [l.file, l.status])).toEqual([
+      ['package-lock.json', 'unreadable'],
+    ]);
+    expect(project.unreadable).toEqual([{ file: 'package-lock.json', kind: 'binary' }]);
+  });
+
+  it('records a lockfile the tree refuses to read as an unreadable lockfile', async () => {
+    const sftp = new MemorySftp(
+      app({
+        'package.json': '{ "name": "acme", "dependencies": { "baip-server": "^2" } }',
+        // Changed between the listing and the read: refused, as a file swapped for a link would be.
+        'package-lock.json': lockfileV3(
+          { name: 'acme' },
+          { 'node_modules/POISON-swapped': registryEntry('POISON-swapped', '1.0.0') },
+        ),
+        'srv/package-lock.json': lockfileV3(
+          { name: 'srv' },
+          { 'node_modules/baip-server': registryEntry('baip-server', '2.4.1') },
+        ),
+      }),
+    );
+    sftp.swapped.add(`${APP_ROOT}/package-lock.json`);
+    const project = await collectProjectTree(new SftpProjectTree(sftp, { rootName: 'acme' }));
+    expect(project.dependencies).toEqual({
+      lockfiles: [
+        {
+          file: 'package-lock.json',
+          kind: 'package-lock',
+          lockfileVersion: null,
+          status: 'unreadable',
+          kept: 0,
+          notKept: ZERO,
+        },
+        {
+          file: 'srv/package-lock.json',
+          kind: 'package-lock',
+          lockfileVersion: 3,
+          status: 'read',
+          kept: 1,
+          notKept: ZERO,
+        },
+      ],
+      lockfilesNotRead: 0,
+      packages: [
+        {
+          name: 'baip-server',
+          version: '2.4.1',
+          direct: false,
+          scope: 'prod',
+          lockfiles: ['srv/package-lock.json'],
+        },
+      ],
+    });
+    // Under the reason of a file of its kind, like every other file that is refused.
+    expect(project.unreadable).toEqual([{ file: 'package-lock.json', kind: 'json' }]);
+    expect(project.files).toEqual(['package.json', 'srv/package-lock.json']);
+    expect(project.filesOpened).toBe(project.files.length + project.unreadable.length);
+    expect(sftp.requests).not.toContain(`read ${APP_ROOT}/package-lock.json`);
+    expect(JSON.stringify(project)).not.toContain('POISON');
   });
 
   it('says a container is not a repository', async () => {

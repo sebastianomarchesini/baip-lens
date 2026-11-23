@@ -106,6 +106,34 @@ function wideFinding(i: number): string {
   return JSON.stringify({ ...finding, evidence: '\u0000e' }).replace('"\\u0000e"', `{${keys}}`);
 }
 
+const PACKAGES: JsonPath = ['raw', 'projects', 0, 'dependencies', 'packages'];
+
+/** A package of a lockfile whose lockfile paths are 20 values that are not paths. */
+const packageWithInvalidLockfiles = JSON.stringify({
+  name: 'baip-fixture-server',
+  version: '1.0.0',
+  direct: false,
+  scope: 'prod',
+  lockfiles: '\u0000paths',
+}).replace('"\\u0000paths"', repeated('"../up"', 20));
+
+/** The sample project under another id, with 20,000 valid packages of its lockfile. */
+function projectWithPackages(i: number): string {
+  const sample = (project.raw as { projects: Record<string, unknown>[] }).projects[0]!;
+  const dependencies = sample.dependencies as Record<string, unknown>;
+  let packages = '';
+  for (let k = 0; k < 20_000; k++) {
+    packages +=
+      `${k === 0 ? '' : ','}{"name":"baip-p${k}","version":"1.0.${i}","direct":false,` +
+      '"scope":"prod","lockfiles":["package-lock.json"]}';
+  }
+  return JSON.stringify({
+    ...sample,
+    id: `acme-${i}`,
+    dependencies: { ...dependencies, packages: '\u0000packages' },
+  }).replace('"\\u0000packages"', () => `[${packages}]`);
+}
+
 const ARRAY: [string, string] = ['[', ']'];
 const OBJECT: [string, string] = ['{', '}'];
 
@@ -118,6 +146,20 @@ const CRAFTED: [string, Write][] = [
   [
     '4 MB of {} in raw.projects',
     text(project, ['raw', 'projects'], () => repeated('{}', 1_400_000)),
+  ],
+  [
+    '4 MB of {} in the packages of a project',
+    text(project, PACKAGES, () => repeated('{}', 1_400_000)),
+  ],
+  [
+    '4 MB of {} in the lockfiles of a project',
+    text(project, ['raw', 'projects', 0, 'dependencies', 'lockfiles'], () =>
+      repeated('{}', 1_400_000),
+    ),
+  ],
+  [
+    '3 MB of packages with invalid lockfile paths',
+    text(project, PACKAGES, () => repeated(packageWithInvalidLockfiles, 20_000)),
   ],
   ['4 MB of 0 in raw.apps', text(cf, ['raw', 'apps'], () => repeated('0', 2_000_000))],
   [
@@ -193,6 +235,21 @@ describe('reading a crafted snapshot', () => {
     },
     30_000,
   );
+
+  it('loads a valid snapshot whose projects spend the item limit on lockfile packages', async () => {
+    // 14 projects at the limit of 20,000 packages each: 14 keys and values per package.
+    const { snapshot, error, seconds } = await read(
+      'packages at the item limit',
+      joined(project, ['raw', 'projects'], ARRAY, 14, projectWithPackages),
+    );
+    expect(error).toBeUndefined();
+    expect(snapshot?.raw.projects).toHaveLength(14);
+    expect(snapshot?.raw.projects.every((p) => p.dependencies?.packages.length === 20_000)).toBe(
+      true,
+    );
+    expect(seconds).toBeLessThan(MAX_SECONDS);
+    expect((peakRss() - before) / MB).toBeLessThan(MAX_GROWTH_MB);
+  }, 30_000);
 
   it('loads a valid snapshot whose findings spend the item limit on wide evidence', async () => {
     const { snapshot, seconds } = await read(

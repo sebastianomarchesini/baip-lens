@@ -58,6 +58,24 @@ export const COLLECTOR_CHECKS = {
       'Deployed app files read over SSH, read-only SFTP (package.json, .cdsrc, xs-app.json, *.cds, seed CSV, *.html)',
     roles: ['SpaceDeveloper'],
   },
+  /**
+   * The npm lockfiles of a project scan (docs/data-sources.md §12.1),
+   * recorded next to `collect.project` as a check of its own. The dependency
+   * rules require it: a snapshot written before lockfiles were read does not
+   * have it, so re-analysing one never reports "no finding" about packages
+   * nobody looked at.
+   */
+  dependencies: {
+    id: 'collect.dependencies',
+    title: 'npm lockfiles (package-lock.json, npm-shrinkwrap.json)',
+    roles: [],
+  },
+  /** The same for deployed apps (`baip-lens project --cf`); it keeps the id the rules require. */
+  deployedDependencies: {
+    id: 'collect.dependencies',
+    title: 'npm lockfiles of the deployed app (node_modules/.package-lock.json, package-lock.json)',
+    roles: ['SpaceDeveloper'],
+  },
 } as const satisfies Record<string, CheckDefinition>;
 
 /** How much of an app name the title of a check repeats. */

@@ -27,7 +27,7 @@ test('the project report works from disk with networking disabled', async ({ pag
 
   await page.getByRole('tab', { name: 'Findings' }).click();
   await expect(page).toHaveURL(/#\/findings$/);
-  await expect(page.getByRole('article')).toHaveCount(17);
+  await expect(page.getByRole('article')).toHaveCount(18);
   // A finding with a known line renders as file:line under the project name.
   await expect(
     page.locator('code.finding-location', { hasText: 'srv/services.cds:4' }),

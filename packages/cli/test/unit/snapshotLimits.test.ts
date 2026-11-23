@@ -52,6 +52,18 @@ describe('list()', () => {
 const cf = readFixture('sample-snapshot.json');
 const project = readFixture('sample-project-snapshot.json');
 const SERVICE_ROLES: JsonPath = ['raw', 'projects', 0, 'cdsFiles', 2, 'services', 0, 'requires'];
+const DEPENDENCIES: JsonPath = ['raw', 'projects', 0, 'dependencies'];
+
+const ZERO_NOT_KEPT = {
+  otherRegistry: 0,
+  git: 0,
+  file: 0,
+  link: 0,
+  bundled: 0,
+  unknown: 0,
+  excluded: 0,
+  invalid: 0,
+};
 
 function issuesOf(text: string) {
   const result = SnapshotSchema.safeParse(JSON.parse(text));
@@ -70,6 +82,9 @@ const LISTS: [string, typeof cf, JsonPath, number][] = [
   ['raw.history', cf, ['raw', 'history'], 10_000],
   ['raw.projects', project, ['raw', 'projects'], 1_000],
   ['the roles a project service requires', project, SERVICE_ROLES, 50],
+  ['the lockfiles of a project', project, [...DEPENDENCIES, 'lockfiles'], 50],
+  ['the packages of a project', project, [...DEPENDENCIES, 'packages'], 20_000],
+  ['the lockfiles of a package', project, [...DEPENDENCIES, 'packages', 0, 'lockfiles'], 20],
 ];
 
 describe('a snapshot list stops at its first invalid element', () => {
@@ -116,5 +131,86 @@ describe('a snapshot list stops at its first invalid element', () => {
     ).toBe(true);
     const issues = issuesOf(withJsonAt(cf, ['checks'], repeated('0', 1_001)));
     expect(issues).toMatchObject([{ code: 'too_big', maximum: 1_000, path: ['checks'] }]);
+  });
+});
+
+describe('the lockfile record of a project', () => {
+  const packages: JsonPath = [...DEPENDENCIES, 'packages'];
+  const lockfiles: JsonPath = [...DEPENDENCIES, 'lockfiles'];
+  const firstPackage = (
+    project.raw as { projects: { dependencies: { packages: Record<string, unknown>[] } }[] }
+  ).projects[0]!.dependencies.packages[0]!;
+  const firstLockfile = (
+    project.raw as { projects: { dependencies: { lockfiles: Record<string, unknown>[] } }[] }
+  ).projects[0]!.dependencies.lockfiles[0]!;
+
+  const parsed = (path: JsonPath, json: string) =>
+    SnapshotSchema.safeParse(JSON.parse(withJsonAt(project, path, json)));
+
+  it('refuses each of its lists over the limit at once', () => {
+    const item = JSON.stringify(firstPackage);
+    expect(parsed(packages, repeated(item, 20_000)).success).toBe(true);
+    expect(issuesOf(withJsonAt(project, packages, repeated('0', 20_001)))).toMatchObject([
+      { code: 'too_big', maximum: 20_000, path: packages },
+    ]);
+    expect(issuesOf(withJsonAt(project, lockfiles, repeated('0', 51)))).toMatchObject([
+      { code: 'too_big', maximum: 50, path: lockfiles },
+    ]);
+    expect(
+      issuesOf(withJsonAt(project, [...packages, 0, 'lockfiles'], repeated('"a"', 21))),
+    ).toMatchObject([{ code: 'too_big', maximum: 20, path: [...packages, 0, 'lockfiles'] }]);
+  });
+
+  it.each([
+    ['a name that could be read as a path', { name: '../x' }],
+    ['a name that starts with a dot', { name: '.hidden' }],
+    ['a name with an encoded slash', { name: '@scope%2fname' }],
+    ['a name of 215 characters', { name: 'n'.repeat(215) }],
+    ['a range instead of a version', { version: '^1.0.0' }],
+    ['a version of 65 characters', { version: `1.0.0-${'9'.repeat(59)}` }],
+    ['a version that is an address', { version: 'https://example.com/x.tgz' }],
+    ['a scope it does not know', { scope: 'peer' }],
+    ['a lockfile path that climbs out', { lockfiles: ['../package-lock.json'] }],
+    ['a direct flag that is not a boolean', { direct: 'yes' }],
+  ])('refuses a package with %s', (_name, change) => {
+    const item = JSON.stringify({ ...firstPackage, ...change });
+    expect(parsed(packages, `[${item}]`).success).toBe(false);
+  });
+
+  it.each([
+    ['a kind it does not know', { kind: 'bun' }],
+    ['a status it does not know', { status: 'skipped' }],
+    ['a lockfile version it does not know', { lockfileVersion: 4 }],
+    ['a negative count', { kept: -1 }],
+    ['a count that is not a whole number', { notKept: { ...ZERO_NOT_KEPT, git: 1.5 } }],
+    ['a reason missing from the counts', { notKept: { otherRegistry: 0 } }],
+    ['an absolute path', { file: '/etc/package-lock.json' }],
+  ])('refuses a lockfile with %s', (_name, change) => {
+    const item = JSON.stringify({ ...firstLockfile, ...change });
+    expect(parsed(lockfiles, `[${item}]`).success).toBe(false);
+  });
+
+  it('drops every key of an entry it does not know, so nothing else of a lockfile can be stored', () => {
+    const item = JSON.stringify({
+      ...firstPackage,
+      resolved: 'https://npm.internal.example.com/x/-/x-1.0.0.tgz',
+      integrity: 'sha512-planted',
+      deprecated: 'planted message',
+      license: 'planted',
+    });
+    const result = parsed(packages, `[${item}]`);
+    expect(result.success).toBe(true);
+    expect(result.data?.raw.projects[0]?.dependencies?.packages).toEqual([firstPackage]);
+    expect(JSON.stringify(result.data)).not.toMatch(/planted|internal\.example/);
+  });
+
+  it('reads a project without the record as one whose lockfiles were not collected', () => {
+    const before = structuredClone(project) as { raw: { projects: Record<string, unknown>[] } };
+    delete before.raw.projects[0]!.dependencies;
+    const result = SnapshotSchema.safeParse(before);
+    expect(result.success).toBe(true);
+    expect(result.data?.raw.projects[0]?.dependencies).toBeNull();
+    expect(parsed(DEPENDENCIES, 'null').success).toBe(true);
+    expect(parsed(DEPENDENCIES, '{}').success).toBe(false);
   });
 });

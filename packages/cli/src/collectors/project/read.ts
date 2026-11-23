@@ -1,18 +1,24 @@
 import { constants } from 'node:fs';
-import { open } from 'node:fs/promises';
+import { type FileHandle, open } from 'node:fs/promises';
 import { parseDocument } from 'yaml';
 import { IDENTIFIER_PATTERN } from '../../model/raw.js';
 
 /*
  * Safe file reads for the project collector. A file is opened without
  * following symlinks, checked with fstat to be a regular file within the size
- * limit, read at most once up to that limit and rejected when it looks
- * binary. Every failure is a reason code, never a message: the collector
- * records reasons, and messages from Node or a parser could carry a path or
- * file content.
+ * limit, rejected when its first bytes look binary (before the rest is
+ * read), and read up to the size fstat reported. Every failure is a reason
+ * code, never a message: the collector records reasons, and messages from
+ * Node or a parser could carry a path or file content.
  */
 
 export const MAX_FILE_BYTES = 2 * 1024 * 1024;
+/**
+ * The size limit of an npm lockfile, which the caller passes as `maxBytes`:
+ * a real lockfile is often larger than the 2 MiB every other file may have
+ * (about 500 bytes per package, docs/data-sources.md §12.1).
+ */
+export const MAX_LOCKFILE_BYTES = 32 * 1024 * 1024;
 /** A NUL byte in this many leading bytes marks a file as binary. */
 export const NUL_SCAN_BYTES = 8 * 1024;
 
@@ -21,7 +27,37 @@ export type ReadFailure = 'too-large' | 'binary' | 'unreadable';
 export type ReadResult =
   { ok: true; text: string; bytes: number } | { ok: false; reason: ReadFailure };
 
-export async function readProjectFile(path: string): Promise<ReadResult> {
+export interface ReadOptions {
+  /** The size limit for this file; `MAX_FILE_BYTES` when absent. */
+  maxBytes?: number;
+}
+
+/**
+ * Reads the bytes from `start` up to `end` of the file into the buffer, at
+ * the same offsets, and returns where it stopped. One read may return less
+ * than it was asked for, so this reads until the range is full or the file
+ * ends (a file that shrank since fstat).
+ */
+async function readRange(
+  handle: FileHandle,
+  buffer: Buffer,
+  start: number,
+  end: number,
+): Promise<number> {
+  let at = start;
+  while (at < end) {
+    const { bytesRead } = await handle.read(buffer, at, end - at, at);
+    if (bytesRead <= 0) break;
+    at += bytesRead;
+  }
+  return at;
+}
+
+export async function readProjectFile(
+  path: string,
+  options: ReadOptions = {},
+): Promise<ReadResult> {
+  const maxBytes = options.maxBytes ?? MAX_FILE_BYTES;
   // O_NOFOLLOW: a symlink planted at an allow-listed name is refused, not read
   // through. O_NONBLOCK: opening a FIFO for reading must not wait for a writer.
   const flags = constants.O_RDONLY | (constants.O_NOFOLLOW ?? 0) | (constants.O_NONBLOCK ?? 0);
@@ -34,11 +70,13 @@ export async function readProjectFile(path: string): Promise<ReadResult> {
   try {
     const stats = await handle.stat();
     if (!stats.isFile()) return { ok: false, reason: 'unreadable' };
-    if (stats.size > MAX_FILE_BYTES) return { ok: false, reason: 'too-large' };
-    const buffer = Buffer.alloc(Math.min(stats.size, MAX_FILE_BYTES));
-    const { bytesRead } = await handle.read(buffer, 0, buffer.length, 0);
-    const head = buffer.subarray(0, Math.min(bytesRead, NUL_SCAN_BYTES));
-    if (head.includes(0)) return { ok: false, reason: 'binary' };
+    if (stats.size > maxBytes) return { ok: false, reason: 'too-large' };
+    const buffer = Buffer.alloc(stats.size);
+    // The head first: a binary file is given up before the rest of it is read.
+    const headEnd = Math.min(buffer.length, NUL_SCAN_BYTES);
+    let bytesRead = await readRange(handle, buffer, 0, headEnd);
+    if (buffer.subarray(0, bytesRead).includes(0)) return { ok: false, reason: 'binary' };
+    if (bytesRead === headEnd) bytesRead = await readRange(handle, buffer, headEnd, buffer.length);
     return { ok: true, text: buffer.toString('utf8', 0, bytesRead), bytes: bytesRead };
   } catch {
     return { ok: false, reason: 'unreadable' };

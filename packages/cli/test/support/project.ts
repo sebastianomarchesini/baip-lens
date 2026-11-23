@@ -15,10 +15,13 @@ import type {
   RawData,
   RawDependency,
   RawHtmlBootstrap,
+  RawLockedPackage,
+  RawLockfile,
   RawMta,
   RawMtaModule,
   RawMtaResource,
   RawProject,
+  RawProjectDependencies,
   RawSeedData,
   RawXsApp,
   RawXsAppRoute,
@@ -46,6 +49,21 @@ export const PROJECT_COLLECTOR_SKIPPED: CheckResult = {
   status: 'skipped',
   reasonCode: 'error',
   reason: 'error: not a project',
+};
+
+/** The lockfile check a project scan records next to `collect.project`; the dependency rules require it. */
+export const DEPENDENCIES_COLLECTOR: CheckResult = {
+  id: 'collect.dependencies',
+  title: 'npm lockfiles',
+  roles: [],
+  status: 'ran',
+};
+
+export const DEPENDENCIES_COLLECTOR_SKIPPED: CheckResult = {
+  ...DEPENDENCIES_COLLECTOR,
+  status: 'skipped',
+  reasonCode: 'dependency_skipped',
+  reason: 'needs collect.project, which did not run',
 };
 
 /**
@@ -105,6 +123,21 @@ export const POISON: string[] = [
   'passwd-poison',
   'POISON_password_cell',
   'POISON_bp_path',
+  // Planted in the lockfile of the fixture (test/support/lockfileFixture.ts): packages that
+  // do not come from the public npm registry, and the fields of an entry that are never kept.
+  'poison-lock-git',
+  'POISON_lock_repo',
+  'poison-lock-link',
+  'poison-lock-folder',
+  'poison-lock-tarball',
+  'poison-lock-bundled',
+  'poison-lock-unresolved',
+  'poison-lock-invalid',
+  'POISON_lock_version',
+  'POISON_lock_token',
+  'POISON_lock_integrity',
+  'POISON_lock_deprecated',
+  'POISON_lock_license',
 ];
 
 type DeepPartial<T> = T extends (infer U)[]
@@ -164,6 +197,7 @@ export function rawProject(overrides?: DeepPartial<RawProject>): RawProject {
     seedData: [],
     archives: [],
     html: [],
+    dependencies: { lockfiles: [], lockfilesNotRead: 0, packages: [] },
   };
   return merge(base, overrides);
 }
@@ -412,6 +446,66 @@ export function htmlBootstrap(
   };
 }
 
+/** A lockfile record; `read` with nothing kept and nothing left out unless the options say so. */
+export function lockfile(
+  file: string,
+  opts: {
+    kind?: RawLockfile['kind'];
+    lockfileVersion?: RawLockfile['lockfileVersion'];
+    status?: RawLockfile['status'];
+    kept?: number;
+    notKept?: Partial<RawLockfile['notKept']>;
+  } = {},
+): RawLockfile {
+  const status = opts.status ?? 'read';
+  return {
+    file,
+    kind: opts.kind ?? 'package-lock',
+    lockfileVersion:
+      opts.lockfileVersion === undefined ? (status === 'read' ? 3 : null) : opts.lockfileVersion,
+    status,
+    kept: opts.kept ?? 0,
+    notKept: {
+      otherRegistry: 0,
+      git: 0,
+      file: 0,
+      link: 0,
+      bundled: 0,
+      unknown: 0,
+      excluded: 0,
+      invalid: 0,
+      ...opts.notKept,
+    },
+  };
+}
+
+/** A package from the public npm registry as a project keeps it. */
+export function lockedPackage(
+  name: string,
+  version: string,
+  opts: { direct?: boolean; scope?: RawLockedPackage['scope']; lockfiles?: string[] } = {},
+): RawLockedPackage {
+  return {
+    name,
+    version,
+    direct: opts.direct ?? false,
+    scope: opts.scope ?? 'prod',
+    lockfiles: opts.lockfiles ?? ['package-lock.json'],
+  };
+}
+
+/** `dependencies(lockfile('package-lock.json'))`, with packages and a count of lockfiles not opened. */
+export function dependencies(
+  lockfiles: RawLockfile | RawLockfile[],
+  opts: { packages?: RawLockedPackage[]; lockfilesNotRead?: number } = {},
+): RawProjectDependencies {
+  return {
+    lockfiles: Array.isArray(lockfiles) ? lockfiles : [lockfiles],
+    lockfilesNotRead: opts.lockfilesNotRead ?? 0,
+    packages: opts.packages ?? [],
+  };
+}
+
 export function rawData(...projects: RawProject[]): RawData {
   return {
     orgs: [],
@@ -426,9 +520,10 @@ export function rawData(...projects: RawProject[]): RawData {
   };
 }
 
-/** Runs one rule as a project scan would: the project collector ran, nothing else exists. */
+/** Runs one rule as a project scan would: the project files and the lockfiles were read, nothing else exists. */
 export function runRule(analyzer: Analyzer, ...projects: RawProject[]): Finding[] {
-  return analyze(rawData(...projects), NOW, [PROJECT_COLLECTOR], [analyzer]).findings;
+  const checks = [PROJECT_COLLECTOR, DEPENDENCIES_COLLECTOR];
+  return analyze(rawData(...projects), NOW, checks, [analyzer]).findings;
 }
 
 /** Same input, same output: twice on the same object, and once on a copy. */

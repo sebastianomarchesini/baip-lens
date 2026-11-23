@@ -5,6 +5,7 @@ import { join } from 'node:path';
 import { describe, expect, it } from 'vitest';
 import {
   MAX_FILE_BYTES,
+  MAX_LOCKFILE_BYTES,
   NUL_SCAN_BYTES,
   identifierOrNull,
   identifiers,
@@ -69,6 +70,68 @@ describe('readProjectFile', () => {
     const result = await readProjectFile(join(dir, 'exact.cds'));
     expect(result.ok).toBe(true);
     if (result.ok) expect(result.bytes).toBe(MAX_FILE_BYTES);
+  });
+
+  it('applies the size limit the caller names instead of the one of an ordinary file', async () => {
+    const dir = await tmp();
+    expect(MAX_LOCKFILE_BYTES).toBe(32 * 1024 * 1024);
+    const path = join(dir, 'package-lock.json');
+    // Larger than an ordinary file may be: refused by default, read whole with a higher limit.
+    const big = Buffer.alloc(MAX_FILE_BYTES + 4096, 0x61);
+    big.write('{"first":1', 0, 'utf8');
+    big.write('"last":2}', big.length - 9, 'utf8');
+    await writeFile(path, big);
+    expect(await readProjectFile(path)).toEqual({ ok: false, reason: 'too-large' });
+    const result = await readProjectFile(path, { maxBytes: MAX_LOCKFILE_BYTES });
+    expect(result.ok).toBe(true);
+    if (result.ok) {
+      expect(result.bytes).toBe(big.length);
+      expect(result.text).toHaveLength(big.length);
+      expect(result.text.startsWith('{"first":1')).toBe(true);
+      expect(result.text.endsWith('"last":2}')).toBe(true);
+    }
+    // The limit is exact, and a lower one than the default holds as well.
+    expect((await readProjectFile(path, { maxBytes: big.length })).ok).toBe(true);
+    expect(await readProjectFile(path, { maxBytes: big.length - 1 })).toEqual({
+      ok: false,
+      reason: 'too-large',
+    });
+    await writeFile(join(dir, 'small.json'), '0123456789');
+    expect(await readProjectFile(join(dir, 'small.json'), { maxBytes: 9 })).toEqual({
+      ok: false,
+      reason: 'too-large',
+    });
+    expect(await readProjectFile(join(dir, 'small.json'), { maxBytes: 10 })).toEqual({
+      ok: true,
+      text: '0123456789',
+      bytes: 10,
+    });
+  });
+
+  it('keeps the other checks with a higher limit: links, special files and binary content', async () => {
+    const dir = await tmp();
+    const options = { maxBytes: MAX_LOCKFILE_BYTES };
+    await writeFile(join(dir, 'target.json'), '{}');
+    await symlink(join(dir, 'target.json'), join(dir, 'package-lock.json'));
+    expect(await readProjectFile(join(dir, 'package-lock.json'), options)).toEqual({
+      ok: false,
+      reason: 'unreadable',
+    });
+    await writeFile(join(dir, 'bin.json'), Buffer.from([0x7b, 0, 0x7d]));
+    expect(await readProjectFile(join(dir, 'bin.json'), options)).toEqual({
+      ok: false,
+      reason: 'binary',
+    });
+    expect(await readProjectFile(join(dir, 'missing.json'), options)).toEqual({
+      ok: false,
+      reason: 'unreadable',
+    });
+    await writeFile(join(dir, 'empty.json'), '');
+    expect(await readProjectFile(join(dir, 'empty.json'), options)).toEqual({
+      ok: true,
+      text: '',
+      bytes: 0,
+    });
   });
 
   it(`treats a NUL byte in the first ${NUL_SCAN_BYTES} bytes as binary`, async () => {

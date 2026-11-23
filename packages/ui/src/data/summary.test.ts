@@ -100,7 +100,7 @@ describe('startHereSentences', () => {
     const s = startHereSentences(project);
     expect(s).toEqual([
       'The project acme-incidents was scanned on Sep 29, 2026.',
-      '17 findings need attention: 3 pages load SAPUI5 from an external CDN without integrity protection; 2 seed data columns contain card numbers, IBANs or secrets; 2 entities hold personal data without @PersonalData annotations.',
+      '18 findings need attention: 3 pages load SAPUI5 from an external CDN without integrity protection; 2 seed data columns contain card numbers, IBANs or secrets; 2 entities hold personal data without @PersonalData annotations.',
       'Nothing in your project was changed: this scan only read files in the project folder.',
     ]);
   });
@@ -132,13 +132,29 @@ describe('startHereSentences', () => {
     const projectRules = project.rules.filter(
       (r) => r.roles.length === 0 && r.id !== 'APP_NO_RECENT_DEPLOY',
     );
-    expect(projectRules).toHaveLength(13);
+    // The thirteen project rules and the two dependency rules.
+    expect(projectRules).toHaveLength(15);
     for (const rule of projectRules) {
       const finding = { ...project.findings[0]!, id: rule.id };
       const s = startHereSentences({ ...project, findings: [finding, finding] });
       // The fallback wording quotes the rule title; a phrase never does.
       expect(s[1]).not.toContain(`"${rule.title}"`);
     }
+  });
+
+  it('words the dependency rules as statements about the project, counted only across projects', () => {
+    const notChecked = project.findings.find((f) => f.id === 'DEP_NOT_CHECKED')!;
+    const missing = { ...notChecked, id: 'DEP_LOCKFILE_MISSING' };
+    expect(startHereSentences({ ...project, findings: [notChecked] })[1]).toBe(
+      '1 finding needs attention: some packages of the npm lockfiles were not checked.',
+    );
+    expect(startHereSentences({ ...project, findings: [missing] })[1]).toBe(
+      '1 finding needs attention: dependencies are declared but no npm lockfile could be read.',
+    );
+    const other = { ...missing, app: { ...missing.app, guid: 'project:other', name: 'other' } };
+    expect(startHereSentences({ ...project, findings: [missing, other, notChecked] })[1]).toBe(
+      '3 findings need attention: dependencies are declared but no npm lockfile could be read in 2 projects; some packages of the npm lockfiles were not checked.',
+    );
   });
 
   it('labels the scope of a project scan', () => {

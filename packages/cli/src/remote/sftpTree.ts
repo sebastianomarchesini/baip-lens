@@ -1,5 +1,10 @@
 import { MAX_FILES_OPENED, MAX_TOTAL_BYTES } from '../collectors/project/index.js';
-import { MAX_FILE_BYTES, NUL_SCAN_BYTES, type ReadResult } from '../collectors/project/read.js';
+import {
+  MAX_FILE_BYTES,
+  NUL_SCAN_BYTES,
+  type ReadOptions,
+  type ReadResult,
+} from '../collectors/project/read.js';
 import type { ProjectTree, RepositoryContext, TreeEntry } from '../collectors/project/tree.js';
 import { classify } from '../collectors/project/walk.js';
 import { Semaphore } from '../http/semaphore.js';
@@ -41,6 +46,26 @@ interface Listed {
 
 function byName(a: RemoteEntry, b: RemoteEntry): number {
   return a.name < b.name ? -1 : a.name > b.name ? 1 : 0;
+}
+
+/**
+ * Reads the bytes from `start` up to `end` of the file into the buffer, at
+ * the same offsets, and returns where it stopped: at `end`, or earlier when
+ * the file ended (it shrank since it was opened).
+ */
+async function readRange(
+  file: RemoteFile,
+  buffer: Buffer,
+  start: number,
+  end: number,
+): Promise<number> {
+  let at = start;
+  while (at < end) {
+    const bytesRead = await file.read(buffer, at, end - at, at);
+    if (bytesRead <= 0) break;
+    at += bytesRead;
+  }
+  return at;
 }
 
 export interface SftpProjectTreeOptions {
@@ -89,13 +114,13 @@ export class SftpProjectTree implements ProjectTree {
     return entries.map(({ name, type, size }) => ({ name, type, size }));
   }
 
-  read(location: string): Promise<ReadResult> {
+  read(location: string, options: ReadOptions = {}): Promise<ReadResult> {
     const fetched = this.ahead.get(location);
     if (fetched !== undefined) {
       this.ahead.delete(location);
       return fetched;
     }
-    return this.slots.run(() => this.fetch(location));
+    return this.slots.run(() => this.fetch(location, options.maxBytes ?? MAX_FILE_BYTES));
   }
 
   async isFile(location: string): Promise<boolean> {
@@ -125,19 +150,22 @@ export class SftpProjectTree implements ProjectTree {
     const kind = classify(rel);
     // Archives are never opened; .gitignore files only when an archive exists.
     if (kind === null || kind === 'mtar' || kind === 'gitignore') return;
+    // A foreign lockfile is never opened. An npm lockfile is read on request
+    // only: one per directory, with its own size limit and byte budget.
+    if (kind === 'lockfile' || kind === 'foreign-lockfile') return;
     // Too large: read() answers `too-large` from fstat without reading.
     if (size > MAX_FILE_BYTES) return;
     if (this.aheadFiles >= MAX_FILES_OPENED || this.aheadBytes + size > MAX_TOTAL_BYTES) return;
     this.aheadFiles += 1;
     this.aheadBytes += size;
-    const pending = this.slots.run(() => this.fetch(location));
+    const pending = this.slots.run(() => this.fetch(location, MAX_FILE_BYTES));
     // Handled here so that a session error is not reported as unhandled before read() awaits it.
     pending.catch(() => undefined);
     this.ahead.set(location, pending);
   }
 
   /** Opens, checks and reads one file with the same limits as a local read. */
-  private async fetch(location: string): Promise<ReadResult> {
+  private async fetch(location: string, maxBytes: number): Promise<ReadResult> {
     let file: RemoteFile;
     try {
       file = await this.sftp.openForReading(location);
@@ -151,16 +179,13 @@ export class SftpProjectTree implements ProjectTree {
       if (listed !== undefined && (listed.size !== stats.size || listed.mtime !== stats.mtime)) {
         return { ok: false, reason: 'unreadable' };
       }
-      if (stats.size > MAX_FILE_BYTES) return { ok: false, reason: 'too-large' };
+      if (stats.size > maxBytes) return { ok: false, reason: 'too-large' };
       const buffer = Buffer.alloc(stats.size);
-      let total = 0;
-      while (total < buffer.length) {
-        const bytesRead = await file.read(buffer, total, buffer.length - total, total);
-        if (bytesRead <= 0) break;
-        total += bytesRead;
-      }
-      const head = buffer.subarray(0, Math.min(total, NUL_SCAN_BYTES));
-      if (head.includes(0)) return { ok: false, reason: 'binary' };
+      // The head first: a binary file is given up before the rest of it is fetched.
+      const headEnd = Math.min(buffer.length, NUL_SCAN_BYTES);
+      let total = await readRange(file, buffer, 0, headEnd);
+      if (buffer.subarray(0, total).includes(0)) return { ok: false, reason: 'binary' };
+      if (total === headEnd) total = await readRange(file, buffer, headEnd, buffer.length);
       return { ok: true, text: buffer.toString('utf8', 0, total), bytes: total };
     } catch (error) {
       return this.failure(error);
