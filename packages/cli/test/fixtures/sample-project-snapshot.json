@@ -18,7 +18,7 @@
     "minTrafficWindowHours": 12,
     "trafficPages": 5,
     "previousScannedAt": null,
-    "dependencyCheck": false
+    "dependencyCheck": true
   },
   "checks": [
     {
@@ -30,6 +30,12 @@
     {
       "id": "collect.dependencies",
       "title": "npm lockfiles (package-lock.json, npm-shrinkwrap.json)",
+      "roles": [],
+      "status": "ran"
+    },
+    {
+      "id": "collect.osv",
+      "title": "Known vulnerabilities of npm packages (OSV.dev: POST /v1/querybatch, GET /v1/vulns)",
       "roles": [],
       "status": "ran"
     },
@@ -108,6 +114,12 @@
     {
       "id": "rule.UI5_BOOTSTRAP_EXTERNAL",
       "title": "SAPUI5 loaded from an external CDN without integrity protection",
+      "roles": [],
+      "status": "ran"
+    },
+    {
+      "id": "rule.DEP_KNOWN_CVE",
+      "title": "Dependency with a known vulnerability",
       "roles": [],
       "status": "ran"
     },
@@ -873,8 +885,132 @@
         }
       }
     ],
-    "advisories": [],
-    "vulnerablePackages": []
+    "advisories": [
+      {
+        "id": "GHSA-fake-0001-baip",
+        "aliases": [
+          "CVE-2026-00001"
+        ],
+        "summary": "Requests inside a batch skip the authorization check in @baip-fixture/odata",
+        "cvssV3": "CVSS:3.1/AV:N/AC:L/PR:N/UI:N/S:U/C:H/I:H/A:H",
+        "label": "CRITICAL"
+      },
+      {
+        "id": "GHSA-fake-0002-baip",
+        "aliases": [
+          "CVE-2026-00002"
+        ],
+        "summary": "Merging request data can overwrite properties shared by all objects",
+        "cvssV3": null,
+        "label": "MODERATE"
+      },
+      {
+        "id": "GHSA-fake-0003-baip",
+        "aliases": [],
+        "summary": "A crafted template string makes baip-fixture-merge run for a very long time",
+        "cvssV3": "CVSS:3.0/AV:N/AC:L/PR:N/UI:N/S:U/C:N/I:N/A:H",
+        "label": "HIGH"
+      },
+      {
+        "id": "GHSA-fake-0004-baip",
+        "aliases": [
+          "CVE-2026-00004"
+        ],
+        "summary": "Folders can be created outside the target folder",
+        "cvssV3": "CVSS:3.1/AV:N/AC:H/PR:N/UI:N/S:U/C:L/I:N/A:N",
+        "label": "LOW"
+      },
+      {
+        "id": "GHSA-fake-0006-baip",
+        "aliases": [],
+        "summary": null,
+        "cvssV3": null,
+        "label": null
+      },
+      {
+        "id": "MAL-0000-0001",
+        "aliases": [],
+        "summary": "Malicious code in baip-fixture-queue (npm)",
+        "cvssV3": null,
+        "label": null
+      }
+    ],
+    "vulnerablePackages": [
+      {
+        "name": "@baip-fixture/odata",
+        "version": "3.1.0",
+        "advisories": [
+          {
+            "id": "GHSA-fake-0001-baip",
+            "fixed": [
+              "3.1.2"
+            ]
+          }
+        ]
+      },
+      {
+        "name": "baip-fixture-merge",
+        "version": "3.10.1",
+        "advisories": [
+          {
+            "id": "GHSA-fake-0002-baip",
+            "fixed": [
+              "3.10.2",
+              "4.17.21"
+            ]
+          }
+        ]
+      },
+      {
+        "name": "baip-fixture-merge",
+        "version": "4.17.20",
+        "advisories": [
+          {
+            "id": "GHSA-fake-0002-baip",
+            "fixed": [
+              "3.10.2",
+              "4.17.21"
+            ]
+          },
+          {
+            "id": "GHSA-fake-0003-baip",
+            "fixed": []
+          }
+        ]
+      },
+      {
+        "name": "baip-fixture-mkdir",
+        "version": "0.5.1",
+        "advisories": [
+          {
+            "id": "GHSA-fake-0004-baip",
+            "fixed": [
+              "0.5.2"
+            ]
+          }
+        ]
+      },
+      {
+        "name": "baip-fixture-queue",
+        "version": "5.0.2",
+        "advisories": [
+          {
+            "id": "MAL-0000-0001",
+            "fixed": []
+          }
+        ]
+      },
+      {
+        "name": "baip-fixture-watcher",
+        "version": "2.3.3",
+        "advisories": [
+          {
+            "id": "GHSA-fake-0006-baip",
+            "fixed": []
+          }
+        ]
+      }
+    ]
   },
   "apps": [
     {
@@ -897,14 +1033,14 @@
       "lastDeployAt": null,
       "usage": null,
       "findingCounts": {
-        "critical": 2,
-        "high": 2,
-        "medium": 9,
-        "low": 4,
+        "critical": 4,
+        "high": 3,
+        "medium": 11,
+        "low": 5,
         "info": 1
       },
       "highestSeverity": "critical",
-      "riskScore": 299
+      "riskScore": 535
     }
   ],
   "findings": [
@@ -974,6 +1110,135 @@
       "location": {
         "file": "srv/services.cds",
         "line": 4
+      }
+    },
+    {
+      "id": "DEP_KNOWN_CVE",
+      "severity": "critical",
+      "title": "Dependency with a known vulnerability",
+      "app": {
+        "guid": "project:acme-incidents",
+        "name": "acme-incidents",
+        "space": "project",
+        "org": "local"
+      },
+      "evidence": {
+        "subject": "@baip-fixture/odata@3.1.0",
+        "package": "@baip-fixture/odata",
+        "version": "3.1.0",
+        "direct": true,
+        "scope": "prod",
+        "advisories": [
+          "GHSA-fake-0001-baip"
+        ],
+        "advisoryCount": 1,
+        "aliases": [
+          "CVE-2026-00001"
+        ],
+        "fixedIn": "3.1.2",
+        "score": 9.8,
+        "severityFrom": "cvss",
+        "summary": "Requests inside a batch skip the authorization check in @baip-fixture/odata",
+        "lockfiles": [
+          "package-lock.json"
+        ],
+        "lockfileCount": 1
+      },
+      "remediation": "Upgrade the package to the version in `fixedIn` or a later one. For each advisory of this finding the lowest fixed version above the installed one was taken, and `fixedIn` is the highest of them. `npm ls <package>` shows which dependency brings the package in. For a direct dependency (`direct` is true), change its version in `package.json` and install again. For a transitive one, upgrade the dependency that requires it, or pin the version of the transitive package with `overrides` in `package.json` until that dependency follows. Commit the lockfile, deploy the app again and scan again: the scan judges the version that is installed then, so a finding that is still there says the upgrade did not go far enough.",
+      "references": [
+        "https://docs.npmjs.com/cli/v11/commands/npm-ls",
+        "https://docs.npmjs.com/cli/v11/configuring-npm/package-json#overrides",
+        "https://osv.dev/vulnerability/GHSA-fake-0001-baip",
+        "https://owasp.org/Top10/2025/A03_2025-Software_Supply_Chain_Failures/"
+      ],
+      "location": {
+        "file": "package-lock.json"
+      }
+    },
+    {
+      "id": "DEP_KNOWN_CVE",
+      "severity": "critical",
+      "title": "Dependency with a known vulnerability",
+      "app": {
+        "guid": "project:acme-incidents",
+        "name": "acme-incidents",
+        "space": "project",
+        "org": "local"
+      },
+      "evidence": {
+        "subject": "baip-fixture-queue@5.0.2",
+        "package": "baip-fixture-queue",
+        "version": "5.0.2",
+        "direct": true,
+        "scope": "prod",
+        "advisories": [
+          "MAL-0000-0001"
+        ],
+        "advisoryCount": 1,
+        "aliases": [],
+        "fixedIn": null,
+        "score": null,
+        "severityFrom": "malicious",
+        "summary": "Malicious code in baip-fixture-queue (npm)",
+        "lockfiles": [
+          "package-lock.json"
+        ],
+        "lockfileCount": 1
+      },
+      "remediation": "This package version is reported as malicious code (an advisory whose id starts with `MAL-`): it was published to do harm, not written with a flaw. Remove it, and treat every machine, pipeline and app that installed it as compromised: rotate the credentials that were within its reach (tokens, service keys, the contents of `.npmrc` and of the environment), and review what was built and deployed since it came in. `npm ls <package>` shows which dependency brings the package in. For a direct dependency (`direct` is true), change its version in `package.json` and install again. For a transitive one, upgrade the dependency that requires it, or pin the version of the transitive package with `overrides` in `package.json` until that dependency follows. Install a version that is not reported, or replace the package.",
+      "references": [
+        "https://docs.npmjs.com/cli/v11/commands/npm-ls",
+        "https://docs.npmjs.com/cli/v11/configuring-npm/package-json#overrides",
+        "https://osv.dev/vulnerability/MAL-0000-0001",
+        "https://owasp.org/Top10/2025/A03_2025-Software_Supply_Chain_Failures/"
+      ],
+      "location": {
+        "file": "package-lock.json"
+      }
+    },
+    {
+      "id": "DEP_KNOWN_CVE",
+      "severity": "high",
+      "title": "Dependency with a known vulnerability",
+      "app": {
+        "guid": "project:acme-incidents",
+        "name": "acme-incidents",
+        "space": "project",
+        "org": "local"
+      },
+      "evidence": {
+        "subject": "baip-fixture-merge@4.17.20",
+        "package": "baip-fixture-merge",
+        "version": "4.17.20",
+        "direct": false,
+        "scope": "prod",
+        "advisories": [
+          "GHSA-fake-0002-baip",
+          "GHSA-fake-0003-baip"
+        ],
+        "advisoryCount": 2,
+        "aliases": [
+          "CVE-2026-00002"
+        ],
+        "fixedIn": null,
+        "score": 7.5,
+        "severityFrom": "cvss",
+        "summary": "A crafted template string makes baip-fixture-merge run for a very long time",
+        "lockfiles": [
+          "package-lock.json"
+        ],
+        "lockfileCount": 1
+      },
+      "remediation": "At least one advisory of this finding names no fixed version above the installed one (`fixedIn` is null), so an upgrade alone may not clear it. Read the advisories linked below: they say which versions are affected and whether a setting, another major version or another package helps. `npm ls <package>` shows which dependency brings the package in. For a direct dependency (`direct` is true), change its version in `package.json` and install again. For a transitive one, upgrade the dependency that requires it, or pin the version of the transitive package with `overrides` in `package.json` until that dependency follows. Where the vulnerable code cannot be reached in this app, accept the finding and write down why.",
+      "references": [
+        "https://docs.npmjs.com/cli/v11/commands/npm-ls",
+        "https://docs.npmjs.com/cli/v11/configuring-npm/package-json#overrides",
+        "https://osv.dev/vulnerability/GHSA-fake-0002-baip",
+        "https://osv.dev/vulnerability/GHSA-fake-0003-baip",
+        "https://owasp.org/Top10/2025/A03_2025-Software_Supply_Chain_Failures/"
+      ],
+      "location": {
+        "file": "package-lock.json"
       }
     },
     {
@@ -1262,6 +1527,90 @@
       }
     },
     {
+      "id": "DEP_KNOWN_CVE",
+      "severity": "medium",
+      "title": "Dependency with a known vulnerability",
+      "app": {
+        "guid": "project:acme-incidents",
+        "name": "acme-incidents",
+        "space": "project",
+        "org": "local"
+      },
+      "evidence": {
+        "subject": "baip-fixture-merge@3.10.1",
+        "package": "baip-fixture-merge",
+        "version": "3.10.1",
+        "direct": false,
+        "scope": "prod",
+        "advisories": [
+          "GHSA-fake-0002-baip"
+        ],
+        "advisoryCount": 1,
+        "aliases": [
+          "CVE-2026-00002"
+        ],
+        "fixedIn": "3.10.2",
+        "score": null,
+        "severityFrom": "label",
+        "summary": "Merging request data can overwrite properties shared by all objects",
+        "lockfiles": [
+          "package-lock.json"
+        ],
+        "lockfileCount": 1
+      },
+      "remediation": "Upgrade the package to the version in `fixedIn` or a later one. For each advisory of this finding the lowest fixed version above the installed one was taken, and `fixedIn` is the highest of them. `npm ls <package>` shows which dependency brings the package in. For a direct dependency (`direct` is true), change its version in `package.json` and install again. For a transitive one, upgrade the dependency that requires it, or pin the version of the transitive package with `overrides` in `package.json` until that dependency follows. Commit the lockfile, deploy the app again and scan again: the scan judges the version that is installed then, so a finding that is still there says the upgrade did not go far enough.",
+      "references": [
+        "https://docs.npmjs.com/cli/v11/commands/npm-ls",
+        "https://docs.npmjs.com/cli/v11/configuring-npm/package-json#overrides",
+        "https://osv.dev/vulnerability/GHSA-fake-0002-baip",
+        "https://owasp.org/Top10/2025/A03_2025-Software_Supply_Chain_Failures/"
+      ],
+      "location": {
+        "file": "package-lock.json"
+      }
+    },
+    {
+      "id": "DEP_KNOWN_CVE",
+      "severity": "medium",
+      "title": "Dependency with a known vulnerability",
+      "app": {
+        "guid": "project:acme-incidents",
+        "name": "acme-incidents",
+        "space": "project",
+        "org": "local"
+      },
+      "evidence": {
+        "subject": "baip-fixture-watcher@2.3.3",
+        "package": "baip-fixture-watcher",
+        "version": "2.3.3",
+        "direct": true,
+        "scope": "optional",
+        "advisories": [
+          "GHSA-fake-0006-baip"
+        ],
+        "advisoryCount": 1,
+        "aliases": [],
+        "fixedIn": null,
+        "score": null,
+        "severityFrom": "default",
+        "summary": null,
+        "lockfiles": [
+          "package-lock.json"
+        ],
+        "lockfileCount": 1
+      },
+      "remediation": "At least one advisory of this finding names no fixed version above the installed one (`fixedIn` is null), so an upgrade alone may not clear it. Read the advisories linked below: they say which versions are affected and whether a setting, another major version or another package helps. `npm ls <package>` shows which dependency brings the package in. For a direct dependency (`direct` is true), change its version in `package.json` and install again. For a transitive one, upgrade the dependency that requires it, or pin the version of the transitive package with `overrides` in `package.json` until that dependency follows. Where the vulnerable code cannot be reached in this app, accept the finding and write down why.",
+      "references": [
+        "https://docs.npmjs.com/cli/v11/commands/npm-ls",
+        "https://docs.npmjs.com/cli/v11/configuring-npm/package-json#overrides",
+        "https://osv.dev/vulnerability/GHSA-fake-0006-baip",
+        "https://owasp.org/Top10/2025/A03_2025-Software_Supply_Chain_Failures/"
+      ],
+      "location": {
+        "file": "package-lock.json"
+      }
+    },
+    {
       "id": "DEPLOY_ARTIFACT_IN_REPO",
       "severity": "medium",
       "title": "Deployment archive (.mtar) is not ignored by git",
@@ -1347,6 +1696,49 @@
       ],
       "location": {
         "file": "package.json"
+      }
+    },
+    {
+      "id": "DEP_KNOWN_CVE",
+      "severity": "low",
+      "title": "Dependency with a known vulnerability",
+      "app": {
+        "guid": "project:acme-incidents",
+        "name": "acme-incidents",
+        "space": "project",
+        "org": "local"
+      },
+      "evidence": {
+        "subject": "baip-fixture-mkdir@0.5.1",
+        "package": "baip-fixture-mkdir",
+        "version": "0.5.1",
+        "direct": false,
+        "scope": "dev",
+        "advisories": [
+          "GHSA-fake-0004-baip"
+        ],
+        "advisoryCount": 1,
+        "aliases": [
+          "CVE-2026-00004"
+        ],
+        "fixedIn": "0.5.2",
+        "score": 3.7,
+        "severityFrom": "cvss",
+        "summary": "Folders can be created outside the target folder",
+        "lockfiles": [
+          "package-lock.json"
+        ],
+        "lockfileCount": 1
+      },
+      "remediation": "Upgrade the package to the version in `fixedIn` or a later one. For each advisory of this finding the lowest fixed version above the installed one was taken, and `fixedIn` is the highest of them. `npm ls <package>` shows which dependency brings the package in. For a direct dependency (`direct` is true), change its version in `package.json` and install again. For a transitive one, upgrade the dependency that requires it, or pin the version of the transitive package with `overrides` in `package.json` until that dependency follows. Commit the lockfile, deploy the app again and scan again: the scan judges the version that is installed then, so a finding that is still there says the upgrade did not go far enough.",
+      "references": [
+        "https://docs.npmjs.com/cli/v11/commands/npm-ls",
+        "https://docs.npmjs.com/cli/v11/configuring-npm/package-json#overrides",
+        "https://osv.dev/vulnerability/GHSA-fake-0004-baip",
+        "https://owasp.org/Top10/2025/A03_2025-Software_Supply_Chain_Failures/"
+      ],
+      "location": {
+        "file": "package-lock.json"
       }
     },
     {

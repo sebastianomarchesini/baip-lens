@@ -10,6 +10,11 @@ import { MAX_FILE_BYTES } from '../../src/collectors/project/read.js';
 import { MAX_READ_BYTES } from '../../src/remote/sftpTree.js';
 import { type SshConnect, connectSsh } from '../../src/remote/session.js';
 import {
+  ACME_CRITICAL,
+  ACME_MODERATE,
+  ACME_NO_FIX,
+  ACME_OSV_SCRIPT,
+  ACME_UNRATED,
   OSV_HOST,
   OSV_POISON,
   type OsvScript,
@@ -617,7 +622,8 @@ function expectOnlyReads(r: Run): void {
 
 describe('baip-lens project --cf', () => {
   it('lists the apps of the cf target space, reads the chosen one over read-only SFTP and reports it', async () => {
-    const r = await run();
+    // OSV.dev knows advisories for three of the four public packages the app has installed.
+    const r = await run({ osv: ACME_OSV_SCRIPT });
     expect(r.code, r.err).toBe(EXIT.ok);
 
     // The Space Developer warning and the audit event come first.
@@ -671,7 +677,12 @@ describe('baip-lens project --cf', () => {
     const report = JSON.parse(await readFile(join(r.outDir, 'baip-lens-report.json'), 'utf8')) as {
       scope: { orgs: string[]; projects: string[]; apiEndpoint?: string };
       checks: { id: string; title: string; status: string; roles: string[] }[];
-      findings: { id: string }[];
+      findings: {
+        id: string;
+        severity: string;
+        evidence: { subject: string; advisories?: string[]; lockfiles?: string[] };
+        location?: { file: string };
+      }[];
     };
     expect(report.scope).toEqual({ apiEndpoint: `${API}/`, orgs: [], projects: ['incidents-srv'] });
     expect(report.checks.find((c) => c.id === 'collect.project')).toMatchObject({
@@ -732,11 +743,56 @@ describe('baip-lens project --cf', () => {
     expect(r.err).toContain(
       'Read 1 npm lockfile(s): 4 package(s) from the public npm registry, 2 other package(s) not checked\n',
     );
-    // The versions are known, so nothing is missing; the packages left unchecked are said.
+    // The versions are known, so nothing is missing; the installed packages that have an
+    // advisory are reported, worst first, and the packages left unchecked are said.
     const dependencyFindings = report.findings.filter((f) => f.id.startsWith('DEP_'));
-    expect(dependencyFindings.map((f) => f.id)).toEqual(['DEP_NOT_CHECKED']);
-    // A finding never points into node_modules.
-    expect(JSON.stringify(report.findings)).not.toContain('node_modules');
+    expect(dependencyFindings.map((f) => [f.id, f.severity, f.evidence.subject])).toEqual([
+      ['DEP_KNOWN_CVE', 'critical', '@baip-fixture/odata@3.1.0'],
+      ['DEP_KNOWN_CVE', 'high', 'baip-fixture-merge@4.17.20'],
+      ['DEP_KNOWN_CVE', 'medium', 'baip-fixture-watcher@2.3.3'],
+      ['DEP_NOT_CHECKED', 'info', 'dependencies'],
+    ]);
+    // A finding never points into node_modules: no finding has a location there, in the JSON
+    // report or in the SARIF one. The evidence says truthfully where the installed version
+    // was read, which is the lockfile of the installed tree.
+    const vulnerable = dependencyFindings.filter((f) => f.id === 'DEP_KNOWN_CVE');
+    // The fourth package has one advisory, and that was taken back: nothing is said about it.
+    expect(vulnerable.map((f) => f.evidence.advisories)).toEqual([
+      [ACME_CRITICAL],
+      [ACME_MODERATE, ACME_NO_FIX],
+      [ACME_UNRATED],
+    ]);
+    for (const finding of vulnerable) {
+      expect('location' in finding, finding.evidence.subject).toBe(false);
+      expect(finding.evidence.lockfiles).toEqual(['node_modules/.package-lock.json']);
+    }
+    for (const finding of report.findings) {
+      expect(finding.location?.file ?? '', finding.id).not.toContain('node_modules');
+    }
+    expect(report.findings.some((f) => f.location !== undefined)).toBe(true);
+    const sarif = JSON.parse(await readFile(join(r.outDir, 'baip-lens-report.sarif'), 'utf8')) as {
+      runs: {
+        results: {
+          ruleId: string;
+          locations: { physicalLocation: { artifactLocation: { uri: string } } }[];
+        }[];
+      }[];
+    };
+    const results = sarif.runs[0]?.results ?? [];
+    expect(results).toHaveLength(report.findings.length);
+    for (const result of results) {
+      for (const location of result.locations) {
+        expect(location.physicalLocation.artifactLocation.uri, result.ruleId).not.toContain(
+          'node_modules',
+        );
+      }
+    }
+    // Without a file to point at, a vulnerable package is located at the app it is installed in.
+    expect(
+      results
+        .filter((result) => result.ruleId === 'DEP_KNOWN_CVE')
+        .map((result) => result.locations[0]?.physicalLocation.artifactLocation.uri),
+    ).toEqual(['project/incidents-srv', 'project/incidents-srv', 'project/incidents-srv']);
 
     // stdout lists the report files it wrote, so only the others must be free of absolute paths.
     expectNoLeaks({ stdout: r.out }, [...POISON, r.token]);
@@ -2418,6 +2474,42 @@ describe('baip-lens project --cf and the lookup of the installed packages on OSV
       },
     ]);
 
+    // The rule reads the tables: one finding for the package, with the cleaned summary, the
+    // fix the advisory names, and no location (the version was read from the installed tree).
+    const findings = (await dependencyFindings(r.outDir)).filter((f) => f.id === 'DEP_KNOWN_CVE');
+    expect(findings).toHaveLength(1);
+    expect(findings[0]).toMatchObject({
+      severity: 'critical',
+      app: { guid: 'project:incidents-srv' },
+      evidence: {
+        subject: 'baip-fixture-merge@4.17.20',
+        package: 'baip-fixture-merge',
+        version: '4.17.20',
+        // The root package.json of the app does not list it.
+        direct: false,
+        scope: 'prod',
+        advisories: [A1],
+        advisoryCount: 1,
+        aliases: ['CVE-2026-00001'],
+        fixedIn: '4.17.21',
+        score: 9.8,
+        severityFrom: 'cvss',
+        summary: 'Prototype pollution, reported by [e-mail] via https://advisories.example.org/x',
+        lockfiles: ['node_modules/.package-lock.json'],
+        lockfileCount: 1,
+      },
+    });
+    expect('location' in (findings[0] ?? {})).toBe(false);
+    expect(findings[0]?.remediation).toMatch(/^Upgrade the package to the version in `fixedIn`/);
+    // No text of the finding names a path of the container.
+    expect(findings[0]?.remediation).not.toContain('node_modules');
+    expect(snapshot.checks.find((check) => check.id === 'rule.DEP_KNOWN_CVE')).toMatchObject({
+      status: 'ran',
+      roles: [],
+    });
+    // Next to the two critical findings of its files.
+    expect(r.out).toMatch(/^Scanned deployed app incidents-srv: 5 finding\(s\) \(3 critical, /);
+
     // Nothing of a record but what the tables name reaches a file or the terminal.
     const never = [...POISON, r.token, ...OSV_POISON, 'POISON_osv_pw', 'baip-fixture-other', A2];
     expectNoLeaks({ stdout: r.out }, never);
@@ -2511,6 +2603,17 @@ describe('baip-lens project --cf and the lookup of the installed packages on OSV
       'collect.dependencies',
       'collect.osv',
     ]);
+    // One finding for each app that has the package installed.
+    const findings = (await dependencyFindings(r.outDir)).filter((f) => f.id === 'DEP_KNOWN_CVE');
+    expect(findings.map((f) => [f.app.guid, f.severity, f.evidence.subject])).toEqual([
+      ['project:acme-router', 'medium', 'baip-fixture-server@2.4.1'],
+      ['project:acme-srv', 'medium', 'baip-fixture-server@2.4.1'],
+    ]);
+    for (const finding of findings) {
+      expect(finding.evidence).toMatchObject({ severityFrom: 'label', fixedIn: null });
+      expect('location' in finding).toBe(false);
+    }
+    await expectSameOffline(r);
     await expectNothingLeaked(r);
   }, 20_000);
 

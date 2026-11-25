@@ -635,6 +635,16 @@
       "helpUri": "https://github.com/sebastianomarchesini/BAIP-Lens/blob/main/docs/rules.md#ui5_bootstrap_external"
     },
     {
+      "id": "DEP_KNOWN_CVE",
+      "title": "Dependency with a known vulnerability",
+      "description": "A package version that an npm lockfile of the project pins from the public npm registry has a known vulnerability, or is reported as malicious code, according to OSV.dev. The severity is the highest among its advisories: critical for a malicious package, else from the CVSS v3 base score, else from the severity the advisory states in words, else medium.",
+      "roles": [],
+      "owasp": [
+        "A03:2025"
+      ],
+      "helpUri": "https://github.com/sebastianomarchesini/BAIP-Lens/blob/main/docs/rules.md#dep_known_cve"
+    },
+    {
       "id": "DEP_LOCKFILE_MISSING",
       "title": "No npm lockfile could be read for the declared dependencies",
       "description": "The root package.json declares dependencies, but no npm lockfile (package-lock.json or npm-shrinkwrap.json) could be read for it. Without one the installed versions are not known, and no package can be checked for known vulnerabilities or deprecation.",

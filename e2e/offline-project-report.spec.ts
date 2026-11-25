@@ -27,7 +27,7 @@ test('the project report works from disk with networking disabled', async ({ pag
 
   await page.getByRole('tab', { name: 'Findings' }).click();
   await expect(page).toHaveURL(/#\/findings$/);
-  await expect(page.getByRole('article')).toHaveCount(18);
+  await expect(page.getByRole('article')).toHaveCount(24);
   // A finding with a known line renders as file:line under the project name.
   await expect(
     page.locator('code.finding-location', { hasText: 'srv/services.cds:4' }),
@@ -37,6 +37,17 @@ test('the project report works from disk with networking disabled', async ({ pag
       'ui5-panel[header-text="Service is open to every authenticated user (1) · OWASP A01:2025"]',
     ),
   ).toBeAttached();
+
+  // The packages with a known vulnerability have a panel of their own, and each finding
+  // points at the lockfile that pins the package.
+  const vulnerable = page.locator(
+    'ui5-panel[header-text="Dependency with a known vulnerability (6) · OWASP A03:2025"]',
+  );
+  await expect(vulnerable).toBeAttached();
+  await expect(vulnerable.getByRole('article')).toHaveCount(6);
+  await expect(
+    vulnerable.locator('code.finding-location', { hasText: 'package-lock.json' }),
+  ).toHaveCount(6);
 
   await page.getByRole('tab', { name: 'Projects' }).click();
   await expect(page).toHaveURL(/#\/apps$/);

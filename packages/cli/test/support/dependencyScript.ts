@@ -143,6 +143,101 @@ export function scriptOsv(fake: FakeFetch, script: OsvScript = {}): FakeFetch {
     );
 }
 
+/*
+ * What the scripted OSV.dev says about the packages of the acme-incidents
+ * fixture (test/support/lockfileFixture.ts): the sample data of the golden
+ * files, and of the tests that pin the findings of the fixture. Every case
+ * the rule `DEP_KNOWN_CVE` tells apart is in it once. The packages of the
+ * clean-cap fixture are other versions, and have no advisory.
+ */
+
+/** A critical score on a direct production package, with a fix. */
+export const ACME_CRITICAL = 'GHSA-fake-0001-baip';
+/** A severity in words only, with one fix per line of versions. */
+export const ACME_MODERATE = 'GHSA-fake-0002-baip';
+/** A high score (a CVSS v3.0 vector), and no fixed version. */
+export const ACME_NO_FIX = 'GHSA-fake-0003-baip';
+/** A low score on a package that is installed for development only. */
+export const ACME_DEV = 'GHSA-fake-0004-baip';
+/** Taken back: stored nowhere and reported nowhere. */
+export const ACME_WITHDRAWN = 'GHSA-fake-0005-baip';
+/** An advisory that states no severity and has no summary. */
+export const ACME_UNRATED = 'GHSA-fake-0006-baip';
+/** A report of malicious code. */
+export const ACME_MALICIOUS = 'MAL-0000-0001';
+
+export const ACME_OSV_SCRIPT: OsvScript = {
+  vulnerable: {
+    '@baip-fixture/odata@3.1.0': [ACME_CRITICAL],
+    // The older line of the package has one advisory, the newer one a second without a fix.
+    'baip-fixture-merge@3.10.1': [ACME_MODERATE],
+    'baip-fixture-merge@4.17.20': [ACME_MODERATE, ACME_NO_FIX],
+    'baip-fixture-mkdir@0.5.1': [ACME_DEV],
+    // Installed under an alias; the package behind it is what is looked up.
+    'baip-fixture-queue@5.0.2': [ACME_MALICIOUS],
+    'baip-fixture-server@2.4.1': [ACME_WITHDRAWN],
+    'baip-fixture-watcher@2.3.3': [ACME_UNRATED],
+  },
+  advisories: {
+    [ACME_CRITICAL]: {
+      aliases: ['CVE-2026-00001'],
+      summary: 'Requests inside a batch skip the authorization check in @baip-fixture/odata',
+      cvssV3: 'CVSS:3.1/AV:N/AC:L/PR:N/UI:N/S:U/C:H/I:H/A:H',
+      label: 'CRITICAL',
+      affected: [{ name: '@baip-fixture/odata', fixed: '3.1.2' }],
+    },
+    [ACME_MODERATE]: {
+      aliases: ['CVE-2026-00002'],
+      summary: 'Merging request data can overwrite properties shared by all objects',
+      label: 'MODERATE',
+      affected: [
+        { name: 'baip-fixture-merge', fixed: '3.10.2' },
+        { name: 'baip-fixture-merge', introduced: '4.0.0', fixed: '4.17.21' },
+        // Another package of the same advisory: nothing of it is kept.
+        { name: 'baip-fixture-merge-deep', fixed: '9.9.9' },
+      ],
+    },
+    [ACME_NO_FIX]: {
+      summary: 'A crafted template string makes baip-fixture-merge run for a very long time',
+      cvssV3: 'CVSS:3.0/AV:N/AC:L/PR:N/UI:N/S:U/C:N/I:N/A:H',
+      label: 'HIGH',
+      affected: [{ name: 'baip-fixture-merge' }],
+    },
+    [ACME_DEV]: {
+      aliases: ['CVE-2026-00004'],
+      summary: 'Folders can be created outside the target folder',
+      cvssV3: 'CVSS:3.1/AV:N/AC:H/PR:N/UI:N/S:U/C:L/I:N/A:N',
+      label: 'LOW',
+      affected: [{ name: 'baip-fixture-mkdir', fixed: '0.5.2' }],
+    },
+    [ACME_WITHDRAWN]: {
+      summary: 'Reported in error',
+      withdrawn: '2026-09-15T00:00:00Z',
+      label: 'HIGH',
+      affected: [{ name: 'baip-fixture-server', fixed: '2.4.2' }],
+    },
+    [ACME_UNRATED]: { affected: [{ name: 'baip-fixture-watcher' }] },
+    [ACME_MALICIOUS]: {
+      summary: 'Malicious code in baip-fixture-queue (npm)',
+      affected: [{ name: 'baip-fixture-queue' }],
+    },
+  },
+};
+
+/**
+ * The findings of `DEP_KNOWN_CVE` for the acme-incidents fixture with the
+ * script above, in report order: `[severity, subject, fixedIn, severityFrom]`.
+ * The package with the withdrawn advisory is not among them.
+ */
+export const ACME_KNOWN_CVE = [
+  ['critical', '@baip-fixture/odata@3.1.0', '3.1.2', 'cvss'],
+  ['critical', 'baip-fixture-queue@5.0.2', null, 'malicious'],
+  ['high', 'baip-fixture-merge@4.17.20', null, 'cvss'],
+  ['medium', 'baip-fixture-merge@3.10.1', '3.10.2', 'label'],
+  ['medium', 'baip-fixture-watcher@2.3.3', null, 'default'],
+  ['low', 'baip-fixture-mkdir@0.5.1', '0.5.2', 'cvss'],
+] as const;
+
 /** A fetch that knows OSV.dev and nothing else: any other request fails the test that made it. */
 export function osvFetch(script: OsvScript = {}): FakeFetch {
   return scriptOsv(new FakeFetch(), script);

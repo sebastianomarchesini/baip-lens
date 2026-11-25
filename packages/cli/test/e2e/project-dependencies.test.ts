@@ -6,6 +6,11 @@ import type * as HtmlReporter from '../../src/reporters/html.js';
 import { type CliIo, EXIT, main } from '../../src/main.js';
 import type { Snapshot } from '../../src/model/snapshot.js';
 import {
+  ACME_KNOWN_CVE,
+  ACME_NO_FIX,
+  ACME_MODERATE,
+  ACME_OSV_SCRIPT,
+  ACME_WITHDRAWN,
   OSV_HOST,
   OSV_POISON,
   type OsvScript,
@@ -583,6 +588,448 @@ describe('baip-lens project --path and the lookup on OSV.dev', () => {
     expect(quiet.out + quiet.err).toBe('');
     expect(askedPackages(quiet.fake)).toEqual(ASKED);
     expect(quiet.snapshot.raw.vulnerablePackages).toEqual(r.snapshot.raw.vulnerablePackages);
+  });
+});
+
+/*
+ * The rule that reads the answers, end to end: the scripted OSV.dev of the
+ * sample data (test/support/dependencyScript.ts) has every case the rule
+ * tells apart once, for the packages of the acme-incidents lockfile.
+ */
+describe('baip-lens project --path and the findings about vulnerable packages', () => {
+  const NPM_LS = 'https://docs.npmjs.com/cli/v11/commands/npm-ls';
+  const OVERRIDES = 'https://docs.npmjs.com/cli/v11/configuring-npm/package-json#overrides';
+  const OWASP_A03 = 'https://owasp.org/Top10/2025/A03_2025-Software_Supply_Chain_Failures/';
+  const ACME = { guid: 'project:acme-incidents', name: 'acme-incidents', space: 'project' };
+
+  interface ReportJson {
+    findings: Snapshot['findings'];
+    checks: Snapshot['checks'];
+    apps: Snapshot['apps'];
+    summary: { findings: number; findingsBySeverity: Record<string, number> };
+    rules: { id: string; owasp: string[] }[];
+  }
+  interface SarifResult {
+    ruleId: string;
+    level: string;
+    message: { text: string };
+    locations: { physicalLocation: { artifactLocation: { uri: string; uriBaseId?: string } } }[];
+    properties: { 'security-severity': string; severity: string; evidence: { subject: string } };
+  }
+  interface SarifLog {
+    runs: { tool: { driver: { rules: { id: string }[] } }; results: SarifResult[] }[];
+  }
+
+  let fixture: MaterializedFixture;
+  let r: Run;
+  let report: ReportJson;
+
+  beforeAll(async () => {
+    fixture = await materializeFixture('acme-incidents');
+    r = await scan(fixture.root, osvFetch(ACME_OSV_SCRIPT));
+    report = JSON.parse(r.files['baip-lens-report.json'] ?? '{}') as ReportJson;
+  });
+  afterAll(() => fixture.cleanup());
+
+  const knownCve = (findings: Snapshot['findings']) =>
+    findings.filter((finding) => finding.id === 'DEP_KNOWN_CVE');
+  const facts = (findings: Snapshot['findings']) =>
+    knownCve(findings).map((f) => [
+      f.severity,
+      f.evidence.subject,
+      f.evidence.fixedIn,
+      f.evidence.severityFrom,
+    ]);
+
+  it('reports each vulnerable package version of the lockfile once, by the severity of its advisories', () => {
+    expect(r.code, r.err).toBe(EXIT.ok);
+    expect(check(r, 'collect.osv')?.status).toBe('ran');
+    expect(check(r, 'rule.DEP_KNOWN_CVE')).toEqual({
+      id: 'rule.DEP_KNOWN_CVE',
+      title: 'Dependency with a known vulnerability',
+      roles: [],
+      status: 'ran',
+    });
+    expect(skipped(r)).toEqual([]);
+    // Worst first: a critical score, malicious code, a high score without a fix, a severity in
+    // words, an advisory that states none, and a low score on a package of development.
+    expect(facts(r.snapshot.findings)).toEqual(ACME_KNOWN_CVE);
+    // Among the findings of the files, in report order.
+    expect(r.snapshot.findings.map((f) => [f.id, f.severity, f.evidence.subject])).toEqual([
+      ['CAP_MOCKED_AUTH_IN_PROD', 'critical', 'requires.auth'],
+      ['CAP_SERVICE_NO_RESTRICTION', 'critical', 'AdminService'],
+      ['DEP_KNOWN_CVE', 'critical', '@baip-fixture/odata@3.1.0'],
+      ['DEP_KNOWN_CVE', 'critical', 'baip-fixture-queue@5.0.2'],
+      ['DEP_KNOWN_CVE', 'high', 'baip-fixture-merge@4.17.20'],
+      ['SEED_DATA_SENSITIVE', 'high', 'db/data/acme.incidents-Customers.csv#6'],
+      ['SEED_DATA_SENSITIVE', 'high', 'test/data/POISON-headerless.csv#2'],
+      ['APPROUTER_CSRF_DISABLED', 'medium', '^/odata/(.*)$'],
+      ['APPROUTER_ROUTE_NO_AUTH', 'medium', '^/public/(.*)$'],
+      ['CAP_AUDITLOG_MISSING', 'medium', 'requires.audit-log'],
+      ['CAP_AUDITLOG_NOT_BOUND', 'medium', 'auditlog'],
+      ['CAP_PERSONAL_DATA_UNANNOTATED', 'medium', 'Customers'],
+      ['CAP_PERSONAL_DATA_UNANNOTATED', 'medium', 'Addresses'],
+      ['CAP_ROLE_NOT_IN_XSUAA', 'medium', 'auditor'],
+      ['DEP_KNOWN_CVE', 'medium', 'baip-fixture-merge@3.10.1'],
+      ['DEP_KNOWN_CVE', 'medium', 'baip-fixture-watcher@2.3.3'],
+      ['DEPLOY_ARTIFACT_IN_REPO', 'medium', 'mta_archives/acme-incidents_1.0.0.mtar'],
+      ['UI5_BOOTSTRAP_EXTERNAL', 'medium', 'app/incidents/webapp/index.html'],
+      ['CAP_MOCKED_USER_PASSWORD', 'low', 'requires.auth.users'],
+      ['DEP_KNOWN_CVE', 'low', 'baip-fixture-mkdir@0.5.1'],
+      ['UI5_BOOTSTRAP_EXTERNAL', 'low', 'app/incidents/webapp/test/flpSandbox.html'],
+      ['UI5_BOOTSTRAP_EXTERNAL', 'low', 'app/launchpage.html'],
+      ['XSUAA_SCOPE_UNUSED', 'low', '$XSAPPNAME.unused'],
+      ['DEP_NOT_CHECKED', 'info', 'dependencies'],
+    ]);
+    expect(r.err).toContain(
+      'api.osv.dev: 6 of 9 package(s) have a known vulnerability (6 advisories)\n',
+    );
+    expect(r.out).toMatch(
+      /^Scanned project acme-incidents: 24 finding\(s\) \(4 critical, 3 high, 11 medium, 5 low, 1 info\)\.\n/,
+    );
+  });
+
+  it('says of a package what its advisories say, which version clears them and which lockfile pins it', () => {
+    const [odata, , merge] = knownCve(r.snapshot.findings);
+    // A direct dependency with one advisory and a fix.
+    expect(odata?.remediation).toMatch(/^Upgrade the package to the version in `fixedIn`/);
+    expect({ ...odata, remediation: '' }).toEqual({
+      id: 'DEP_KNOWN_CVE',
+      severity: 'critical',
+      title: 'Dependency with a known vulnerability',
+      app: { ...ACME, org: 'local' },
+      evidence: {
+        subject: '@baip-fixture/odata@3.1.0',
+        package: '@baip-fixture/odata',
+        version: '3.1.0',
+        direct: true,
+        scope: 'prod',
+        advisories: ['GHSA-fake-0001-baip'],
+        advisoryCount: 1,
+        aliases: ['CVE-2026-00001'],
+        fixedIn: '3.1.2',
+        score: 9.8,
+        severityFrom: 'cvss',
+        summary: 'Requests inside a batch skip the authorization check in @baip-fixture/odata',
+        lockfiles: ['package-lock.json'],
+        lockfileCount: 1,
+      },
+      remediation: '',
+      references: [
+        NPM_LS,
+        OVERRIDES,
+        'https://osv.dev/vulnerability/GHSA-fake-0001-baip',
+        OWASP_A03,
+      ],
+      location: { file: 'package-lock.json' },
+    });
+    // A transitive one with two advisories: the worse decides, and one of them has no fix.
+    expect(merge).toMatchObject({
+      severity: 'high',
+      evidence: {
+        subject: 'baip-fixture-merge@4.17.20',
+        direct: false,
+        advisories: [ACME_MODERATE, ACME_NO_FIX],
+        advisoryCount: 2,
+        aliases: ['CVE-2026-00002'],
+        fixedIn: null,
+        score: 7.5,
+        severityFrom: 'cvss',
+        summary: 'A crafted template string makes baip-fixture-merge run for a very long time',
+      },
+      references: [
+        NPM_LS,
+        OVERRIDES,
+        `https://osv.dev/vulnerability/${ACME_MODERATE}`,
+        `https://osv.dev/vulnerability/${ACME_NO_FIX}`,
+        OWASP_A03,
+      ],
+    });
+    expect(merge?.remediation).toMatch(/^At least one advisory of this finding names no fixed/);
+    // The other version of the same package is in the range the advisory fixed in its own line.
+    expect(knownCve(r.snapshot.findings)[3]?.evidence).toMatchObject({
+      subject: 'baip-fixture-merge@3.10.1',
+      advisories: [ACME_MODERATE],
+      fixedIn: '3.10.2',
+      score: null,
+    });
+  });
+
+  it('reports the package behind an alias, and never the name it is installed under', () => {
+    const queue = knownCve(r.snapshot.findings)[1];
+    expect(queue?.evidence).toMatchObject({
+      subject: 'baip-fixture-queue@5.0.2',
+      direct: true,
+      severityFrom: 'malicious',
+      fixedIn: null,
+    });
+    expect(queue?.remediation).toMatch(/^This package version is reported as malicious code/);
+    expect(JSON.stringify(knownCve(r.snapshot.findings))).not.toContain('baip-fixture-alias');
+  });
+
+  it('says nothing about a package whose only advisory was taken back', () => {
+    expect(askedAdvisories(r.fake)).toContain(ACME_WITHDRAWN);
+    expect(r.snapshot.raw.projects[0]?.dependencies?.packages.map((item) => item.name)).toContain(
+      'baip-fixture-server',
+    );
+    for (const [name, content] of Object.entries(r.files)) {
+      expect(content, name).not.toContain(ACME_WITHDRAWN);
+      expect(content, name).not.toContain('baip-fixture-server@');
+      expect(content, name).not.toContain('Reported in error');
+    }
+  });
+
+  it('counts the findings in the inventory and in the summary', () => {
+    expect(report.summary.findings).toBe(24);
+    expect(report.summary.findingsBySeverity).toEqual({
+      critical: 4,
+      high: 3,
+      medium: 11,
+      low: 5,
+      info: 1,
+    });
+    expect(report.apps[0]).toMatchObject({
+      guid: 'project:acme-incidents',
+      findingCounts: { critical: 4, high: 3, medium: 11, low: 5, info: 1 },
+      highestSeverity: 'critical',
+    });
+  });
+
+  it('writes the same findings into the JSON, the CSV, the SARIF and the HTML report', () => {
+    expect(report.findings).toEqual(r.snapshot.findings);
+    expect(report.rules.find((rule) => rule.id === 'DEP_KNOWN_CVE')?.owasp).toEqual(['A03:2025']);
+
+    // CSV: one row per finding; the location is the lockfile, the evidence one cell of JSON.
+    const rows = (r.files['baip-lens-findings.csv'] ?? '')
+      .split('\r\n')
+      .filter((row) => row.startsWith('DEP_KNOWN_CVE,'));
+    expect(rows).toHaveLength(6);
+    expect(rows.map((row) => row.split(',')[1])).toEqual([
+      'critical',
+      'critical',
+      'high',
+      'medium',
+      'medium',
+      'low',
+    ]);
+    for (const row of rows) {
+      expect(row).toContain(',Dependency with a known vulnerability,local,project,acme-incidents,');
+      expect(row).toMatch(/,A03:2025,package-lock\.json,$/);
+    }
+    expect(rows[0]).toContain('""subject"":""@baip-fixture/odata@3.1.0""');
+    expect(rows[0]).toContain('""fixedIn"":""3.1.2""');
+
+    // SARIF: a result per finding at the lockfile, ranked by the severity of the advisories.
+    const sarif = JSON.parse(r.files['baip-lens-report.sarif'] ?? '{}') as SarifLog;
+    const results = (sarif.runs[0]?.results ?? []).filter((x) => x.ruleId === 'DEP_KNOWN_CVE');
+    expect(sarif.runs[0]?.tool.driver.rules.map((rule) => rule.id)).toContain('DEP_KNOWN_CVE');
+    expect(
+      results.map((x) => [
+        x.properties.evidence.subject,
+        x.level,
+        x.properties['security-severity'],
+      ]),
+    ).toEqual([
+      ['@baip-fixture/odata@3.1.0', 'error', '9.5'],
+      ['baip-fixture-queue@5.0.2', 'error', '9.5'],
+      ['baip-fixture-merge@4.17.20', 'error', '8.0'],
+      ['baip-fixture-merge@3.10.1', 'warning', '5.5'],
+      ['baip-fixture-watcher@2.3.3', 'warning', '5.5'],
+      ['baip-fixture-mkdir@0.5.1', 'note', '3.0'],
+    ]);
+    for (const result of results) {
+      expect(result.locations[0]?.physicalLocation.artifactLocation).toEqual({
+        uri: 'package-lock.json',
+        uriBaseId: 'PROJECTROOT',
+      });
+      expect(result.message.text).toMatch(
+        /^Dependency with a known vulnerability \(local\/project\/acme-incidents\)\. /,
+      );
+    }
+
+    // HTML: the data of the report, embedded.
+    const html = r.files['baip-lens-report.html'] ?? '';
+    for (const [, subject] of ACME_KNOWN_CVE) expect(html, subject).toContain(`"${subject}"`);
+    expect(html).toContain('https://osv.dev/vulnerability/MAL-0000-0001');
+  });
+
+  it('leaks nothing into any output: only what the tables name of an advisory', () => {
+    const never = [
+      ...POISON,
+      ...OSV_POISON,
+      ACME_WITHDRAWN,
+      // A package of an advisory that is not in the lockfile.
+      'baip-fixture-merge-deep',
+      ENV_TOKEN,
+      fixture.root,
+      tmpdir(),
+    ];
+    expect(Object.keys(r.files)).toHaveLength(6);
+    expectNoLeaks({ ...r.files, terminal: terminal(r) }, never, [ABSOLUTE_PATH]);
+    // The terminal says how many, never which.
+    expect(terminal(r)).not.toMatch(/baip-fixture|GHSA|MAL-/);
+  });
+
+  it('gives the same findings again offline, in every format: report --from asks nothing', async () => {
+    const again = await tmp();
+    let out = '';
+    const io: CliIo = {
+      stdout: (text) => (out += text),
+      stderr: () => undefined,
+      env: {},
+      fetch: () => Promise.reject(new Error('network must not be used')),
+      now: () => NOW,
+    };
+    const args = ['report', '--from', join(r.outDir, SNAPSHOT_FILE), '--out', again];
+    expect(await main([...args, '--format', 'html,json,csv,sarif'], io)).toBe(EXIT.ok);
+    for (const name of [
+      'baip-lens-report.json',
+      'baip-lens-findings.csv',
+      'baip-lens-apps.csv',
+      'baip-lens-report.sarif',
+      'baip-lens-report.html',
+    ]) {
+      expect(await readFile(join(again, name), 'utf8'), name).toBe(r.files[name]);
+    }
+    expect(out).toMatch(/^Scanned project acme-incidents: 24 finding\(s\) \(4 critical, 3 high, /);
+    // The threshold judges them offline as it does after the scan.
+    expect(await main([...args, '--format', 'json', '--fail-on', 'critical'], io)).toBe(
+      EXIT.findings,
+    );
+  });
+
+  it('reports none of them when the lookup is turned off, and says that the rule did not run', async () => {
+    const off = await scan(fixture.root, osvFetch(ACME_OSV_SCRIPT), '--no-dependency-check');
+    expect(off.fake.calls).toEqual([]);
+    expect(knownCve(off.snapshot.findings)).toEqual([]);
+    expect(check(off, 'rule.DEP_KNOWN_CVE')).toEqual({
+      id: 'rule.DEP_KNOWN_CVE',
+      title: 'Dependency with a known vulnerability',
+      roles: [],
+      status: 'skipped',
+      reasonCode: 'dependency_skipped',
+      reason: 'needs collect.osv, which did not run',
+    });
+    expect(off.out).toMatch(
+      /^Scanned project acme-incidents: 18 finding\(s\) .*2 check\(s\) skipped/,
+    );
+    expect(off.out).toContain(
+      '  skipped rule.DEP_KNOWN_CVE: needs collect.osv, which did not run\n',
+    );
+  });
+
+  it('reports none of a package that --dependency-exclude holds back', async () => {
+    const x = await scan(
+      fixture.root,
+      osvFetch(ACME_OSV_SCRIPT),
+      '--dependency-exclude',
+      'baip-fixture-merge,@baip-fixture/*',
+    );
+    expect(x.code, x.err).toBe(EXIT.ok);
+    expect(facts(x.snapshot.findings).map(([, subject]) => subject)).toEqual([
+      'baip-fixture-queue@5.0.2',
+      'baip-fixture-watcher@2.3.3',
+      'baip-fixture-mkdir@0.5.1',
+    ]);
+    expect(check(x, 'rule.DEP_KNOWN_CVE')?.status).toBe('ran');
+    // What was held back is counted by the other rule, and named nowhere.
+    expect(x.snapshot.findings.find((f) => f.id === 'DEP_NOT_CHECKED')?.evidence).toMatchObject({
+      excluded: 3,
+      checked: 6,
+    });
+    for (const [name, content] of Object.entries({ ...x.files, terminal: terminal(x) })) {
+      expect(content, name).not.toMatch(/baip-fixture-merge|baip-fixture\/odata/);
+    }
+  });
+});
+
+/*
+ * `--fail-on` judges every finding, so since the lookup exists a vulnerable
+ * package can fail a pipeline that passed before. The clean-cap fixture has
+ * no finding of its own: what fails here is the package alone.
+ */
+describe('baip-lens project --path --fail-on and a vulnerable package', () => {
+  const HIGH = 'GHSA-fake-0007-baip';
+  /** One advisory of the high band for a package of the clean-cap lockfile. */
+  const ONE_HIGH: OsvScript = {
+    vulnerable: { 'baip-fixture-server@2.5.0': [HIGH] },
+    advisories: {
+      [HIGH]: {
+        summary: 'A long header makes baip-fixture-server stop answering',
+        cvssV3: 'CVSS:3.1/AV:N/AC:L/PR:N/UI:N/S:U/C:N/I:N/A:H',
+        affected: [{ name: 'baip-fixture-server', fixed: '2.5.1' }],
+      },
+    },
+  };
+  let fixture: MaterializedFixture;
+
+  beforeAll(async () => {
+    fixture = await materializeFixture('clean-cap');
+  });
+  afterAll(() => fixture.cleanup());
+
+  it('passes a project whose packages have no advisory, at any threshold', async () => {
+    const clean = await scan(fixture.root, osvFetch(), '--fail-on', 'info');
+    expect(clean.code, clean.err).toBe(EXIT.ok);
+    expect(askedPackages(clean.fake)).toHaveLength(4);
+    expect(clean.snapshot.findings).toEqual([]);
+    expect(clean.err).toContain(
+      'api.osv.dev: 0 of 4 package(s) have a known vulnerability (0 advisories)\n',
+    );
+  });
+
+  it('fails with exit code 1 when a package has an advisory at or above the threshold', async () => {
+    const failing = await scan(fixture.root, osvFetch(ONE_HIGH), '--fail-on', 'high');
+    expect(failing.code).toBe(EXIT.findings);
+    expect(failing.snapshot.findings).toHaveLength(1);
+    expect(failing.snapshot.findings[0]).toMatchObject({
+      id: 'DEP_KNOWN_CVE',
+      severity: 'high',
+      evidence: { subject: 'baip-fixture-server@2.5.0', fixedIn: '2.5.1', score: 7.5 },
+      location: { file: 'package-lock.json' },
+    });
+    // The reports are written all the same: the exit code is the verdict, not an error.
+    expect(Object.keys(failing.files)).toHaveLength(6);
+    expect(failing.out).toMatch(
+      /^Scanned project clean-cap: 1 finding\(s\) \(0 critical, 1 high, /,
+    );
+
+    expect((await scan(fixture.root, osvFetch(ONE_HIGH), '--fail-on', 'medium')).code).toBe(
+      EXIT.findings,
+    );
+  });
+
+  it('passes when the advisory is below the threshold, or no threshold is set', async () => {
+    expect((await scan(fixture.root, osvFetch(ONE_HIGH), '--fail-on', 'critical')).code).toBe(
+      EXIT.ok,
+    );
+    expect((await scan(fixture.root, osvFetch(ONE_HIGH))).code).toBe(EXIT.ok);
+  });
+
+  it('cannot fail on a package it did not look up: turned off, or OSV.dev out of reach', async () => {
+    const off = await scan(
+      fixture.root,
+      osvFetch(ONE_HIGH),
+      '--fail-on',
+      'low',
+      '--no-dependency-check',
+    );
+    expect(off.code).toBe(EXIT.ok);
+    expect(off.snapshot.findings).toEqual([]);
+    // Not a clean result: the report says the rule did not run.
+    expect(check(off, 'rule.DEP_KNOWN_CVE')?.status).toBe('skipped');
+
+    const unreachable = new FakeFetch().on('POST', QUERYBATCH, () => {
+      throw new TypeError('fetch failed');
+    });
+    const down = await scan(fixture.root, unreachable, '--fail-on', 'low');
+    expect(down.code).toBe(EXIT.ok);
+    expect(down.snapshot.findings).toEqual([]);
+    expect(check(down, 'rule.DEP_KNOWN_CVE')).toMatchObject({
+      status: 'skipped',
+      reason: 'needs collect.osv, which did not run',
+    });
+    expect(down.out).toContain('2 check(s) skipped');
   });
 });
 

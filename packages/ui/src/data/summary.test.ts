@@ -100,9 +100,17 @@ describe('startHereSentences', () => {
     const s = startHereSentences(project);
     expect(s).toEqual([
       'The project acme-incidents was scanned on Sep 29, 2026.',
-      '18 findings need attention: 3 pages load SAPUI5 from an external CDN without integrity protection; 2 seed data columns contain card numbers, IBANs or secrets; 2 entities hold personal data without @PersonalData annotations.',
-      'Nothing in your project was changed: this scan only read files in the project folder.',
+      '24 findings need attention: 6 use a library with a known vulnerability; 3 pages load SAPUI5 from an external CDN without integrity protection; 2 seed data columns contain card numbers, IBANs or secrets.',
+      'Nothing in your project was changed: this scan read files of the project and looked its public npm packages up on OSV.dev.',
     ]);
+  });
+
+  it('says that a project scan only read files when no package was looked up', () => {
+    const offline = { ...project, options: { ...project.options, dependencyCheck: false } };
+    expect(startHereSentences(offline).at(-1)).toBe(
+      'Nothing in your project was changed: this scan only read files in the project folder.',
+    );
+    expect(startHereSentences(project).at(-1)).toContain('looked its public npm packages up');
   });
 
   it('counts findings, not projects, per project rule', () => {
@@ -132,8 +140,8 @@ describe('startHereSentences', () => {
     const projectRules = project.rules.filter(
       (r) => r.roles.length === 0 && r.id !== 'APP_NO_RECENT_DEPLOY',
     );
-    // The thirteen project rules and the two dependency rules.
-    expect(projectRules).toHaveLength(15);
+    // The thirteen project rules and the three dependency rules.
+    expect(projectRules).toHaveLength(16);
     for (const rule of projectRules) {
       const finding = { ...project.findings[0]!, id: rule.id };
       const s = startHereSentences({ ...project, findings: [finding, finding] });

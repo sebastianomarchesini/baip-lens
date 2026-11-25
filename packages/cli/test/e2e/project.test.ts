@@ -294,7 +294,8 @@ describe('baip-lens project on the acme-incidents fixture', () => {
     // file whose first row looks like a header fires by column position, never by name.
     // Of the dependency rules, DEP_NOT_CHECKED counts the packages of the lockfile that
     // do not come from the public npm registry; the lockfile is there, so
-    // DEP_LOCKFILE_MISSING stays silent.
+    // DEP_LOCKFILE_MISSING stays silent. DEP_KNOWN_CVE ran and has nothing to say: the
+    // scripted OSV.dev of this file knows no advisory (project-dependencies.test.ts has them).
     expect(snapshot.findings.map((f) => [f.id, f.severity, f.evidence.subject])).toEqual([
       ['CAP_MOCKED_AUTH_IN_PROD', 'critical', 'requires.auth'],
       ['CAP_SERVICE_NO_RESTRICTION', 'critical', 'AdminService'],

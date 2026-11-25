@@ -47,10 +47,12 @@ open reports/baip-lens-report.html                      # works offline
 ### Project scan (no login needed)
 
 ```sh
-npx baip-lens project --path ./my-cap-project      # reads the project files, contacts nothing
+npx baip-lens project --path ./my-cap-project      # reads the project files; asks OSV.dev about its public npm packages
 ```
 
 This checks a local CAP or MTA project the way a reviewer would: effective `cds` configuration per profile, `mta.yaml`, `xs-security.json`, `xs-app.json`, the CDS model, seed CSV files and the SAPUI5 bootstrap, and writes the same reports with a `file:line` location per finding (also in SARIF, for code scanning). The rules follow the OWASP Top 10 (2025) patterns of the public SAP TechEd 2026 workshop XP261; see [docs/rules.md](docs/rules.md#project-rules).
+
+It also reads the npm lockfiles of the project and reports every package version with a **known vulnerability** (`DEP_KNOWN_CVE`). For that it sends the names and versions of the packages that come from the public npm registry, and nothing else, to [OSV.dev](https://osv.dev), and says so first. `--no-dependency-check` turns the lookup off, and `--dependency-exclude '@acme/*'` holds packages back; see [docs/privacy.md](docs/privacy.md#what-is-sent-to-osvdev).
 
 ### Project scan of a deployed app or project
 
@@ -93,9 +95,11 @@ baip-lens scan   --api <cf api url> --org <name> [--space <name>] [--deep]
                 [--out ./reports] [--format html,json,csv,sarif] [--fail-on <severity>] [--concurrency 5]
                 [--no-traffic-check] [--min-traffic-window 12] [--traffic-pages 5]
                 [--previous <snapshot.json>] [--quiet]
-baip-lens project --path <dir> [--out ./reports] [--format html,json,csv,sarif] [--fail-on <severity>] [--quiet]
+baip-lens project --path <dir> [--no-dependency-check] [--dependency-exclude <list>]
+                [--out ./reports] [--format html,json,csv,sarif] [--fail-on <severity>] [--quiet]
 baip-lens project --cf [--app <name> | --mta <id> [--mta-namespace <name>]]
                 [--api <url>] [--org <name>] [--space <name>]
+                [--no-dependency-check] [--dependency-exclude <list>]
                 [--out ./reports] [--format html,json,csv,sarif] [--fail-on <severity>] [--quiet]
 baip-lens report --from <snapshot.json> [--format html,json,csv,sarif] [--out ./reports] [--fail-on <severity>]
 baip-lens version
@@ -103,7 +107,8 @@ baip-lens version
 
 - With no arguments on a terminal, guided mode starts; in a script it prints usage and exits 2.
 - `--api` takes the API endpoint or just the region: `--api eu10` is `https://api.cf.eu10.hana.ondemand.com`. `baip-lens regions` lists the regions.
-- `project` scans a local CAP or MTA project folder for the thirteen configuration and model rules in [docs/rules.md](docs/rules.md#project-rules) (mocked authentication in production, unrestricted services, missing audit logging, open approuter routes, seed data with card numbers, and more), each tagged with its OWASP Top 10 (2025) category. It reads files only: no login, no network, no child process, and it never opens `.env`, `.cdsrc-private.json`, `default-env.json`, keys or `*.mtaext` files.
+- `project` scans a local CAP or MTA project folder for the thirteen configuration and model rules in [docs/rules.md](docs/rules.md#project-rules) (mocked authentication in production, unrestricted services, missing audit logging, open approuter routes, seed data with card numbers, and more), each tagged with its OWASP Top 10 (2025) category. It reads files only: no login, no child process, and it never opens `.env`, `.cdsrc-private.json`, `default-env.json`, `.npmrc`, keys or `*.mtaext` files.
+- `project` also reads the npm lockfiles (`package-lock.json`, `npm-shrinkwrap.json`) and looks the packages that were resolved from the public npm registry up on OSV.dev for known vulnerabilities: only their names and versions are sent, each once, and the terminal says so before the first request. Every other package (a company registry, git, a local folder) is counted and never named or sent. `--no-dependency-check` makes no request about a package; the report then says that the packages were not looked up. `--dependency-exclude <list>` takes comma-separated package names or patterns such as `@acme/*` that are never looked up and never kept from a lockfile. When OSV.dev cannot be reached, the scan still finishes, and the report says what was not checked. See [docs/rules.md](docs/rules.md#dependency-rules).
 - `project --cf` runs the same rules on what is deployed instead of a folder: it takes the API, login, org and space from the cf CLI (`--api`, `--org` and `--space` override them), lists the apps of the space grouped by the project (MTA) they were deployed from, and reads what you pick over SSH with read-only SFTP: one app (or name it with `--app`), or every app of a project (or name it with `--mta <id>`), one session per app and at most 50 apps. `--mta-namespace <name>` tells two deployments of one project apart (`""` is the one without a namespace). It needs Space Developer and SSH enabled for each app, and records one audit event per app in Cloud Foundry.
 - Guided mode signs in the way `cf login --sso` does (one-time code from your company login) or with username and password, keeps the session in memory only, and writes to `./baip-lens-reports/<date-time>/`.
 - `scan` and `project` write one snapshot (`snapshot-<time>.json`) and the requested reports.
@@ -126,13 +131,14 @@ The HTML report is a single file. Fonts, themes and data are embedded, it follow
 | Planned: buildpacks, stacks, binding metadata and the rules built on them | Space Auditor | on, in the next releases |
 | Planned: plain-text secrets in environment variable **names** (`ENV_SECRET_PLAINTEXT`) | Space Developer or Space Supporter | `--deep` only |
 | Project scan (`collect.project` and the thirteen project rules) | none: local files, no login, no network | on, for `baip-lens project` |
+| Known vulnerabilities of a project's npm packages (`collect.dependencies`, `collect.osv`, rule `DEP_KNOWN_CVE`) | none for the lookup: OSV.dev is public and gets no credential (reading a deployed app's lockfile with `--cf` needs Space Developer, like the rest of that scan) | on, for `baip-lens project`; `--no-dependency-check` turns the lookup off |
 
 The Cloud Foundry list endpoints answer with what your user may see rather than with 403, so a user who can see the org but none of its spaces gets a clear message and exit code 2 instead of an empty report. When a call does return 403, the check is recorded as *skipped: insufficient role* and the scan continues. Details are in [docs/permissions.md](docs/permissions.md).
 
 ## Privacy
 
 - **Read-only:** the HTTP client refuses any method other than `GET` to the CF API and its log cache. The only `POST` request goes to the OAuth token endpoint.
-- **No data leaves your machine:** a Cloud Foundry scan talks to your CF API, its login server (UAA) and its log cache, and to nothing else. The log cache address comes from your CF API, and `--no-traffic-check` leaves it out. The egress allow-list also names `api.osv.dev`, `endoflife.date`, `ui5.sap.com` and `registry.npmjs.org` for the version and vulnerability rules of the next releases; none of them is contacted yet. There is no telemetry.
+- **No data leaves your machine:** a Cloud Foundry scan talks to your CF API, its login server (UAA) and its log cache, and to nothing else. The log cache address comes from your CF API, and `--no-traffic-check` leaves it out. A project scan sends one thing: the names and versions of the project's **public** npm packages to `api.osv.dev`, to learn their known vulnerabilities. It says so before the first request, `--no-dependency-check` turns it off, and `--dependency-exclude` holds packages back ([docs/privacy.md](docs/privacy.md#what-is-sent-to-osvdev)). The egress allow-list also names `endoflife.date`, `ui5.sap.com` and `registry.npmjs.org` for the version rules of the next releases; none of them is contacted yet. There is no telemetry.
 - **No personal data:** user names, emails and IDs are never written. Audit-event actors are dropped when the events are read.
 - **No secrets:** tokens, environment variable values and service credentials are never printed or stored. Credentials in buildpack URLs are stripped, everything printed to the terminal passes through a redaction filter, and the endpoints that return credentials (`/v3/apps/:guid/env`, binding `details`) are refused by the allow-list even for `GET`.
 

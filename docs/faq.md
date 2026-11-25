@@ -20,7 +20,7 @@ Because the Cloud Foundry API only answers people with a role. BAIP Lens uses yo
 
 ### What leaves my machine?
 
-A Cloud Foundry scan sends requests to your CF API, its login server and its log cache only (the log cache to see when each app last served a request; `--no-traffic-check` leaves it out). The rules of the next releases add public version and vulnerability lookups at `api.osv.dev`, `endoflife.date`, `ui5.sap.com` and `registry.npmjs.org`; those hosts are already in the allow-list but are not contacted yet. The full list, with what is sent to each, is in [privacy.md](privacy.md). The HTML report itself carries a Content Security Policy with `connect-src 'none'`, so even the browser refuses to let it connect anywhere.
+A Cloud Foundry scan sends requests to your CF API, its login server and its log cache only (the log cache to see when each app last served a request; `--no-traffic-check` leaves it out). From the next release on, a project scan (`baip-lens project`) also sends the names and versions of the public npm packages in your lockfiles to `api.osv.dev`, to learn their known vulnerabilities; `--no-dependency-check` turns that off. The rules of later releases add public version lookups at `endoflife.date`, `ui5.sap.com` and `registry.npmjs.org`; those hosts are already in the allow-list but are not contacted yet. The full list, with what is sent to each, is in [privacy.md](privacy.md). The HTML report itself carries a Content Security Policy with `connect-src 'none'`, so even the browser refuses to let it connect anywhere.
 
 ### It says my role is insufficient. What now?
 

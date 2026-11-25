@@ -435,7 +435,9 @@ describe('DEP_NOT_CHECKED', () => {
 
 describe('the dependency rules', () => {
   it('declare final metadata: ids, OWASP A03, no CF role, the lockfile collector', () => {
+    // Report order: what is known about the packages, then what could not be said about them.
     expect(DEPENDENCY_ANALYZERS.map((a) => a.rule.id)).toEqual([
+      'DEP_KNOWN_CVE',
       'DEP_LOCKFILE_MISSING',
       'DEP_NOT_CHECKED',
     ]);

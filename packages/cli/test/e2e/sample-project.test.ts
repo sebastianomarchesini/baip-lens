@@ -2,10 +2,14 @@ import { mkdir, readFile, writeFile } from 'node:fs/promises';
 import { dirname } from 'node:path';
 import { fileURLToPath } from 'node:url';
 import { afterAll, beforeAll, describe, expect, it } from 'vitest';
+import { createDependencyLookup } from '../../src/dependencyCheck.js';
 import { ReportDataSchema, SnapshotSchema } from '../../src/model/snapshot.js';
 import { scanProject } from '../../src/project.js';
 import { renderJson } from '../../src/reporters/json.js';
 import { toReportData } from '../../src/reporters/reportData.js';
+import { TOOL_NAME, TOOL_VERSION } from '../../src/version.js';
+import { ACME_KNOWN_CVE, ACME_OSV_SCRIPT, osvFetch } from '../support/dependencyScript.js';
+import { noSleep } from '../support/fakeFetch.js';
 import { NOW } from '../support/project.js';
 import { type MaterializedFixture, materializeFixture } from '../support/projectFixture.js';
 
@@ -15,6 +19,10 @@ import { type MaterializedFixture, materializeFixture } from '../support/project
  *  - packages/ui/src/test/fixtures/report-project.json is the UI's test data
  *    for a project scan.
  * Regenerate both with `UPDATE_SAMPLE=1 npm test -w baip-lens`.
+ *
+ * The packages of the fixture's lockfile are looked up as `baip-lens project`
+ * does it, on a scripted OSV.dev (test/support/dependencyScript.ts): the
+ * advisories of the sample are invented, and no request leaves the test.
  */
 const SAMPLE_SNAPSHOT = fileURLToPath(
   new URL('../fixtures/sample-project-snapshot.json', import.meta.url),
@@ -39,7 +47,17 @@ describe('sample project data', () => {
   afterAll(() => fixture.cleanup());
 
   it('matches the committed sample project snapshot and UI report fixture', async () => {
-    const snapshot = await scanProject({ path: fixture.root, now: () => new Date(NOW) });
+    const osv = osvFetch(ACME_OSV_SCRIPT);
+    const snapshot = await scanProject({
+      path: fixture.root,
+      now: () => new Date(NOW),
+      lookup: createDependencyLookup({
+        enabled: true,
+        userAgent: `${TOOL_NAME}/${TOOL_VERSION}`,
+        fetch: osv.fetch,
+        sleep: noSleep,
+      }),
+    });
     const snapshotJson = `${JSON.stringify(snapshot, null, 2)}\n`;
     const reportJson = renderJson(toReportData(snapshot));
 
@@ -52,6 +70,16 @@ describe('sample project data', () => {
         await writeFile(path, content, 'utf8');
       }
     }
+
+    // The sample shows the lookup: it ran, and every case of the script is a finding.
+    expect(osv.calls.length).toBeGreaterThan(0);
+    expect(snapshot.options.dependencyCheck).toBe(true);
+    expect(snapshot.checks.find((check) => check.id === 'collect.osv')?.status).toBe('ran');
+    expect(
+      snapshot.findings
+        .filter((finding) => finding.id === 'DEP_KNOWN_CVE')
+        .map((f) => [f.severity, f.evidence.subject, f.evidence.fixedIn, f.evidence.severityFrom]),
+    ).toEqual(ACME_KNOWN_CVE);
 
     expect(SnapshotSchema.safeParse(JSON.parse(snapshotJson)).success).toBe(true);
     expect(ReportDataSchema.safeParse(JSON.parse(reportJson)).success).toBe(true);

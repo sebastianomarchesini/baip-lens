@@ -84,13 +84,17 @@ describe('project scan has no way out of the file system', () => {
   it('guards the collector, the analyzers and the command', async () => {
     const files = (await Promise.all(GUARDED.map(sourceFiles))).flat();
     expect(files.length).toBeGreaterThan(14);
-    // The lockfile parser, the lockfile step and the dependency rules are among them.
+    // The lockfile parser, the lockfile step and the dependency rules are among them: also the
+    // rule that reads the answers of the lookup, and the two calculations it rests on.
     for (const guarded of [
       'collectors/project/lockfile.ts',
       'collectors/project/dependencies.ts',
       'analyzers/dependencies/index.ts',
       'analyzers/dependencies/lockfileMissing.ts',
       'analyzers/dependencies/notChecked.ts',
+      'analyzers/dependencies/knownCve.ts',
+      'analyzers/dependencies/cvss.ts',
+      'analyzers/dependencies/semver.ts',
       'project.ts',
     ]) {
       expect(files, guarded).toContain(join(SRC, guarded));

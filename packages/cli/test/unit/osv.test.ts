@@ -539,16 +539,24 @@ describe('collectOsv', () => {
         );
     }
 
-    it('stores 200 advisories of one package, and nothing when it has 201', async () => {
-      const many = (count: number) => () =>
-        Array.from({ length: count }, (_, i) => `GHSA-fake-${String(i).padStart(4, '0')}`);
-      const fits = await collect(flood(many(200)), [MERGE]);
-      expect(fits.vulnerablePackages[0]?.advisories).toHaveLength(200);
-      expect(fits.advisories).toHaveLength(200);
-      const over = flood(many(201));
+    const many = (count: number) => () =>
+      Array.from({ length: count }, (_, i) => `GHSA-fake-${String(i).padStart(4, '0')}`);
+
+    // Heavily reported packages have well over a hundred advisories: one of them must not
+    // switch the whole lookup off.
+    it.each([201, 1_000])('stores %i advisories of one package', async (count) => {
+      const fits = await collect(flood(many(count)), [MERGE]);
+      expect(fits.vulnerablePackages).toHaveLength(1);
+      expect(fits.vulnerablePackages[0]?.advisories).toHaveLength(count);
+      expect(fits.advisories).toHaveLength(count);
+      expect(RawVulnerablePackageSchema.safeParse(fits.vulnerablePackages[0]).success).toBe(true);
+    });
+
+    it('stores nothing when one package has 1,001 advisories', async () => {
+      const over = flood(many(1_001));
       expect(await skip(collect(over, [MERGE]))).toEqual([
         'error',
-        'more than 200 advisories for one package',
+        'more than 1,000 advisories for one package',
       ]);
       // Known from the first answer: no advisory was asked for.
       expect(over.calls).toHaveLength(1);

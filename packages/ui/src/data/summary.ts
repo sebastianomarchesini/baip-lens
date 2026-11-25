@@ -169,7 +169,10 @@ export function startHereSentences(data: ReportData): string[] {
   }
   sentences.push(
     project
-      ? 'Nothing in your project was changed: this scan only read files in the project folder.'
+      ? data.options.dependencyCheck
+        ? // The lookup of the npm packages is the one thing a project scan asks anybody else.
+          'Nothing in your project was changed: this scan read files of the project and looked its public npm packages up on OSV.dev.'
+        : 'Nothing in your project was changed: this scan only read files in the project folder.'
       : 'Nothing in your account was changed: this scan only read information.',
   );
   return sentences;

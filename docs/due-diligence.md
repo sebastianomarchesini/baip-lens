@@ -6,7 +6,7 @@ This page answers the questions a manager, a security officer, a legal or procur
 
 - **It reads, and nothing else.** Towards your Cloud Foundry API and its log cache it can send `GET` and no other method. The only `POST` to your systems is the sign-in to your own UAA, as `cf login` does.
 - **It needs the Space Auditor role**, which cannot change anything. Even a bug in BAIP Lens cannot write to your landscape with that role.
-- **It runs on your machine.** There is no server, no account and no telemetry. A Cloud Foundry scan talks to your CF API, your UAA and your log cache, and to nothing else; a project scan makes no network request at all.
+- **It runs on your machine.** There is no server, no account and no telemetry. A Cloud Foundry scan talks to your CF API, your UAA and your log cache, and to nothing else; a project scan reads your files and asks one public service, `api.osv.dev`, about the public npm packages it finds (names and versions only, without credentials; `--no-dependency-check` turns that off).
 - **Its output holds no secrets and no personal data**, and a test plants fake ones in the input to prove that none reaches a report.
 - **It is open source** (Apache-2.0), so every claim on this page can be checked. [Check it yourself](#check-it-yourself) shows how in about 30 minutes.
 
@@ -27,7 +27,7 @@ Yes, on exactly two paths, and never to your CF API:
 | Host | Method and path | Why |
 | --- | --- | --- |
 | Your UAA (login server) | `POST /oauth/token` | Signing in or refreshing the token. OAuth requires `POST` here, and `cf login` does the same. It returns a token and changes nothing in your landscape. |
-| `api.osv.dev` | `POST /v1/querybatch` | Known-vulnerability lookups for public package names and versions, with no credentials. It is on the allow-list for a coming release; **0.3.1 never calls it.** |
+| `api.osv.dev` | `POST /v1/querybatch` | Known-vulnerability lookups for public package names and versions, with no credentials. `baip-lens project` uses it from the next release on, for the public npm packages of a project's lockfiles (`--no-dependency-check` turns it off); a Cloud Foundry scan does not call it, and **0.3.1 never calls it.** |
 
 `PUT`, `PATCH` and `DELETE` are not in the type at all, so the code cannot express them.
 
@@ -53,7 +53,7 @@ Its requests look like a person browsing the BTP cockpit: authenticated `GET` re
 
 Requests of a Cloud Foundry scan go to three places, all yours: your CF API (`GET`, with your token), your UAA (`POST /oauth/token`) and your log cache (`GET /api/v1/read/<app-guid>`, with your token, to see when each app with an HTTP route last served a request; its address comes from your CF API and `--no-traffic-check` turns it off). Nothing else. From the log cache BAIP Lens keeps only three values per app, never a log line (client addresses, paths and user agents are dropped as they are read).
 
-The allow-list also names `api.osv.dev`, `endoflife.date`, `ui5.sap.com` and `registry.npmjs.org` for the rules of the next releases. They will receive public product and package names, such as `nodejs` or `@sap/cds`, and never your token or the names of your orgs, spaces or apps. The vulnerability lookup will send the package names and versions from your software bill of materials; it will come with an option to leave out your internal packages or to switch the lookup off ([security review](security-review.md), SEC-10). The full table is in [privacy.md](privacy.md#where-requests-go).
+From the next release on, a project scan contacts `api.osv.dev`: it sends the names and versions of the packages that the project's npm lockfiles resolved from the public npm registry, and nothing else. Packages from any other source are never sent, `--dependency-exclude` holds further packages back, and `--no-dependency-check` switches the lookup off ([security review](security-review.md), SEC-10). The allow-list also names `endoflife.date`, `ui5.sap.com` and `registry.npmjs.org` for the rules of later releases; nothing contacts them yet. They will receive public product and package names, such as `nodejs` or `@sap/cds`, and never your token or the names of your orgs, spaces or apps. The full table is in [privacy.md](privacy.md#where-requests-go).
 
 Downloading BAIP Lens with `npx` contacts the npm registry, like any npm package. If your company uses an internal registry mirror, install it from there.
 
@@ -179,7 +179,7 @@ No, and those certifications would not apply in the usual way. They certify an o
 - It applies `APP_IDLE`: apps that nothing seems to use, because they are started with no route, no request reached them in the router logs that Log Cache holds, or they have been stopped for more than 90 days. Each finding carries a confidence, and an app the data cannot judge is shown as unknown, never as fine. One scan sees only the hours of logs Log Cache keeps; `scan --previous` builds a longer view across scans ([rules.md](rules.md#app_idle)).
 - It writes HTML, JSON, CSV and SARIF reports.
 
-Since 0.2.0, `baip-lens project --path <dir>` checks a local CAP or MTA project against thirteen configuration and model rules tagged with the OWASP Top 10 (2025) categories, without any login or network access ([rules.md](rules.md#project-rules), [privacy.md](privacy.md#project-scans)).
+Since 0.2.0, `baip-lens project --path <dir>` checks a local CAP or MTA project against thirteen configuration and model rules tagged with the OWASP Top 10 (2025) categories, without any login. From the next release on it also reads the project's npm lockfiles and looks their public packages up on `api.osv.dev` for known vulnerabilities, which is its only network request ([rules.md](rules.md#project-rules), [privacy.md](privacy.md#project-scans)).
 
 The other rules and the `sbom` command are designed and documented in [rules.md](rules.md) and arrive in the next releases ([roadmap](roadmap.md)). Those rules cover end-of-life runtimes and stacks, outdated buildpacks, SAPUI5 maintenance, outdated `@sap/*` packages, known CVEs and plain-text secrets. Treat 0.3.1 as an inventory and a first health signal, not as a full security assessment.
 

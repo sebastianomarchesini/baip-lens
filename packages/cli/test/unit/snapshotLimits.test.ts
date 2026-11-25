@@ -114,7 +114,7 @@ const LISTS: [string, typeof cf, JsonPath, number][] = [
   ['raw.advisories', looked, ADVISORIES, 20_000],
   ['the aliases of an advisory', looked, [...ADVISORIES, 0, 'aliases'], 20],
   ['raw.vulnerablePackages', looked, VULNERABLE_PACKAGES, 20_000],
-  ['the advisories of a package', looked, PACKAGE_ADVISORIES, 200],
+  ['the advisories of a package', looked, PACKAGE_ADVISORIES, 1_000],
   ['the fixed versions of an advisory', looked, [...PACKAGE_ADVISORIES, 0, 'fixed'], 10],
 ];
 
@@ -261,7 +261,12 @@ describe('the tables of the lookup on OSV.dev', () => {
     ['advisories', ADVISORIES, JSON.stringify(ADVISORY), 20_000],
     ['vulnerable packages', VULNERABLE_PACKAGES, JSON.stringify(VULNERABLE), 20_000],
     ['aliases of an advisory', [...ADVISORIES, 0, 'aliases'], '"CVE-2026-00001"', 20],
-    ['advisories of a package', PACKAGE_ADVISORIES, JSON.stringify(VULNERABLE.advisories[0]), 200],
+    [
+      'advisories of a package',
+      PACKAGE_ADVISORIES,
+      JSON.stringify(VULNERABLE.advisories[0]),
+      1_000,
+    ],
     ['fixed versions of an advisory', [...PACKAGE_ADVISORIES, 0, 'fixed'], '"4.17.21"', 10],
   ] as [string, JsonPath, string, number][])(
     'take as many %s as the lookup keeps, and are refused at once with one more',

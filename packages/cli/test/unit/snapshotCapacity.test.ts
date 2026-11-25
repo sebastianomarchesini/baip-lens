@@ -2,17 +2,21 @@ import { mkdtemp, readFile, rm, stat, writeFile } from 'node:fs/promises';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 import { afterAll, describe, expect, it } from 'vitest';
+import { reanalyze } from '../../src/analyzers/index.js';
 import { MAX_TABLE_BYTES } from '../../src/collectors/osv.js';
 import { PackageTable } from '../../src/collectors/project/dependencies.js';
 import type { LockedPackage } from '../../src/collectors/project/lockfile.js';
 import { type JsonShapeLimits, jsonShapeExcess } from '../../src/io/jsonShape.js';
 import { rawListBytes } from '../../src/io/jsonSize.js';
 import { MAX_RELATIVE_PATH_LENGTH } from '../../src/model/paths.js';
+import type { RawAdvisory, RawVulnerablePackage } from '../../src/model/raw.js';
+import { SnapshotSchema } from '../../src/model/snapshot.js';
 import {
   MAX_SNAPSHOT_BYTES,
   MAX_SNAPSHOT_DEPTH,
   MAX_SNAPSHOT_ITEMS,
   MAX_SNAPSHOT_MEMBERS,
+  loadableSnapshotText,
   readSnapshot,
   snapshotExcess,
 } from '../../src/snapshot.js';
@@ -232,8 +236,13 @@ describe('a project snapshot with the tables of the lookup at their limits', () 
   const name = (i: number): string => `baip-bulk-${String(i).padStart(5, '0')}`;
   const id = (i: number): string => `GHSA-fake-${String(i).padStart(5, '0')}`;
 
+  interface Tables {
+    advisories: RawAdvisory[];
+    vulnerablePackages: RawVulnerablePackage[];
+  }
+
   /** Each package with `perPackage` advisories that name no fix: the most rows for their bytes. */
-  function tables(perPackage: number) {
+  function tables(perPackage: number): Tables {
     return {
       advisories: Array.from({ length: PACKAGES }, (_, i) => ({
         id: id(i),
@@ -253,10 +262,35 @@ describe('a project snapshot with the tables of the lookup at their limits', () 
     };
   }
 
-  const tableBytes = (found: ReturnType<typeof tables>): number =>
+  /**
+   * A few advisories that say as much as an advisory can (20 other ids of 100
+   * characters, a summary of 200, a score), and every package has all of
+   * them: the largest findings for the bytes of the tables.
+   */
+  function tablesOfLargeFindings(advisories: number): Tables {
+    const ids = Array.from({ length: advisories }, (_, i) => id(i));
+    return {
+      advisories: ids.map((advisoryId, i) => ({
+        id: advisoryId,
+        aliases: Array.from({ length: 20 }, (_, k) =>
+          `CVE-${i}-${k}-${'9'.repeat(100)}`.slice(0, 100),
+        ),
+        summary: 'word '.repeat(40).trim(),
+        cvssV3: 'CVSS:3.1/AV:N/AC:L/PR:N/UI:N/S:U/C:H/I:H/A:H',
+        label: 'CRITICAL' as const,
+      })),
+      vulnerablePackages: Array.from({ length: PACKAGES }, (_, i) => ({
+        name: name(i),
+        version: '1.0.0',
+        advisories: ids.map((advisoryId) => ({ id: advisoryId, fixed: [] })),
+      })),
+    };
+  }
+
+  const tableBytes = (found: Tables): number =>
     rawListBytes(found.advisories) + rawListBytes(found.vulnerablePackages);
 
-  function atTheLimits(found: ReturnType<typeof tables>): Record<string, unknown> {
+  function atTheLimits(found: Tables): Record<string, unknown> {
     const sample = readFixture('sample-project-snapshot.json');
     const raw = sample.raw as Record<string, unknown> & { projects: Record<string, unknown>[] };
     const dependencies = raw.projects[0]?.dependencies as Record<string, unknown>;
@@ -303,4 +337,54 @@ describe('a project snapshot with the tables of the lookup at their limits', () 
     expect(snapshot.raw.vulnerablePackages).toHaveLength(PACKAGES);
     expect(snapshot.raw.vulnerablePackages.at(-1)?.advisories).toHaveLength(6);
   }, 60_000);
+
+  /**
+   * The whole result of such a scan: the tables, and on top of them the
+   * finding the rule raises for every package, checked and written as
+   * `baip-lens project` does it, and read back.
+   */
+  async function writtenAndReadBack(found: Tables) {
+    const scanned = reanalyze(SnapshotSchema.parse(atTheLimits(found)));
+    // The check `baip-lens project` makes before it writes anything: it does not refuse this.
+    const text = loadableSnapshotText(scanned, 'unused');
+    const dir = await mkdtemp(join(tmpdir(), 'baip-lens-capacity-'));
+    created.push(dir);
+    const path = join(dir, 'snapshot.json');
+    await writeFile(path, text);
+    const snapshot = await readSnapshot(path);
+    const vulnerable = snapshot.findings.filter((finding) => finding.id === 'DEP_KNOWN_CVE');
+    return { bytes: Buffer.byteLength(text, 'utf8'), text, snapshot, vulnerable };
+  }
+
+  it('loads again with a finding for every one of 20,000 vulnerable packages', async () => {
+    const { bytes, text, snapshot, vulnerable } = await writtenAndReadBack(tables(6));
+    expect(vulnerable).toHaveLength(PACKAGES);
+    expect(vulnerable.at(-1)?.evidence).toMatchObject({ advisoryCount: 6, lockfileCount: 1 });
+    expect(snapshot.raw.vulnerablePackages).toHaveLength(PACKAGES);
+    // The findings are the larger part: with them the file takes about half of what it may.
+    expect(bytes).toBeGreaterThan(MAX_SNAPSHOT_BYTES / 4);
+    expect(bytes).toBeLessThan(0.6 * MAX_SNAPSHOT_BYTES);
+    expect(
+      jsonShapeExcess(Buffer.from(text), itemLimit(0.75 * MAX_SNAPSHOT_ITEMS)),
+    ).toBeUndefined();
+  }, 120_000);
+
+  it('loads again when every one of those findings is as large as the rule makes one', async () => {
+    // Eight advisories for each package fit into the tables; a ninth each does not.
+    const found = tablesOfLargeFindings(8);
+    expect(tableBytes(found)).toBeLessThanOrEqual(MAX_TABLE_BYTES);
+    expect(tableBytes(tablesOfLargeFindings(9))).toBeGreaterThan(MAX_TABLE_BYTES);
+
+    const { bytes, vulnerable } = await writtenAndReadBack(found);
+    expect(vulnerable).toHaveLength(PACKAGES);
+    expect(vulnerable.at(-1)?.evidence).toMatchObject({
+      advisoryCount: 8,
+      fixedIn: null,
+      score: 9.8,
+    });
+    // Eight ids, ten other ids of 100 characters and a summary of 200 in each finding.
+    expect(vulnerable.at(-1)?.evidence.aliases).toHaveLength(10);
+    expect(bytes).toBeGreaterThan(0.6 * MAX_SNAPSHOT_BYTES);
+    expect(bytes).toBeLessThan(MAX_SNAPSHOT_BYTES);
+  }, 120_000);
 });

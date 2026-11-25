@@ -16,6 +16,8 @@ import {
   DEPENDENCIES_COLLECTOR,
   DEPENDENCIES_COLLECTOR_SKIPPED,
   NOW,
+  OSV_COLLECTOR,
+  OSV_COLLECTOR_SKIPPED,
   PROJECT_COLLECTOR,
   PROJECT_COLLECTOR_SKIPPED,
   mta,
@@ -53,6 +55,11 @@ function emitting(subjects: string[], location = false): Analyzer {
     },
   };
 }
+
+/** The dependency rules that need the lockfiles and nothing else: a scan without a lookup runs these. */
+const LOCKFILE_RULES = DEPENDENCY_ANALYZERS.filter((analyzer) =>
+  analyzer.requires.every((id) => id === 'collect.dependencies'),
+);
 
 const cfCollectors: CheckResult[] = [
   { id: 'collect.apps', title: 'apps', roles: ['SpaceAuditor'], status: 'ran' },
@@ -139,8 +146,9 @@ describe('analyze: which rules run', () => {
     const before = analyze(rawData(rawProject()), NOW, [PROJECT_COLLECTOR]);
     expect(before.ruleChecks.some((c) => c.id.startsWith('rule.DEP_'))).toBe(false);
 
+    // No lookup was part of this scan: the rules that need the lockfiles alone run, and no other.
     const ran = analyze(rawData(rawProject()), NOW, [PROJECT_COLLECTOR, DEPENDENCIES_COLLECTOR]);
-    expect(ran.ruleChecks).toHaveLength(PROJECT_ANALYZERS.length + DEPENDENCY_ANALYZERS.length);
+    expect(ran.ruleChecks).toHaveLength(PROJECT_ANALYZERS.length + LOCKFILE_RULES.length);
     expect(ran.ruleChecks.slice(PROJECT_ANALYZERS.length).map((c) => [c.id, c.status])).toEqual([
       ['rule.DEP_LOCKFILE_MISSING', 'ran'],
       ['rule.DEP_NOT_CHECKED', 'ran'],
@@ -169,6 +177,64 @@ describe('analyze: which rules run', () => {
         'needs collect.dependencies, which did not run',
       ],
     ]);
+  });
+});
+
+describe('analyze: the rules that read the answers of a lookup', () => {
+  const dependencyRules = (checks: CheckResult[]) =>
+    analyze(rawData(rawProject()), NOW, checks)
+      .ruleChecks.filter((c) => c.id.startsWith('rule.DEP_'))
+      .map((c) => [c.id, c.status, c.reason]);
+
+  it('run first among the dependency rules when the lookup ran', () => {
+    const ran = analyze(rawData(rawProject()), NOW, [
+      PROJECT_COLLECTOR,
+      DEPENDENCIES_COLLECTOR,
+      OSV_COLLECTOR,
+    ]);
+    expect(ran.ruleChecks).toHaveLength(PROJECT_ANALYZERS.length + DEPENDENCY_ANALYZERS.length);
+    expect(ran.ruleChecks.slice(PROJECT_ANALYZERS.length).map((c) => [c.id, c.status])).toEqual([
+      ['rule.DEP_KNOWN_CVE', 'ran'],
+      ['rule.DEP_LOCKFILE_MISSING', 'ran'],
+      ['rule.DEP_NOT_CHECKED', 'ran'],
+    ]);
+  });
+
+  it('are skipped, and say so, when the lookup could not be made: the others still run', () => {
+    expect(
+      dependencyRules([PROJECT_COLLECTOR, DEPENDENCIES_COLLECTOR, OSV_COLLECTOR_SKIPPED]),
+    ).toEqual([
+      ['rule.DEP_KNOWN_CVE', 'skipped', 'needs collect.osv, which did not run'],
+      ['rule.DEP_LOCKFILE_MISSING', 'ran', undefined],
+      ['rule.DEP_NOT_CHECKED', 'ran', undefined],
+    ]);
+  });
+
+  it('name every check they miss when the lockfiles were not read either', () => {
+    expect(
+      dependencyRules([
+        PROJECT_COLLECTOR_SKIPPED,
+        DEPENDENCIES_COLLECTOR_SKIPPED,
+        { ...OSV_COLLECTOR_SKIPPED, reasonCode: 'dependency_skipped' },
+      ]),
+    ).toEqual([
+      [
+        'rule.DEP_KNOWN_CVE',
+        'skipped',
+        'needs collect.dependencies, collect.osv, which did not run',
+      ],
+      ['rule.DEP_LOCKFILE_MISSING', 'skipped', 'needs collect.dependencies, which did not run'],
+      ['rule.DEP_NOT_CHECKED', 'skipped', 'needs collect.dependencies, which did not run'],
+    ]);
+  });
+
+  it('are no check of a scan that was handed no lookup, such as a snapshot written before it existed', () => {
+    expect(dependencyRules([PROJECT_COLLECTOR, DEPENDENCIES_COLLECTOR])).toEqual([
+      ['rule.DEP_LOCKFILE_MISSING', 'ran', undefined],
+      ['rule.DEP_NOT_CHECKED', 'ran', undefined],
+    ]);
+    // Nor of a scan that has the lookup but no lockfiles: a rule needs every check it names.
+    expect(dependencyRules([PROJECT_COLLECTOR, OSV_COLLECTOR])).toEqual([]);
   });
 });
 

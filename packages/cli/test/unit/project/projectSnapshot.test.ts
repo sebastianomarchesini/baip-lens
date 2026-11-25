@@ -86,7 +86,9 @@ describe('projectSnapshot with several projects', () => {
       },
     ]);
     const rules = snapshot.checks.slice(4);
-    expect(rules).toHaveLength(PROJECT_ANALYZERS.length + DEPENDENCY_ANALYZERS.length);
+    // No lookup was handed in, so the rule that reads its answers is no check of this scan.
+    expect(rules).toHaveLength(PROJECT_ANALYZERS.length + DEPENDENCY_ANALYZERS.length - 1);
+    expect(rules.map((check) => check.id)).not.toContain('rule.DEP_KNOWN_CVE');
     // A skipped app does not stop the rules on the apps that were read.
     expect(rules.every((check) => check.id.startsWith('rule.') && check.status === 'ran')).toBe(
       true,

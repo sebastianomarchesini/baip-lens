@@ -90,8 +90,12 @@ export const SNAPSHOT_LIST_LIMITS = {
   vulnerablePackages: 20_000,
   /** Other ids of one advisory (CVE ids and the like); the lookup keeps the first 20. */
   advisoryAliases: 20,
-  /** Advisories of one package version; with more, the lookup stores none. */
-  packageAdvisories: 200,
+  /**
+   * Advisories of one package version; with more, the lookup stores none.
+   * Heavily reported packages have well over a hundred, so the limit is the
+   * 1,000 one answer of OSV.dev holds for a package.
+   */
+  packageAdvisories: 1_000,
   /** Fixed versions one advisory names for one package. */
   fixedVersions: 10,
   findings: 1_000_000,

@@ -101,7 +101,7 @@ describe('report UI', () => {
       .getAllByText(/^(\d+|—)$/)
       .map((el) => el.textContent);
     // Projects scanned, critical + high, services open, entities without annotations
-    expect(values).toEqual(['1', '4', '1', '2']);
+    expect(values).toEqual(['1', '7', '1', '2']);
     expect(document.querySelector('ui5-card-header[title-text="Top risks"]')).not.toBeNull();
     expect(document.querySelector('ui5-card-header[title-text="Top risky apps"]')).toBeNull();
     expect(screen.getByText(/The project acme-incidents was scanned on/)).toBeInTheDocument();
@@ -131,12 +131,13 @@ describe('report UI', () => {
     embed(projectSample);
     renderAt('#/findings');
     expect(await screen.findByText('srv/services.cds:4')).toBeInTheDocument();
-    expect(screen.getAllByRole('article')).toHaveLength(18);
+    expect(screen.getAllByRole('article')).toHaveLength(24);
     const locations = [...document.querySelectorAll('code.finding-location')].map(
       (el) => el.textContent,
     );
     // Panels follow the rule order; the line is left out when the rule does not know it,
     // and the finding about packages that were not checked has no location at all.
+    // A vulnerable package points at the lockfile that pins it.
     expect(locations).toEqual([
       'package.json',
       'package.json',
@@ -155,6 +156,12 @@ describe('report UI', () => {
       'app/incidents/webapp/index.html:7',
       'app/incidents/webapp/test/flpSandbox.html:9',
       'app/launchpage.html:6',
+      'package-lock.json',
+      'package-lock.json',
+      'package-lock.json',
+      'package-lock.json',
+      'package-lock.json',
+      'package-lock.json',
     ]);
     const panel = document.querySelector(
       'ui5-panel[header-text="Service is open to every authenticated user (1) · OWASP A01:2025"]',
@@ -170,13 +177,62 @@ describe('report UI', () => {
     ).toBeInTheDocument();
   });
 
+  it('shows the vulnerable packages of a project scan with what their advisories say', async () => {
+    embed(projectSample);
+    renderAt('#/findings');
+    await screen.findByText('srv/services.cds:4');
+    const panel = document.querySelector<HTMLElement>(
+      'ui5-panel[header-text="Dependency with a known vulnerability (6) · OWASP A03:2025"]',
+    );
+    expect(panel).not.toBeNull();
+    const articles = within(panel!).getAllByRole('article');
+    // Worst first: two critical, one high, two medium, one low.
+    expect(
+      articles.map((article) => {
+        const values = [...article.querySelectorAll('dl.evidence > div')].map((row) => [
+          row.querySelector('dt')?.textContent,
+          row.querySelector('dd')?.textContent,
+        ]);
+        return Object.fromEntries(values) as Record<string, string>;
+      }),
+    ).toMatchObject([
+      { subject: '@baip-fixture/odata@3.1.0', fixedIn: '3.1.2', score: '9.8' },
+      // A value the scan does not have is a dash, never the word "null".
+      { subject: 'baip-fixture-queue@5.0.2', fixedIn: '—', score: '—', severityFrom: 'malicious' },
+      { subject: 'baip-fixture-merge@4.17.20', fixedIn: '—', score: '7.5', advisoryCount: '2' },
+      { subject: 'baip-fixture-merge@3.10.1', fixedIn: '3.10.2', severityFrom: 'label' },
+      { subject: 'baip-fixture-watcher@2.3.3', summary: '—', severityFrom: 'default' },
+      { subject: 'baip-fixture-mkdir@0.5.1', scope: 'dev', direct: 'false' },
+    ]);
+    const first = within(articles[0]!);
+    // Lists of ids are shown as they are stored.
+    expect(first.getByText('["GHSA-fake-0001-baip"]')).toBeInTheDocument();
+    expect(first.getByText('["CVE-2026-00001"]')).toBeInTheDocument();
+    expect(
+      first.getByText(
+        'Requests inside a batch skip the authorization check in @baip-fixture/odata',
+      ),
+    ).toBeInTheDocument();
+    expect(first.getByText(/^Upgrade the package to the version in `fixedIn`/)).toBeInTheDocument();
+    // The page of the advisory is a link; the lockfile that pins the package is the location.
+    expect(
+      articles[0]!.querySelector(
+        'ui5-link[href="https://osv.dev/vulnerability/GHSA-fake-0001-baip"]',
+      ),
+    ).not.toBeNull();
+    expect(articles[0]!.querySelector('code.finding-location')?.textContent).toBe(
+      'package-lock.json',
+    );
+    expect(within(articles[1]!).getByText(/reported as malicious code/)).toBeInTheDocument();
+  });
+
   it('names the project when findings are filtered to it', async () => {
     embed(projectSample);
     renderAt('#/findings?app=project%3Aacme-incidents');
     expect(
       await screen.findByText(/Showing findings for project acme-incidents\./),
     ).toBeInTheDocument();
-    expect(screen.getAllByRole('article')).toHaveLength(18);
+    expect(screen.getAllByRole('article')).toHaveLength(24);
   });
 
   it('lists projects without app-only columns or grouping', async () => {
