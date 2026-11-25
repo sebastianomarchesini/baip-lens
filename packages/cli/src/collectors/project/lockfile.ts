@@ -45,6 +45,16 @@ const MAX_NAME_LENGTH = 214;
 const MAX_VERSION_LENGTH = 64;
 /** A `resolved` longer than this is not looked at: where the package came from stays unknown. */
 const MAX_REFERENCE_LENGTH = 4096;
+/**
+ * Limits on telling the direct dependencies of the local folders of a
+ * lockfile (workspace members, `file:` folders): the dependency names looked
+ * at over all folders, the length of a folder's key, and the folders walked
+ * up from it. A real workspace stays far below them; beyond a limit a package
+ * is simply not marked as direct.
+ */
+const MAX_FOLDER_DEPENDENCIES = 20_000;
+const MAX_FOLDER_KEY_LENGTH = 512;
+const MAX_FOLDER_LEVELS = 16;
 
 /** The one origin whose packages are kept by name: the public npm registry, over https, default port. */
 const PUBLIC_REGISTRY_HOST = 'registry.npmjs.org';
@@ -290,6 +300,64 @@ function scopeOf(entry: Record<string, unknown>): PackageScope {
   return entry.optional === true || entry.devOptional === true ? 'optional' : 'prod';
 }
 
+/** The local folders that a link of the lockfile points at: workspace members and `file:` folders. */
+function linkedFolders(packages: Record<string, unknown>): Set<string> {
+  const folders = new Set<string>();
+  for (const entry of Object.values(packages)) {
+    if (!isPlainObject(entry) || entry.link !== true) continue;
+    const { resolved } = entry;
+    if (typeof resolved === 'string' && resolved.length <= MAX_FOLDER_KEY_LENGTH) {
+      folders.add(resolved);
+    }
+  }
+  return folders;
+}
+
+/**
+ * Where a package that a local folder asks for is installed, found as Node
+ * finds it: in the nearest `node_modules`, from the folder up to the root of
+ * the lockfile. A folder outside the root (`../local-lib`) ends at the root
+ * too, which is where npm installs what it asks for.
+ */
+function installKeyOf(
+  packages: Record<string, unknown>,
+  folder: string,
+  name: string,
+): string | undefined {
+  let dir = folder;
+  for (let level = 0; level < MAX_FOLDER_LEVELS && dir !== ''; level += 1) {
+    const key = `${dir}/${INSTALL_FOLDER}${name}`;
+    if (Object.hasOwn(packages, key)) return key;
+    const slash = dir.lastIndexOf('/');
+    dir = slash === -1 ? '' : dir.slice(0, slash);
+  }
+  const topLevel = `${INSTALL_FOLDER}${name}`;
+  return Object.hasOwn(packages, topLevel) ? topLevel : undefined;
+}
+
+/**
+ * The install locations of the packages that the local folders of a lockfile
+ * list as their own dependencies. A workspace member has a manifest of its
+ * own, and its entry carries the same sections as the root entry: what it
+ * lists is a direct dependency of the project as much as what the root lists.
+ */
+function folderDirectKeys(packages: Record<string, unknown>): Set<string> {
+  const keys = new Set<string>();
+  let left = MAX_FOLDER_DEPENDENCIES;
+  for (const [folder, entry] of Object.entries(packages)) {
+    if (folder === '' || folder.length > MAX_FOLDER_KEY_LENGTH) continue;
+    if (!isPlainObject(entry) || entry.link === true || installOf(folder) !== null) continue;
+    for (const name of directNamesOf(entry)) {
+      if (left === 0) return keys;
+      left -= 1;
+      if (name.length > MAX_NAME_LENGTH) continue;
+      const key = installKeyOf(packages, folder, name);
+      if (key !== undefined) keys.add(key);
+    }
+  }
+  return keys;
+}
+
 /** Lockfile version 2 and 3, and the hidden lockfile: one entry per install location. */
 function readPackages(
   packages: Record<string, unknown>,
@@ -300,6 +368,8 @@ function readPackages(
   const directNames = isPlainObject(root)
     ? directNamesOf(root)
     : (source.rootDirectNames ?? new Set<string>());
+  const folderDirect = folderDirectKeys(packages);
+  const linked = linkedFolders(packages);
   for (const [key, entry] of Object.entries(packages)) {
     if (tally.overBudget) return;
     // The project itself.
@@ -309,9 +379,14 @@ function readPackages(
       continue;
     }
     const install = installOf(key);
-    // A linked folder, or the folder a link or a workspace points at.
-    if (entry.link === true || install === null) {
+    // A link to a local folder: a workspace member, or a `file:` folder.
+    if (entry.link === true) {
       tally.skip('link');
+      continue;
+    }
+    if (install === null) {
+      // The folder itself. Its link is counted already; a folder no link points at counts here.
+      if (!linked.has(key)) tally.skip('link');
       continue;
     }
     if (entry.inBundle === true) {
@@ -325,7 +400,7 @@ function readPackages(
     }
     // An alias installs under its own name and records the real one.
     const name = typeof entry.name === 'string' ? entry.name : install.name;
-    const direct = install.topLevel && directNames.has(install.name);
+    const direct = (install.topLevel && directNames.has(install.name)) || folderDirect.has(key);
     tally.keep(name, entry.version, direct, scopeOf(entry));
   }
 }

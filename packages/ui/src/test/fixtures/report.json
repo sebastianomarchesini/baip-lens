@@ -646,7 +646,7 @@
     {
       "id": "DEP_NOT_CHECKED",
       "title": "Some packages of the npm lockfiles were not checked",
-      "description": "Packages that were not resolved from the public npm registry (another registry, git, a local file or link, bundled, unknown source), that were excluded, or that sit in a lockfile that was not read are never looked up. They are counted by reason, and nothing of their lockfile entries is kept, not even a name.",
+      "description": "Packages that were not resolved from the public npm registry (another registry, git, a local file, bundled, unknown source), that were excluded, or that sit in a lockfile that was not read are never looked up. They are counted by reason, and nothing of their lockfile entries is kept, not even a name. Local folders of the project (workspace members) are counted too, but alone they raise no finding.",
       "roles": [],
       "owasp": [
         "A03:2025"

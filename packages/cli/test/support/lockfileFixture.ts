@@ -83,7 +83,7 @@ export const ACME_NOT_KEPT = {
   otherRegistry: 1,
   git: 1,
   file: 1,
-  link: 2,
+  link: 1,
   bundled: 1,
   unknown: 1,
   excluded: 0,
@@ -113,7 +113,7 @@ export function acmeLockfile(): string {
       optionalDependencies: { 'baip-fixture-watcher': '^2.3.0' },
     },
     {
-      // A linked folder: the link, and the folder it points at.
+      // A linked folder: the link, and the folder it points at, which is counted once.
       '../poison-lock-folder': { version: '0.1.0' },
       'node_modules/@baip-fixture/odata': registryEntry('@baip-fixture/odata', '3.1.0'),
       // Another registry, with a token in the address.

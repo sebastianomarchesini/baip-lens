@@ -698,7 +698,7 @@
         "otherRegistry": 1,
         "git": 1,
         "file": 1,
-        "link": 2,
+        "link": 1,
         "bundled": 1,
         "unknown": 1,
         "excluded": 0,
@@ -706,7 +706,7 @@
         "lockfilesNotRead": 0,
         "checked": 9
       },
-      "remediation": "A package is kept by name, and can be looked up for known vulnerabilities and deprecation, only when its lockfile entry was resolved from the public npm registry (`https://registry.npmjs.org`), so that no private package name is taken from a lockfile or sent anywhere. The evidence counts the others by reason, without their names. `otherRegistry`: resolved from a company registry or a mirror; check these with the audit that registry offers. `git`, `file` and `link`: taken from a repository, a local tarball or folder, or a workspace; review them where their source lives. `bundled`: shipped inside another package, and fixed by upgrading that package. `unknown`: the lockfile records no `resolved` address (for example with `omit-lockfile-registry-resolved`); recreate the lockfile with addresses to have these checked. `excluded`: held back on purpose with `--dependency-exclude`. `invalid`: a name or version that is not a plain npm one; look at the lockfile entry itself. `lockfilesNotRead`: lockfiles that were found but not read (more than 50 lockfiles or 64 MiB of them in one project, a lockfile that is not valid or too large, or more packages than one scan keeps); scan their folders on their own with `--path`.",
+      "remediation": "A package is kept by name, and can be looked up for known vulnerabilities and deprecation, only when its lockfile entry was resolved from the public npm registry (`https://registry.npmjs.org`), so that no private package name is taken from a lockfile or sent anywhere. The evidence counts the others by reason, without their names. `otherRegistry`: resolved from a company registry or a mirror; check these with the audit that registry offers. `git` and `file`: taken from a repository, or from a local tarball or path; review them where their source lives. `link`: a local folder (a workspace member or a `file:` folder), which is code of the project itself and alone raises no finding. `bundled`: shipped inside another package, and fixed by upgrading that package. `unknown`: the lockfile records no `resolved` address (for example with `omit-lockfile-registry-resolved`); recreate the lockfile with addresses to have these checked. `excluded`: held back on purpose with `--dependency-exclude`. `invalid`: a name or version that is not a plain npm one; look at the lockfile entry itself. `lockfilesNotRead`: lockfiles that were found but not read (more than 50 lockfiles or 64 MiB of them in one project, a lockfile that is not valid or too large, or more packages than one scan keeps); scan their folders on their own with `--path`.",
       "references": [
         "https://docs.npmjs.com/cli/v11/configuring-npm/package-lock-json",
         "https://owasp.org/Top10/2025/A03_2025-Software_Supply_Chain_Failures/"
@@ -883,7 +883,7 @@
     {
       "id": "DEP_NOT_CHECKED",
       "title": "Some packages of the npm lockfiles were not checked",
-      "description": "Packages that were not resolved from the public npm registry (another registry, git, a local file or link, bundled, unknown source), that were excluded, or that sit in a lockfile that was not read are never looked up. They are counted by reason, and nothing of their lockfile entries is kept, not even a name.",
+      "description": "Packages that were not resolved from the public npm registry (another registry, git, a local file, bundled, unknown source), that were excluded, or that sit in a lockfile that was not read are never looked up. They are counted by reason, and nothing of their lockfile entries is kept, not even a name. Local folders of the project (workspace members) are counted too, but alone they raise no finding.",
       "roles": [],
       "owasp": [
         "A03:2025"

@@ -169,7 +169,7 @@ describe('baip-lens project on the acme-incidents fixture', () => {
     );
     // The lockfile line carries counts only.
     expect(c.err()).toContain(
-      'Read 1 npm lockfile(s): 9 package(s) from the public npm registry, 8 other package(s) not checked\n',
+      'Read 1 npm lockfile(s): 9 package(s) from the public npm registry, 6 other package(s) not checked\n',
     );
   });
 

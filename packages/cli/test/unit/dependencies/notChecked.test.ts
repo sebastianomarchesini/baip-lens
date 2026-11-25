@@ -125,25 +125,51 @@ describe('DEP_NOT_CHECKED', () => {
     expect(FindingSchema.safeParse(finding).success).toBe(true);
   });
 
-  it.each(Object.keys(ZERO) as (keyof typeof ZERO)[])(
-    'fires for a single package not kept as %s',
-    (reason) => {
-      const findings = runRule(
-        notChecked,
-        project([lockfile('package-lock.json', { kept: 3, notKept: { [reason]: 1 } })], {
-          packages: 3,
-        }),
-      );
-      expect(findings).toHaveLength(1);
-      expect(findings[0]!.evidence).toEqual({
-        subject: 'dependencies',
-        ...ZERO,
-        [reason]: 1,
-        lockfilesNotRead: 0,
-        checked: 3,
-      });
-    },
+  // Every reason but `link`: a linked local folder is code of the project itself.
+  const RAISING = (Object.keys(ZERO) as (keyof typeof ZERO)[]).filter(
+    (reason) => reason !== 'link',
   );
+
+  it('knows seven reasons that raise the finding, and one that does not', () => {
+    expect(RAISING).toEqual([
+      'otherRegistry',
+      'git',
+      'file',
+      'bundled',
+      'unknown',
+      'excluded',
+      'invalid',
+    ]);
+  });
+
+  it.each(RAISING)('fires for a single package not kept as %s', (reason) => {
+    const findings = runRule(
+      notChecked,
+      project([lockfile('package-lock.json', { kept: 3, notKept: { [reason]: 1 } })], {
+        packages: 3,
+      }),
+    );
+    expect(findings).toHaveLength(1);
+    expect(findings[0]!.evidence).toEqual({
+      subject: 'dependencies',
+      ...ZERO,
+      [reason]: 1,
+      lockfilesNotRead: 0,
+      checked: 3,
+    });
+  });
+
+  it('counts linked local folders in the evidence when another reason raises the finding', () => {
+    const findings = runRule(
+      notChecked,
+      project([lockfile('package-lock.json', { kept: 3, notKept: { link: 4, git: 1 } })], {
+        packages: 3,
+      }),
+    );
+    expect(findings.map((f) => f.evidence)).toEqual([
+      { subject: 'dependencies', ...ZERO, link: 4, git: 1, lockfilesNotRead: 0, checked: 3 },
+    ]);
+  });
 
   it('fires for lockfiles that were found and not opened, with nothing else left out', () => {
     const findings = runRule(
@@ -193,6 +219,23 @@ describe('DEP_NOT_CHECKED', () => {
       );
     });
 
+    it('for linked local folders alone: workspace members are code of the project', () => {
+      none(
+        project([lockfile('package-lock.json', { kept: 30, notKept: { link: 2 } })], {
+          packages: 30,
+        }),
+      );
+      none(
+        project(
+          [
+            lockfile('package-lock.json', { kept: 1, notKept: { link: 7 } }),
+            lockfile('app/package-lock.json', { kept: 1, notKept: { link: 1 } }),
+          ],
+          { packages: 2 },
+        ),
+      );
+    });
+
     it('for a project without lockfiles', () => {
       none(project([]));
     });
@@ -222,6 +265,14 @@ describe('DEP_NOT_CHECKED', () => {
           lockfile('b/package-lock.json', { notKept: { link: 1, git: 1 } }),
         ],
         { id: 'two' },
+      ),
+      // Links only, in two lockfiles: no finding for this one.
+      project(
+        [
+          lockfile('a/package-lock.json', { notKept: { link: 3 } }),
+          lockfile('b/package-lock.json', { notKept: { link: 3 } }),
+        ],
+        { id: 'workspaces' },
       ),
     );
     expect(

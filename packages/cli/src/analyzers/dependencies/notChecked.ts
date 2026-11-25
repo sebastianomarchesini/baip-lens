@@ -14,6 +14,14 @@ export const RULE_ID = 'DEP_NOT_CHECKED';
  */
 const SEVERITY: Severity = 'info';
 
+/*
+ * A linked local folder (a workspace member, a `file:` folder) is the
+ * project's own code, not a package from somewhere else: there is nothing to
+ * look up. It is counted in the evidence, but links alone raise no finding,
+ * or every project with workspaces would carry one that nothing can clear.
+ */
+const OWN_CODE = 'link';
+
 const SUBJECT = 'dependencies';
 
 /** The reasons a package is not kept, in the order the evidence lists them. */
@@ -34,9 +42,11 @@ const REMEDIATION =
   '(`https://registry.npmjs.org`), so that no private package name is taken from a lockfile or ' +
   'sent anywhere. The evidence counts the others by reason, without their names. ' +
   '`otherRegistry`: resolved from a company registry or a mirror; check these with the audit ' +
-  'that registry offers. `git`, `file` and `link`: taken from a repository, a local tarball or ' +
-  'folder, or a workspace; review them where their source lives. `bundled`: shipped inside ' +
-  'another package, and fixed by upgrading that package. `unknown`: the lockfile records no ' +
+  'that registry offers. `git` and `file`: taken from a repository, or from a local tarball or ' +
+  'path; review them where their source lives. `link`: a local folder (a workspace member or ' +
+  'a `file:` folder), which is code of the project itself and alone raises no finding. ' +
+  '`bundled`: shipped inside another package, and fixed by upgrading that package. ' +
+  '`unknown`: the lockfile records no ' +
   '`resolved` address (for example with `omit-lockfile-registry-resolved`); recreate the ' +
   'lockfile with addresses to have these checked. `excluded`: held back on purpose with ' +
   '`--dependency-exclude`. `invalid`: a name or version that is not a plain npm one; look at ' +
@@ -88,8 +98,11 @@ function findingFor(context: AnalyzerContext, project: RawProject): Finding | un
   if (project.dependencies === null) return undefined;
   const counts = notKeptCounts(project.dependencies);
   const notRead = lockfilesNotRead(project.dependencies);
-  const packagesNotKept = REASONS.reduce((sum, reason) => sum + counts[reason], 0);
-  if (packagesNotKept + notRead === 0) return undefined;
+  const notLookedUp = REASONS.filter((reason) => reason !== OWN_CODE).reduce(
+    (sum, reason) => sum + counts[reason],
+    0,
+  );
+  if (notLookedUp + notRead === 0) return undefined;
   return projectFinding(context, project, {
     id: RULE_ID,
     title: notChecked.rule.title,
@@ -116,7 +129,7 @@ export const notChecked: Analyzer = {
     id: RULE_ID,
     title: 'Some packages of the npm lockfiles were not checked',
     description:
-      'Packages that were not resolved from the public npm registry (another registry, git, a local file or link, bundled, unknown source), that were excluded, or that sit in a lockfile that was not read are never looked up. They are counted by reason, and nothing of their lockfile entries is kept, not even a name.',
+      'Packages that were not resolved from the public npm registry (another registry, git, a local file, bundled, unknown source), that were excluded, or that sit in a lockfile that was not read are never looked up. They are counted by reason, and nothing of their lockfile entries is kept, not even a name. Local folders of the project (workspace members) are counted too, but alone they raise no finding.',
     roles: [],
     owasp: ['A03:2025'],
     helpUri: ruleHelpUri(RULE_ID),

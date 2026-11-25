@@ -517,7 +517,7 @@ export const RawNotKeptSchema = z.object({
   git: Count,
   /** A local tarball or folder. */
   file: Count,
-  /** A linked folder or a workspace: `link: true`, or an entry that is not under `node_modules/`. */
+  /** A local folder linked into `node_modules` (a workspace member, a `file:` folder): code of the project itself, counted once. */
   link: Count,
   /** Shipped inside another package's tarball (`inBundle`, `bundled`). */
   bundled: Count,
@@ -552,7 +552,7 @@ export type PackageScope = z.infer<typeof PackageScopeSchema>;
 export const RawLockedPackageSchema = z.object({
   name: PackageName,
   version: PackageVersion,
-  /** Installed at the top level and listed by the root manifest, in any lockfile. */
+  /** Listed by the root manifest and installed at the top level, or listed by a workspace member, in any lockfile. */
   direct: z.boolean(),
   /** `prod` when any lockfile installs it for production, else `optional`, else `dev`. */
   scope: PackageScopeSchema,

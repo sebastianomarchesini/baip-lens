@@ -174,6 +174,163 @@ describe('lockfile version 3', () => {
     ]);
   });
 
+  it('calls a package direct when a workspace member lists it, found as Node finds it', () => {
+    const entry = (name: string, version = '1.0.0') => ({
+      version,
+      resolved: registry(name, version),
+    });
+    const result = parse(
+      v3({
+        // Two workspace members: each a link in `node_modules` and a folder with a manifest.
+        'node_modules/@POISON/app': { resolved: 'packages/app', link: true },
+        'node_modules/POISON-lib': { resolved: 'packages/lib', link: true },
+        'packages/app': {
+          name: '@POISON/app',
+          version: '1.0.0',
+          dependencies: { 'a-hoisted': '^1', 'b-nested': '^2', 'POISON-lib': '*' },
+          devDependencies: { 'c-dev': '^1' },
+        },
+        'packages/lib': {
+          name: 'POISON-lib',
+          version: '1.0.0',
+          optionalDependencies: { 'd-optional': '^1' },
+          peerDependencies: { 'e-peer': '^1', 'z-not-installed': '^1' },
+        },
+        // Hoisted to the root: the member's `a-hoisted` is this one.
+        'node_modules/a-hoisted': entry('a-hoisted'),
+        // The member needs version 2; the root holds version 1 for another package.
+        'node_modules/b-nested': entry('b-nested'),
+        'packages/app/node_modules/b-nested': entry('b-nested', '2.0.0'),
+        'node_modules/c-dev': { ...entry('c-dev'), dev: true },
+        'node_modules/d-optional': { ...entry('d-optional'), optional: true },
+        'node_modules/e-peer': { ...entry('e-peer'), peer: true },
+        // Asked for by a package, not by a member.
+        'node_modules/f-transitive': entry('f-transitive'),
+        'node_modules/a-hoisted/node_modules/c-dev': entry('c-dev', '0.9.0'),
+      }),
+    );
+    expect(result.packages.map((item) => [item.name, item.version, item.direct])).toEqual([
+      ['a-hoisted', '1.0.0', true],
+      ['b-nested', '1.0.0', false],
+      ['b-nested', '2.0.0', true],
+      ['c-dev', '0.9.0', false],
+      ['c-dev', '1.0.0', true],
+      ['d-optional', '1.0.0', true],
+      ['e-peer', '1.0.0', true],
+      ['f-transitive', '1.0.0', false],
+    ]);
+    // Each member is counted once, by its link: the folder it points at is not counted again.
+    expect(result.lockfile.notKept).toEqual(counted({ link: 2 }));
+    expect(JSON.stringify(result)).not.toContain('POISON');
+  });
+
+  it('walks up from a local folder to the root, also for a folder outside the root', () => {
+    const entry = (name: string, version = '1.0.0') => ({
+      version,
+      resolved: registry(name, version),
+    });
+    const result = parse(
+      v3({
+        'node_modules/POISON-local': { resolved: '../POISON-local', link: true },
+        '../POISON-local': { version: '0.1.0', dependencies: { 'a-root': '^1' } },
+        'node_modules/POISON-client': { resolved: 'apps/web/client', link: true },
+        'apps/web/client': {
+          version: '1.0.0',
+          dependencies: { 'b-between': '^3', 'c-own': '^1', 'd-root': '^1' },
+        },
+        'node_modules/a-root': entry('a-root'),
+        // In a `node_modules` between the folder and the root: nearer than the root's copy.
+        'apps/node_modules/b-between': entry('b-between', '3.0.0'),
+        'node_modules/b-between': entry('b-between'),
+        'apps/web/client/node_modules/c-own': entry('c-own'),
+        'node_modules/d-root': entry('d-root'),
+      }),
+    );
+    expect(result.packages.map((item) => [item.name, item.version, item.direct])).toEqual([
+      ['a-root', '1.0.0', true],
+      ['b-between', '1.0.0', false],
+      ['b-between', '3.0.0', true],
+      ['c-own', '1.0.0', true],
+      ['d-root', '1.0.0', true],
+    ]);
+    expect(result.lockfile.notKept).toEqual(counted({ link: 2 }));
+    expect(JSON.stringify(result)).not.toContain('POISON');
+  });
+
+  it('counts a local folder that no link points at, and a link whose folder has no entry', () => {
+    const result = parse(
+      v3({
+        // A folder without a link: counted, so that no entry goes unnoticed.
+        'packages/POISON-stray': { name: 'POISON-stray', version: '1.0.0' },
+        // A link without a folder entry, and one that names no folder at all.
+        'node_modules/POISON-gone': { resolved: 'packages/POISON-gone', link: true },
+        'node_modules/POISON-bare': { link: true },
+        // A link and its folder: once.
+        'node_modules/POISON-member': { resolved: 'packages/POISON-member', link: true },
+        'packages/POISON-member': { version: '1.0.0' },
+        // The address of a link is compared as written: this folder has another spelling.
+        'node_modules/POISON-dot': { resolved: './packages/POISON-dot', link: true },
+        'packages/POISON-dot': { version: '1.0.0' },
+      }),
+    );
+    expect(result.packages).toEqual([]);
+    expect(result.lockfile.notKept).toEqual(counted({ link: 6 }));
+    expect(JSON.stringify(result)).not.toContain('POISON');
+  });
+
+  it('does not mark a dependency of a local folder beyond its limits', () => {
+    const entry = (name: string) => ({ version: '1.0.0', resolved: registry(name) });
+    const deep = Array.from({ length: 20 }, (_, i) => `l${i}`).join('/');
+    const tenUp = deep.split('/').slice(0, 10).join('/');
+    const longFolder = `packages/${'x'.repeat(504)}`;
+    expect(longFolder).toHaveLength(513);
+    const result = parse(
+      v3({
+        [deep]: { version: '1.0.0', dependencies: { 'a-near': '^1', 'b-far': '^1' } },
+        // Ten folders up: found.
+        [`${tenUp}/node_modules/a-near`]: entry('a-near'),
+        // Nineteen folders up and not in the root: further than the walk goes.
+        'l0/node_modules/b-far': entry('b-far'),
+        // A folder key longer than any real one is not looked at.
+        [longFolder]: { version: '1.0.0', dependencies: { 'c-long-folder': '^1' } },
+        'node_modules/c-long-folder': entry('c-long-folder'),
+        // Nor is a dependency name longer than a package name can be.
+        'packages/app': {
+          version: '1.0.0',
+          dependencies: { ['n'.repeat(215)]: '^1', 'd-ok': '^1' },
+        },
+        'node_modules/d-ok': entry('d-ok'),
+      }),
+    );
+    expect(result.packages.map((item) => [item.name, item.direct])).toEqual([
+      ['a-near', true],
+      ['b-far', false],
+      ['c-long-folder', false],
+      ['d-ok', true],
+    ]);
+    // Three folders without a link.
+    expect(result.lockfile.notKept).toEqual(counted({ link: 3 }));
+  });
+
+  it('looks at 20 000 dependency names of local folders, and marks none after them', () => {
+    const count = 20_001;
+    const listed = Array.from({ length: count }, (_, i) => `"d${i}":"^1"`).join(',');
+    const installs = Array.from(
+      { length: count },
+      (_, i) =>
+        `"node_modules/d${i}":{"version":"1.0.0","resolved":"${REGISTRY}/d${i}/-/d${i}-1.0.0.tgz"}`,
+    ).join(',');
+    const text =
+      `{"lockfileVersion":3,"packages":{"":{"name":"big"},` +
+      `"packages/app":{"version":"1.0.0","dependencies":{${listed}}},${installs}}}`;
+    const result = parse(text, {}, { maxPackages: 30_000 });
+    expect(result.lockfile).toMatchObject({ status: 'read', kept: count });
+    const direct = result.packages.filter((item) => item.direct).map((item) => item.name);
+    expect(direct).toHaveLength(20_000);
+    expect(direct).not.toContain('d20000');
+    expect(direct).toContain('d19999');
+  });
+
   it('reads the scope from the flags: dev, else optional, else prod', () => {
     const entry = (name: string, flags: Record<string, unknown>) => ({
       version: '1.0.0',
@@ -292,7 +449,8 @@ describe('lockfile version 3', () => {
     expect(result.lockfile).toMatchObject({
       status: 'read',
       kept: 1,
-      notKept: counted({ otherRegistry: 2, git: 2, file: 2, link: 3, bundled: 1, unknown: 3 }),
+      // The link counts once, not again for the folder it points at; the folder without a link counts.
+      notKept: counted({ otherRegistry: 2, git: 2, file: 2, link: 2, bundled: 1, unknown: 3 }),
     });
     expect(JSON.stringify(result)).not.toMatch(/POISON/i);
   });
@@ -899,6 +1057,25 @@ describe('hostile lockfiles', () => {
     const againStarted = Date.now();
     expect(parse(text).lockfile.status).toBe('too-many-packages');
     expect(Date.now() - againStarted).toBeLessThan(10_000);
+  }, 60_000);
+
+  it('is not slowed down by many local folders with many dependencies and long keys', () => {
+    // 4 000 folders with keys of 500 characters, 60 dependency names each: 240 000 names,
+    // of which the first 20 000 are looked for in up to 17 places.
+    const names = Array.from({ length: 60 }, (_, i) => `"q${i}":"^1"`).join(',');
+    const folders: string[] = [];
+    for (let i = 0; i < 4_000; i += 1) {
+      const folder = `${'a/'.repeat(245)}f${String(i).padStart(9, '0')}`;
+      folders.push(`"${folder}":{"version":"1.0.0","dependencies":{${names}}}`);
+    }
+    const text = `{"lockfileVersion":3,"packages":{"":{"name":"big"},${folders.join(',')},"node_modules/q0":{"version":"1.0.0","resolved":"${REGISTRY}/q0/-/q0-1.0.0.tgz"}}}`;
+    const started = Date.now();
+    const result = parse(text);
+    expect(Date.now() - started).toBeLessThan(10_000);
+    expect(result.packages).toEqual([
+      { name: 'q0', version: '1.0.0', direct: true, scope: 'prod' },
+    ]);
+    expect(result.lockfile.notKept).toEqual(counted({ link: 4_000 }));
   }, 60_000);
 
   it('reads a wide and deep version 1 tree in time linear to its size', () => {

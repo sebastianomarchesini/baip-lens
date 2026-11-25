@@ -263,7 +263,8 @@ describe('the lockfile check of a project scan', () => {
     );
     expect(log).toEqual([
       'Read 0 project file(s) in project acme-srv',
-      'Read 2 npm lockfile(s): 2 package(s) from the public npm registry, 6 other package(s) not checked',
+      // Without the two linked folders: they are code of the project, not packages left unchecked.
+      'Read 2 npm lockfile(s): 2 package(s) from the public npm registry, 4 other package(s) not checked',
       'Read 0 project file(s) in project acme-yarn',
       'Read 0 project file(s) in project acme-many',
       'Read 0 npm lockfile(s): 0 package(s) from the public npm registry, 0 other package(s) not checked',

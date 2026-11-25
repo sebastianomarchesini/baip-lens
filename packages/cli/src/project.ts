@@ -77,7 +77,8 @@ function assertDistinctIds(own: CheckDefinition[], collection: ProjectCollection
 /**
  * The npm lockfiles of one project in a line, or undefined when it has none
  * (a yarn or pnpm lockfile is not read, so it is not one): counts only, never
- * a package name.
+ * a package name. A linked local folder (`link`) is code of the project, not
+ * a package that was left unchecked, so it is not in the second count.
  */
 function lockfileLine(project: RawProject): string | undefined {
   const dependencies = project.dependencies;
@@ -86,8 +87,8 @@ function lockfileLine(project: RawProject): string | undefined {
   if (npm.length === 0 && dependencies.lockfilesNotRead === 0) return undefined;
   const read = npm.filter((lockfile) => lockfile.status === 'read');
   const notChecked = read
-    .flatMap((lockfile) => Object.values(lockfile.notKept))
-    .reduce((sum, count) => sum + count, 0);
+    .flatMap((lockfile) => Object.entries(lockfile.notKept))
+    .reduce((sum, [reason, count]) => (reason === 'link' ? sum : sum + count), 0);
   return (
     `Read ${read.length} npm lockfile(s): ${dependencies.packages.length} package(s) ` +
     `from the public npm registry, ${notChecked} other package(s) not checked`
