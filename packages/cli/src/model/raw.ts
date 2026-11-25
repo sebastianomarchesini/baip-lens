@@ -570,6 +570,55 @@ export const RawProjectDependenciesSchema = z.object({
 });
 export type RawProjectDependencies = z.infer<typeof RawProjectDependenciesSchema>;
 
+/*
+ * What the lookup on OSV.dev found for the packages above (`baip-lens
+ * project`, docs/data-sources.md §12.3). Of an advisory only what follows is
+ * kept: never its details, its references or the people it credits. The
+ * summary is text from outside: it is cleaned and cut before it is stored,
+ * and bounded here again. The tables hold all of an answer or nothing of it:
+ * when the lookup fails, both stay empty and the check `collect.osv` says so.
+ */
+
+/** An advisory id as the OSV schema allows it (`GHSA-…`, `CVE-…`, `MAL-…`); it goes into request URLs. */
+export const ADVISORY_ID_PATTERN = /^[A-Za-z0-9:_.-]{1,100}$/;
+/** A CVSS v3.0 or v3.1 vector; the rule computes the score from it. */
+export const CVSS_V3_PATTERN = /^CVSS:3\.[01]\/[A-Za-z:/]{1,150}$/;
+
+const AdvisoryId = z.string().regex(ADVISORY_ID_PATTERN);
+
+/** The severity a GitHub advisory states in words (`database_specific.severity`). */
+export const AdvisoryLabelSchema = z.enum(['LOW', 'MODERATE', 'HIGH', 'CRITICAL']);
+export type AdvisoryLabel = z.infer<typeof AdvisoryLabelSchema>;
+
+/** One advisory of OSV.dev; a withdrawn one is not stored. */
+export const RawAdvisorySchema = z.object({
+  id: AdvisoryId,
+  /** Its other ids, CVE ids above all: the first 20, sorted. */
+  aliases: list(AdvisoryId, LIMITS.advisoryAliases),
+  /** One line of external text, cleaned and cut to 200 characters. */
+  summary: z.string().max(200).nullable(),
+  /** The first CVSS v3 vector the advisory carries. */
+  cvssV3: z.string().regex(CVSS_V3_PATTERN).nullable(),
+  label: AdvisoryLabelSchema.nullable(),
+});
+export type RawAdvisory = z.infer<typeof RawAdvisorySchema>;
+
+/** An advisory of one package: its id, and the fixed versions it names for that package name, sorted. */
+export const RawPackageAdvisorySchema = z.object({
+  id: AdvisoryId,
+  /** Empty when the advisory names no fixed version for this package. */
+  fixed: list(PackageVersion, LIMITS.fixedVersions),
+});
+export type RawPackageAdvisory = z.infer<typeof RawPackageAdvisorySchema>;
+
+/** A package version of the lockfiles with at least one advisory; shared by the projects of a scan. */
+export const RawVulnerablePackageSchema = z.object({
+  name: PackageName,
+  version: PackageVersion,
+  advisories: list(RawPackageAdvisorySchema, LIMITS.packageAdvisories),
+});
+export type RawVulnerablePackage = z.infer<typeof RawVulnerablePackageSchema>;
+
 const MtaName = z.string().regex(MTA_NAME_PATTERN);
 
 /**
@@ -646,5 +695,13 @@ export const RawDataSchema = z.object({
   history: list(RawHistorySchema, LIMITS.history).default([]),
   /** Local projects (`baip-lens project`); empty for a CF scan and in snapshots written before 0.2. */
   projects: list(RawProjectSchema, LIMITS.projects).default([]),
+  /**
+   * The advisories OSV.dev lists for the lockfile packages of the projects;
+   * empty when the lookup did not run (see the check `collect.osv`), for a CF
+   * scan and in snapshots written before the lookup existed.
+   */
+  advisories: list(RawAdvisorySchema, LIMITS.advisories).default([]),
+  /** The package versions that have at least one of them; empty in the same cases. */
+  vulnerablePackages: list(RawVulnerablePackageSchema, LIMITS.vulnerablePackages).default([]),
 });
 export type RawData = z.infer<typeof RawDataSchema>;

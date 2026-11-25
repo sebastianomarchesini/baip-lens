@@ -3,7 +3,7 @@ import { analyze } from './analyzers/index.js';
 import { type CheckDefinition, CheckRecorder, COLLECTOR_CHECKS } from './checks.js';
 import { collectProject } from './collectors/project/index.js';
 import type { SkipReasonCode } from './model/check.js';
-import type { RawData, RawProject } from './model/raw.js';
+import type { RawAdvisory, RawData, RawProject, RawVulnerablePackage } from './model/raw.js';
 import {
   DEFAULT_SNAPSHOT_OPTIONS,
   SNAPSHOT_SCHEMA_VERSION,
@@ -19,6 +19,36 @@ export interface ScanProjectOptions {
   /** Injected in tests; defaults to the current time. */
   now?: () => Date;
   log?: (message: string) => void;
+  /** `--dependency-exclude`: patterns of package names that are never kept from a lockfile. */
+  dependencyExclude?: string[];
+  /** Looks the lockfile packages up on the network; absent: nothing is looked up. */
+  lookup?: DependencyLookup;
+}
+
+/** What a lookup of the lockfile packages found, as the snapshot stores it. */
+export interface DependencyTables {
+  advisories: RawAdvisory[];
+  vulnerablePackages: RawVulnerablePackage[];
+}
+
+/**
+ * The step of a project scan that asks public sources about the packages of
+ * the lockfiles. This module makes no request: whoever starts the scan hands
+ * the step in (`src/main.ts` builds it), and without one nothing is looked
+ * up, no check of a lookup is recorded and the rules that read its answers
+ * are left out.
+ */
+export interface DependencyLookup {
+  /** False when the user turned the lookup off (`--no-dependency-check`); the snapshot records it. */
+  readonly enabled: boolean;
+  /** The checks it records, so that no other part of a scan uses their ids. */
+  readonly checks: readonly CheckDefinition[];
+  /**
+   * Looks up the packages the lockfile step kept for these projects and
+   * records its own checks: as ran, or as skipped with the reason. It never
+   * throws for a source that fails; it then returns nothing of that source.
+   */
+  run(projects: readonly RawProject[], recorder: CheckRecorder): Promise<DependencyTables>;
 }
 
 /** A part of a project scan that was not read; recorded as a skipped check of its own. */
@@ -54,6 +84,11 @@ export interface ProjectSnapshotOptions {
   apiEndpoint?: URL;
   now?: () => Date;
   log?: (message: string) => void;
+  /**
+   * Called once the files are collected and before the rules run, with the
+   * projects that were read. Absent: nothing is looked up.
+   */
+  lookup?: DependencyLookup;
 }
 
 /**
@@ -73,6 +108,8 @@ function assertDistinctIds(own: CheckDefinition[], collection: ProjectCollection
     throw new Error('two checks of one project scan have the same id');
   }
 }
+
+const NOTHING_LOOKED_UP: DependencyTables = { advisories: [], vulnerablePackages: [] };
 
 /**
  * The npm lockfiles of one project in a line, or undefined when it has none
@@ -96,10 +133,12 @@ function lockfileLine(project: RawProject): string | undefined {
 }
 
 /**
- * Runs one project collection and the project rules, and builds the
- * snapshot. Shared by a local folder and deployed apps: the collection hands
- * over its results, and this module makes no request itself. The log carries
- * counts and project ids only, never a path or file content.
+ * Runs one project collection, the lookup of the lockfile packages when the
+ * caller handed one in, and the project rules, and builds the snapshot.
+ * Shared by a local folder and deployed apps: the collection hands over its
+ * results and the lookup its answers, and this module makes no request
+ * itself. The log carries counts and project ids only, never a path or file
+ * content.
  */
 export async function projectSnapshot(
   collect: () => Promise<ProjectCollection>,
@@ -122,7 +161,8 @@ export async function projectSnapshot(
     recorder.ran(dependenciesCheck);
   }
   const collection = collected ?? { projects: [], notRead: [] };
-  assertDistinctIds([options.check, dependenciesCheck], collection);
+  const { lookup } = options;
+  assertDistinctIds([options.check, dependenciesCheck, ...(lookup?.checks ?? [])], collection);
   const { projects } = collection;
   for (const project of projects) {
     log(
@@ -135,6 +175,8 @@ export async function projectSnapshot(
   }
   // After the collection's own check, so that the checks keep the order of the apps.
   for (const item of collection.notRead) recorder.skip(item.check, item.reasonCode, item.reason);
+  // Its checks come after those of the files it depends on, and before the rules that read its answers.
+  const found = lookup === undefined ? NOTHING_LOOKED_UP : await lookup.run(projects, recorder);
 
   const raw: RawData = {
     orgs: [],
@@ -146,6 +188,8 @@ export async function projectSnapshot(
     traffic: [],
     history: [],
     projects,
+    advisories: found.advisories,
+    vulnerablePackages: found.vulnerablePackages,
   };
   const collectorChecks = recorder.list();
   const analysis = analyze(raw, scannedAt, collectorChecks);
@@ -159,7 +203,7 @@ export async function projectSnapshot(
       projects: projects.map((p) => p.id),
     },
     // No CF collector runs in a project scan, so no Log Cache either.
-    options: { ...DEFAULT_SNAPSHOT_OPTIONS },
+    options: { ...DEFAULT_SNAPSHOT_OPTIONS, dependencyCheck: lookup?.enabled ?? false },
     checks: [...collectorChecks, ...analysis.ruleChecks],
     raw,
     apps: analysis.apps,
@@ -169,12 +213,14 @@ export async function projectSnapshot(
 
 /**
  * Scans a local CAP / MTA project directory: file-system reads only, no
- * network, no child processes.
+ * child processes, and no request of its own. The packages of its lockfiles
+ * are looked up on the network only by the `lookup` the caller hands in.
  */
 export async function scanProject(options: ScanProjectOptions): Promise<Snapshot> {
   const excludeDirs = options.outDir === undefined ? [] : [resolve(options.outDir)];
+  const { dependencyExclude } = options;
   const collect = async (): Promise<ProjectCollection> => ({
-    projects: [await collectProject(options.path, { excludeDirs })],
+    projects: [await collectProject(options.path, { excludeDirs, dependencyExclude })],
     notRead: [],
   });
   return projectSnapshot(collect, {
@@ -182,5 +228,6 @@ export async function scanProject(options: ScanProjectOptions): Promise<Snapshot
     dependenciesCheck: COLLECTOR_CHECKS.dependencies,
     now: options.now,
     log: options.log,
+    lookup: options.lookup,
   });
 }

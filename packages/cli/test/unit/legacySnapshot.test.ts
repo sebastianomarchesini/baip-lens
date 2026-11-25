@@ -20,6 +20,10 @@ describe('0.1.0 snapshot compatibility', () => {
     expect(parsed.success).toBe(true);
     const snapshot = parsed.data as Snapshot;
     expect(snapshot.raw.projects).toEqual([]);
+    // Nothing was looked up when it was written, and nothing says it was.
+    expect(snapshot.raw.advisories).toEqual([]);
+    expect(snapshot.raw.vulnerablePackages).toEqual([]);
+    expect(snapshot.options.dependencyCheck).toBe(false);
     expect(snapshot.apps.every((app) => app.kind === 'app')).toBe(true);
     expect(snapshot.scope.apiEndpoint).toBe('https://api.cf.example.org/');
     expect(snapshot.tool.name).toBe('btp-lens');
@@ -64,6 +68,11 @@ describe('0.3.1 project snapshot compatibility', () => {
     expect(snapshot.raw.projects).toHaveLength(1);
     expect(snapshot.raw.projects[0]?.dependencies).toBeNull();
     expect(snapshot.checks.some((check) => check.id === 'collect.dependencies')).toBe(false);
+    // Its packages were never looked up either: no table, no check, and the option says so.
+    expect(snapshot.raw.advisories).toEqual([]);
+    expect(snapshot.raw.vulnerablePackages).toEqual([]);
+    expect(snapshot.options.dependencyCheck).toBe(false);
+    expect(snapshot.checks.some((check) => check.id === 'collect.osv')).toBe(false);
   });
 
   it('re-analyzes to the same findings, and gains no dependency rule', () => {
@@ -77,6 +86,7 @@ describe('0.3.1 project snapshot compatibility', () => {
     expect(result.checks).toHaveLength(14);
     expect(result.checks.some((check) => check.id.startsWith('rule.DEP_'))).toBe(false);
     expect(result.findings.some((finding) => finding.id.startsWith('DEP_'))).toBe(false);
+    expect(result.checks.some((check) => check.id === 'collect.osv')).toBe(false);
   });
 
   it('produces valid report data that lists the dependency rules without having run them', () => {

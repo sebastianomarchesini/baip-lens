@@ -34,6 +34,7 @@ import {
   uaaSshCodeRule,
 } from '../net/allowlist.js';
 import {
+  type DependencyLookup,
   type NotRead,
   type ProjectCollection,
   type ProjectSnapshotOptions,
@@ -80,7 +81,11 @@ export { sshOffAdvice } from './selectApps.js';
  * The npm lockfile of an app is the one of the tree that is installed in its
  * container (`node_modules/.package-lock.json`), read in the same session
  * with read requests only; the lockfile that was pushed with the app is the
- * fallback. The apps of one project run share one budget of packages.
+ * fallback. The apps of one project run share one budget of packages. The
+ * packages are looked up on the network only by the `lookup` the caller
+ * hands in, once, for all apps of the run together, after the last session
+ * is closed; it has an HTTP client of its own, so nothing of the CF login can
+ * go along.
  *
  * CF calls are GET only (apps, each app's SSH status, its web process and the
  * process stats), plus one one-time SSH code per session from UAA
@@ -118,6 +123,10 @@ export interface ScanAppOptions {
   now?: () => Date;
   /** Progress and notices, one line each. */
   log?: (message: string) => void;
+  /** `--dependency-exclude`: patterns of package names that are never kept from a lockfile. */
+  dependencyExclude?: string[];
+  /** Looks the lockfile packages up on the network; absent: nothing is looked up. */
+  lookup?: DependencyLookup;
 }
 
 const ProcessSchema = z.object({ guid: z.string().regex(GUID) });
@@ -458,6 +467,7 @@ function snapshotOptions(context: ReadContext): ProjectSnapshotOptions {
     apiEndpoint: context.session.apiUrl,
     now: context.options.now,
     log: context.log,
+    lookup: context.options.lookup,
   };
 }
 
@@ -467,6 +477,7 @@ function snapshotOptions(context: ReadContext): ProjectSnapshotOptions {
  * app, which has the whole budget.
  */
 function collectApp(
+  context: ReadContext,
   tree: SftpProjectTree,
   app: CfApp,
   id: string,
@@ -478,18 +489,26 @@ function collectApp(
     // What is installed in the container, not only what was pushed (see the collector).
     hiddenLockfile: true,
     maxPackages,
+    dependencyExclude: context.options.dependencyExclude,
   });
 }
 
-/** A run of one app: anything that keeps it from being read stops the run. */
-function scanOneApp(context: ReadContext, app: CfApp): Promise<Snapshot> {
+/**
+ * A run of one app: anything that keeps it from being read stops the run.
+ * The files are read first and the session is closed; only then is the
+ * snapshot built, which is when the packages are looked up. A lookup needs
+ * no session and can take a while, and how the reading ended is judged as
+ * before: by the check of the collection.
+ */
+async function scanOneApp(context: ReadContext, app: CfApp): Promise<Snapshot> {
   const id = projectIdOf(app.name);
-  return withAppFiles(context, app, (tree) =>
-    projectSnapshot(
-      async () => ({ projects: [await collectApp(tree, app, id)], notRead: [] }),
-      snapshotOptions(context),
-    ),
+  const [read] = await withAppFiles(context, app, (tree) =>
+    Promise.allSettled([collectApp(context, tree, app, id)]),
   );
+  return projectSnapshot(() => {
+    if (read.status === 'rejected') return Promise.reject(read.reason as Error);
+    return Promise.resolve({ projects: [read.value], notRead: [] });
+  }, snapshotOptions(context));
 }
 
 /**
@@ -528,7 +547,9 @@ async function readProjectApp(
   maxPackages: number,
 ): Promise<RawProject | SkipReason> {
   try {
-    return await withAppFiles(context, app, (tree) => collectApp(tree, app, id, maxPackages));
+    return await withAppFiles(context, app, (tree) =>
+      collectApp(context, tree, app, id, maxPackages),
+    );
   } catch (error) {
     const skip = skipReason(error, context.loggedIn);
     if (skip === null) throw error;

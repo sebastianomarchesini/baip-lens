@@ -17,7 +17,8 @@
     "trafficCheck": false,
     "minTrafficWindowHours": 12,
     "trafficPages": 5,
-    "previousScannedAt": null
+    "previousScannedAt": null,
+    "dependencyCheck": false
   },
   "checks": [
     {

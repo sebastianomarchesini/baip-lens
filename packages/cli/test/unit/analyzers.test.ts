@@ -58,6 +58,8 @@ function raw(ages: Record<string, number | null>): RawData {
     traffic: [],
     history: [],
     projects: [],
+    advisories: [],
+    vulnerablePackages: [],
   };
 }
 

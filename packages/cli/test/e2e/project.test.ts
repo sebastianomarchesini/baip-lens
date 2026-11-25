@@ -8,6 +8,7 @@ import { type CliIo, EXIT, main } from '../../src/main.js';
 import { isSafeRelativePath } from '../../src/model/paths.js';
 import type { RawProject } from '../../src/model/raw.js';
 import type { Snapshot } from '../../src/model/snapshot.js';
+import { osvFetch } from '../support/dependencyScript.js';
 import { ABSOLUTE_PATH, expectNoLeaks } from '../support/leak.js';
 import {
   ACME_NOT_KEPT,
@@ -129,6 +130,9 @@ async function scanFixture(
 ): Promise<{ code: number; out: string; c: Captured; snapshot: Snapshot }> {
   const out = await tmp();
   const c = capture();
+  // The public packages of the fixture's lockfile are looked up: on a scripted OSV.dev that
+  // knows no advisory, so the findings are those of the files. Any other request fails the scan.
+  c.io.fetch = osvFetch().fetch;
   const args = ['project', '--path', fixture.root, '--out', out, '--format', 'html,json,csv,sarif'];
   const code = await main([...args, ...extra], c.io);
   const snapshotText = await readFile(join(out, SNAPSHOT_FILE), 'utf8').catch(() => '{}');

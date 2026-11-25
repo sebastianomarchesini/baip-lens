@@ -98,9 +98,14 @@ describe('the snapshot schema', () => {
         'snapshot.raw.projects[].dependencies.lockfiles',
         'snapshot.raw.projects[].dependencies.packages',
         'snapshot.raw.projects[].dependencies.packages[].lockfiles',
+        'snapshot.raw.advisories',
+        'snapshot.raw.advisories[].aliases',
+        'snapshot.raw.vulnerablePackages',
+        'snapshot.raw.vulnerablePackages[].advisories',
+        'snapshot.raw.vulnerablePackages[].advisories[].fixed',
       ]),
     );
-    // Every list of the model: 21 outside the project record, 39 inside it.
-    expect(found.lists.length).toBeGreaterThanOrEqual(60);
+    // Every list of the model: 26 outside the project record, 39 inside it.
+    expect(found.lists.length).toBeGreaterThanOrEqual(65);
   });
 });

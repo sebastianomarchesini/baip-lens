@@ -40,11 +40,89 @@ const SHAPE_REASONS: Record<JsonShapeLimit, string> = {
   members: `an object in it has more than ${MAX_SNAPSHOT_MEMBERS.toLocaleString('en-US')} keys`,
 };
 
-export async function writeSnapshot(snapshot: Snapshot, outDir: string): Promise<string> {
+/** A limit of `readSnapshot` that the text of a snapshot goes past. */
+export type SnapshotExcess = 'bytes' | JsonShapeLimit;
+
+const EXCESS_REASONS: Record<SnapshotExcess, string> = {
+  bytes: `it is larger than ${MAX_SNAPSHOT_BYTES / (1024 * 1024)} MiB`,
+  ...SHAPE_REASONS,
+};
+
+/**
+ * The result of a scan is larger than `readSnapshot` reads. A `ConfigError`:
+ * the command ends with exit code 2, having written nothing. The message
+ * names the limit; what to do about it depends on the command, which adds it.
+ */
+export class SnapshotTooLargeError extends ConfigError {
+  constructor(
+    readonly excess: SnapshotExcess,
+    /** What to do about it, as one sentence. */
+    advice: string,
+  ) {
+    super(
+      `The result of this scan cannot be written: ${EXCESS_REASONS[excess]}, and ` +
+        `\`baip-lens report --from\` could not read it again. Nothing was written. ${advice}`,
+    );
+  }
+}
+
+/** The text a snapshot is written as. */
+function snapshotText(snapshot: Snapshot): string {
+  return `${JSON.stringify(snapshot, null, 2)}\n`;
+}
+
+/**
+ * The first limit of `readSnapshot` that this text goes past, or undefined:
+ * its size, its nesting, its keys and values together, the keys of one
+ * object. The lists of the model are bounded where they are collected.
+ */
+export function snapshotExcess(text: string): SnapshotExcess | undefined {
+  if (Buffer.byteLength(text, 'utf8') > MAX_SNAPSHOT_BYTES) return 'bytes';
+  return jsonShapeExcess(Buffer.from(text, 'utf8'), {
+    maxDepth: MAX_SNAPSHOT_DEPTH,
+    maxItems: MAX_SNAPSHOT_ITEMS,
+    maxMembers: MAX_SNAPSHOT_MEMBERS,
+  });
+}
+
+/**
+ * The text of a snapshot, once it is certain that `readSnapshot` takes it
+ * back: a scan must never write what `report --from` refuses. Checked before
+ * anything is written, so that a result that is too large leaves no snapshot
+ * and no report behind. `advice` ends the message of the error.
+ */
+export function loadableSnapshotText(snapshot: Snapshot, advice: string): string {
+  let text: string;
+  try {
+    text = snapshotText(snapshot);
+  } catch (error) {
+    // Longer than a string can be, which is far beyond the size limit.
+    if (error instanceof RangeError) throw new SnapshotTooLargeError('bytes', advice);
+    throw error;
+  }
+  const excess = snapshotExcess(text);
+  if (excess !== undefined) throw new SnapshotTooLargeError(excess, advice);
+  return text;
+}
+
+/** Writes the text of a snapshot (`loadableSnapshotText`) and returns the path of the file. */
+export async function writeSnapshotText(
+  text: string,
+  scannedAt: string,
+  outDir: string,
+): Promise<string> {
   await ensurePrivateDir(outDir);
-  const path = join(outDir, snapshotFileName(snapshot.scannedAt));
-  await writePrivateFile(path, `${JSON.stringify(snapshot, null, 2)}\n`);
+  const path = join(outDir, snapshotFileName(scannedAt));
+  await writePrivateFile(path, text);
   return path;
+}
+
+/**
+ * Writes a snapshot as it is, without the check of `loadableSnapshotText`:
+ * what `baip-lens scan` does (docs/security-review.md SEC-21).
+ */
+export async function writeSnapshot(snapshot: Snapshot, outDir: string): Promise<string> {
+  return writeSnapshotText(snapshotText(snapshot), snapshot.scannedAt, outDir);
 }
 
 /**

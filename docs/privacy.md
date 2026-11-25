@@ -86,7 +86,7 @@ What a project scan never keeps:
 
 The acme-incidents fixture plants a poison value in every one of those places (its lockfile, written at test time, holds a package from another registry with a token in its address, a git package, a linked folder, a bundled package, one without an address and one with an invalid version, plus planted `integrity`, `license` and `deprecated` fields), and `packages/cli/test/e2e/project.test.ts` fails if any of them, an absolute path or the temporary folder name reaches the snapshot, a report or the terminal.
 
-A project scan still makes no request: looking the kept packages up for known vulnerabilities and deprecation is not built yet ([data-sources.md §12](data-sources.md#12-npm-dependencies-known-vulnerabilities-and-deprecations)). When it is, only the names and versions kept above will be sent, and this page will say so.
+**In progress.** A project scan now looks the packages it kept from the npm lockfiles up on OSV.dev: the name and version of each package that was resolved from the public npm registry go to `api.osv.dev` (`POST /v1/querybatch`, then `GET /v1/vulns/<id>` for the advisories it names), with no credential, and nothing else of the project is sent. `--no-dependency-check` turns the lookup off, and `--dependency-exclude` holds packages back. The answers are stored in the snapshot, but no rule reports them yet: the rule `DEP_KNOWN_CVE` and the full description of the lookup on this page follow in the next change, and until then the rest of this page describes the state before the lookup ([data-sources.md §12](data-sources.md#12-npm-dependencies-known-vulnerabilities-and-deprecations)). Deprecation is not looked up yet.
 
 ## Deployed-app scans
 

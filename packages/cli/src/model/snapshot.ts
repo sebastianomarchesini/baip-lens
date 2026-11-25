@@ -141,6 +141,13 @@ export const ScanOptionsSchema = z.object({
   trafficPages: z.number().int().positive().default(5),
   /** `--previous`: when the scan whose traffic history this one carries forward ran. */
   previousScannedAt: Timestamp.nullable().default(null),
+  /**
+   * Whether a project scan was allowed to look its npm packages up on the
+   * network: on unless `--no-dependency-check`. Whether the lookup could be
+   * done is the status of `collect.osv`. False for a CF scan, which has no
+   * lockfiles, and in snapshots written before the option existed.
+   */
+  dependencyCheck: z.boolean().default(false),
 });
 /** The scan options a snapshot records; the analyzers read them, offline too. */
 export type SnapshotOptions = z.infer<typeof ScanOptionsSchema>;
@@ -152,6 +159,7 @@ export const DEFAULT_SNAPSHOT_OPTIONS: SnapshotOptions = {
   minTrafficWindowHours: 12,
   trafficPages: 5,
   previousScannedAt: null,
+  dependencyCheck: false,
 };
 
 export const SnapshotSchema = z.object({

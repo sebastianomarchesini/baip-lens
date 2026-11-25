@@ -65,6 +65,32 @@ const ZERO_NOT_KEPT = {
   invalid: 0,
 };
 
+/** One advisory and one package that has it, as the lookup on OSV.dev stores them. */
+const ADVISORY = {
+  id: 'GHSA-fake-0001-baip',
+  aliases: ['CVE-2026-00001'],
+  summary: 'Prototype pollution in baip-fixture-merge',
+  cvssV3: 'CVSS:3.1/AV:N/AC:L/PR:N/UI:N/S:U/C:H/I:H/A:H',
+  label: 'CRITICAL',
+};
+const VULNERABLE = {
+  name: 'baip-fixture-merge',
+  version: '4.17.20',
+  advisories: [{ id: 'GHSA-fake-0001-baip', fixed: ['4.17.21'] }],
+};
+/** The project sample as a scan with a lookup writes it: with one row in each table. */
+const looked = {
+  ...project,
+  raw: {
+    ...(project.raw as Record<string, never>),
+    advisories: [ADVISORY],
+    vulnerablePackages: [VULNERABLE],
+  },
+} as typeof project;
+const ADVISORIES: JsonPath = ['raw', 'advisories'];
+const VULNERABLE_PACKAGES: JsonPath = ['raw', 'vulnerablePackages'];
+const PACKAGE_ADVISORIES: JsonPath = [...VULNERABLE_PACKAGES, 0, 'advisories'];
+
 function issuesOf(text: string) {
   const result = SnapshotSchema.safeParse(JSON.parse(text));
   if (result.success) throw new Error('expected the snapshot to be refused');
@@ -85,6 +111,11 @@ const LISTS: [string, typeof cf, JsonPath, number][] = [
   ['the lockfiles of a project', project, [...DEPENDENCIES, 'lockfiles'], 50],
   ['the packages of a project', project, [...DEPENDENCIES, 'packages'], 20_000],
   ['the lockfiles of a package', project, [...DEPENDENCIES, 'packages', 0, 'lockfiles'], 20],
+  ['raw.advisories', looked, ADVISORIES, 20_000],
+  ['the aliases of an advisory', looked, [...ADVISORIES, 0, 'aliases'], 20],
+  ['raw.vulnerablePackages', looked, VULNERABLE_PACKAGES, 20_000],
+  ['the advisories of a package', looked, PACKAGE_ADVISORIES, 200],
+  ['the fixed versions of an advisory', looked, [...PACKAGE_ADVISORIES, 0, 'fixed'], 10],
 ];
 
 describe('a snapshot list stops at its first invalid element', () => {
@@ -212,5 +243,127 @@ describe('the lockfile record of a project', () => {
     expect(result.data?.raw.projects[0]?.dependencies).toBeNull();
     expect(parsed(DEPENDENCIES, 'null').success).toBe(true);
     expect(parsed(DEPENDENCIES, '{}').success).toBe(false);
+  });
+});
+
+describe('the tables of the lookup on OSV.dev', () => {
+  const parsed = (path: JsonPath, json: string) =>
+    SnapshotSchema.safeParse(JSON.parse(withJsonAt(looked, path, json)));
+
+  it('load as a scan wrote them', () => {
+    const result = SnapshotSchema.safeParse(looked);
+    expect(result.success).toBe(true);
+    expect(result.data?.raw.advisories).toEqual([ADVISORY]);
+    expect(result.data?.raw.vulnerablePackages).toEqual([VULNERABLE]);
+  });
+
+  it.each([
+    ['advisories', ADVISORIES, JSON.stringify(ADVISORY), 20_000],
+    ['vulnerable packages', VULNERABLE_PACKAGES, JSON.stringify(VULNERABLE), 20_000],
+    ['aliases of an advisory', [...ADVISORIES, 0, 'aliases'], '"CVE-2026-00001"', 20],
+    ['advisories of a package', PACKAGE_ADVISORIES, JSON.stringify(VULNERABLE.advisories[0]), 200],
+    ['fixed versions of an advisory', [...PACKAGE_ADVISORIES, 0, 'fixed'], '"4.17.21"', 10],
+  ] as [string, JsonPath, string, number][])(
+    'take as many %s as the lookup keeps, and are refused at once with one more',
+    (_name, path, item, max) => {
+      expect(parsed(path, repeated(item, max)).success).toBe(true);
+      expect(issuesOf(withJsonAt(looked, path, repeated('0', max + 1)))).toMatchObject([
+        { code: 'too_big', maximum: max, path },
+      ]);
+    },
+  );
+
+  it.each([
+    ['an id with a slash', { id: 'GHSA-1/../x' }],
+    ['an id with a blank', { id: 'GHSA 1' }],
+    ['an id of 101 characters', { id: 'G'.repeat(101) }],
+    ['an empty id', { id: '' }],
+    ['an alias that is an address', { aliases: ['https://example.com/CVE-1'] }],
+    ['a summary of 201 characters', { summary: 's'.repeat(201) }],
+    ['a summary that is not text', { summary: ['x'] }],
+    ['a vector of another CVSS version', { cvssV3: 'CVSS:4.0/AV:N/AC:L' }],
+    ['a vector with markup in it', { cvssV3: 'CVSS:3.1/AV:N<script>' }],
+    ['a vector of 160 characters', { cvssV3: `CVSS:3.1/${'A'.repeat(151)}` }],
+    ['a score in place of the vector', { cvssV3: '9.8' }],
+    ['a label it does not know', { label: 'MEDIUM' }],
+    ['a label in lower case', { label: 'high' }],
+    ['no summary key at all', { summary: undefined }],
+  ])('refuse an advisory with %s', (_name, change) => {
+    const item = JSON.stringify({ ...ADVISORY, ...change });
+    expect(parsed(ADVISORIES, `[${item}]`).success).toBe(false);
+  });
+
+  it.each([
+    ['a name that could be read as a path', { name: '../x' }],
+    ['a name with an encoded slash', { name: '@scope%2fname' }],
+    ['a range instead of a version', { version: '^4.17.0' }],
+    ['an advisory without an id', { advisories: [{ fixed: [] }] }],
+    ['an advisory id that is a path', { advisories: [{ id: 'a/b', fixed: [] }] }],
+    ['a fixed version that is a range', { advisories: [{ id: 'A-1', fixed: ['>=4.17.21'] }] }],
+    [
+      'a fixed version of 65 characters',
+      { advisories: [{ id: 'A-1', fixed: [`1.0.0-${'9'.repeat(59)}`] }] },
+    ],
+    [
+      'a fixed version that is one text, not a list',
+      { advisories: [{ id: 'A-1', fixed: '4.17.21' }] },
+    ],
+    ['advisories that are not a list', { advisories: { 'A-1': [] } }],
+  ])('refuse a vulnerable package with %s', (_name, change) => {
+    const item = JSON.stringify({ ...VULNERABLE, ...change });
+    expect(parsed(VULNERABLE_PACKAGES, `[${item}]`).success).toBe(false);
+  });
+
+  it('take an advisory that says next to nothing, and a package whose advisory names no fix', () => {
+    const bare = { id: 'MAL-0000-0001', aliases: [], summary: null, cvssV3: null, label: null };
+    const result = parsed(ADVISORIES, `[${JSON.stringify(bare)}]`);
+    expect(result.data?.raw.advisories).toEqual([bare]);
+    const noFix = { ...VULNERABLE, advisories: [{ id: 'MAL-0000-0001', fixed: [] }] };
+    expect(
+      parsed(VULNERABLE_PACKAGES, `[${JSON.stringify(noFix)}]`).data?.raw.vulnerablePackages,
+    ).toEqual([noFix]);
+  });
+
+  it('drop every key of an advisory they do not know, so nothing else of a record can be stored', () => {
+    const item = JSON.stringify({
+      ...ADVISORY,
+      details: 'planted text',
+      references: [{ type: 'WEB', url: 'https://planted.example.com' }],
+      credits: [{ name: 'Planted Person', contact: ['planted'] }],
+      withdrawn: '2026-09-15T00:00:00Z',
+      database_specific: { severity: 'HIGH', cwe_ids: ['planted'] },
+    });
+    const withRanges = JSON.stringify({
+      ...VULNERABLE,
+      resolved: 'https://planted.example.com/x.tgz',
+      advisories: [{ ...VULNERABLE.advisories[0], introduced: 'planted', modified: 'planted' }],
+    });
+    const snapshot = JSON.parse(withJsonAt(looked, ADVISORIES, `[${item}]`)) as {
+      raw: Record<string, unknown>;
+    };
+    snapshot.raw.vulnerablePackages = [JSON.parse(withRanges)];
+    const result = SnapshotSchema.safeParse(snapshot);
+    expect(result.success).toBe(true);
+    expect(result.data?.raw.advisories).toEqual([ADVISORY]);
+    expect(result.data?.raw.vulnerablePackages).toEqual([VULNERABLE]);
+    expect(JSON.stringify(result.data)).not.toMatch(/planted/i);
+  });
+
+  it('are empty in a snapshot written without them, and the option says nothing was looked up', () => {
+    const before = structuredClone(project) as {
+      raw: Record<string, unknown>;
+      options: Record<string, unknown>;
+    };
+    delete before.raw.advisories;
+    delete before.raw.vulnerablePackages;
+    delete before.options.dependencyCheck;
+    const result = SnapshotSchema.safeParse(before);
+    expect(result.success).toBe(true);
+    expect(result.data?.raw.advisories).toEqual([]);
+    expect(result.data?.raw.vulnerablePackages).toEqual([]);
+    expect(result.data?.options.dependencyCheck).toBe(false);
+    expect(parsed(ADVISORIES, 'null').success).toBe(false);
+    expect(parsed(['options', 'dependencyCheck'], '"yes"').success).toBe(false);
+    expect(parsed(['options', 'dependencyCheck'], 'true').data?.options.dependencyCheck).toBe(true);
   });
 });

@@ -134,6 +134,22 @@ function projectWithPackages(i: number): string {
   }).replace('"\\u0000packages"', () => `[${packages}]`);
 }
 
+/** A package of the lookup on OSV.dev whose advisories are 100 values that are not advisories. */
+const vulnerableWithInvalidAdvisories = JSON.stringify({
+  name: 'baip-fixture-server',
+  version: '1.0.0',
+  advisories: '\u0000advisories',
+}).replace('"\\u0000advisories"', repeated('{}', 100));
+
+/** An advisory whose aliases are 20 values that are not ids. */
+const advisoryWithInvalidAliases = JSON.stringify({
+  id: 'GHSA-fake-0001-baip',
+  aliases: '\u0000aliases',
+  summary: null,
+  cvssV3: null,
+  label: null,
+}).replace('"\\u0000aliases"', repeated('"not an id"', 20));
+
 const ARRAY: [string, string] = ['[', ']'];
 const OBJECT: [string, string] = ['{', '}'];
 
@@ -160,6 +176,24 @@ const CRAFTED: [string, Write][] = [
   [
     '3 MB of packages with invalid lockfile paths',
     text(project, PACKAGES, () => repeated(packageWithInvalidLockfiles, 20_000)),
+  ],
+  [
+    '4 MB of {} in the advisories of the lookup',
+    text(project, ['raw', 'advisories'], () => repeated('{}', 1_400_000)),
+  ],
+  [
+    '4 MB of {} in the vulnerable packages of the lookup',
+    text(project, ['raw', 'vulnerablePackages'], () => repeated('{}', 1_400_000)),
+  ],
+  [
+    '6 MB of vulnerable packages with invalid advisories',
+    text(project, ['raw', 'vulnerablePackages'], () =>
+      repeated(vulnerableWithInvalidAdvisories, 20_000),
+    ),
+  ],
+  [
+    '6 MB of advisories with invalid aliases',
+    text(project, ['raw', 'advisories'], () => repeated(advisoryWithInvalidAliases, 20_000)),
   ],
   ['4 MB of 0 in raw.apps', text(cf, ['raw', 'apps'], () => repeated('0', 2_000_000))],
   [

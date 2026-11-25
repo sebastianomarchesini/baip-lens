@@ -62,6 +62,8 @@ function raw(apps: (string | RawApp)[], traffic: RawTraffic[] = []): RawData {
     traffic,
     history: [],
     projects: [],
+    advisories: [],
+    vulnerablePackages: [],
   };
 }
 

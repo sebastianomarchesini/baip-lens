@@ -2,9 +2,11 @@ import { mkdtemp, readFile, rm, stat, writeFile } from 'node:fs/promises';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 import { afterAll, describe, expect, it } from 'vitest';
+import { MAX_TABLE_BYTES } from '../../src/collectors/osv.js';
 import { PackageTable } from '../../src/collectors/project/dependencies.js';
 import type { LockedPackage } from '../../src/collectors/project/lockfile.js';
 import { type JsonShapeLimits, jsonShapeExcess } from '../../src/io/jsonShape.js';
+import { rawListBytes } from '../../src/io/jsonSize.js';
 import { MAX_RELATIVE_PATH_LENGTH } from '../../src/model/paths.js';
 import {
   MAX_SNAPSHOT_BYTES,
@@ -12,6 +14,7 @@ import {
   MAX_SNAPSHOT_ITEMS,
   MAX_SNAPSHOT_MEMBERS,
   readSnapshot,
+  snapshotExcess,
 } from '../../src/snapshot.js';
 import { fixturePath, readFixture, realShapedSnapshot } from '../support/snapshotText.js';
 
@@ -213,4 +216,91 @@ describe('the largest project record the collector can write', () => {
     },
     120_000,
   );
+});
+
+/*
+ * The lookup on OSV.dev stores at most 20,000 advisories and 20,000
+ * vulnerable packages, and both tables together only as far as they take 16
+ * MiB of the file (`MAX_TABLE_BYTES`, measured as the collector measures
+ * it). A project scan at those limits, on top of the 20,000 packages its
+ * lockfiles may keep, must load again. The findings a rule raises from the
+ * tables come on top; the scan checks the whole result before it writes it
+ * (`loadableSnapshotText`).
+ */
+describe('a project snapshot with the tables of the lookup at their limits', () => {
+  const PACKAGES = 20_000;
+  const name = (i: number): string => `baip-bulk-${String(i).padStart(5, '0')}`;
+  const id = (i: number): string => `GHSA-fake-${String(i).padStart(5, '0')}`;
+
+  /** Each package with `perPackage` advisories that name no fix: the most rows for their bytes. */
+  function tables(perPackage: number) {
+    return {
+      advisories: Array.from({ length: PACKAGES }, (_, i) => ({
+        id: id(i),
+        aliases: [],
+        summary: null,
+        cvssV3: null,
+        label: null,
+      })),
+      vulnerablePackages: Array.from({ length: PACKAGES }, (_, i) => ({
+        name: name(i),
+        version: '1.0.0',
+        advisories: Array.from({ length: perPackage }, (_, k) => ({
+          id: id((i + k) % PACKAGES),
+          fixed: [],
+        })),
+      })),
+    };
+  }
+
+  const tableBytes = (found: ReturnType<typeof tables>): number =>
+    rawListBytes(found.advisories) + rawListBytes(found.vulnerablePackages);
+
+  function atTheLimits(found: ReturnType<typeof tables>): Record<string, unknown> {
+    const sample = readFixture('sample-project-snapshot.json');
+    const raw = sample.raw as Record<string, unknown> & { projects: Record<string, unknown>[] };
+    const dependencies = raw.projects[0]?.dependencies as Record<string, unknown>;
+    raw.projects[0] = {
+      ...raw.projects[0],
+      dependencies: {
+        ...dependencies,
+        packages: Array.from({ length: PACKAGES }, (_, i) => ({
+          name: name(i),
+          version: '1.0.0',
+          direct: false,
+          scope: 'prod',
+          lockfiles: ['package-lock.json'],
+        })),
+      },
+    };
+    raw.advisories = found.advisories;
+    raw.vulnerablePackages = found.vulnerablePackages;
+    return sample;
+  }
+
+  it('holds as many rows as fit into 16 MiB: six advisories for each of 20,000 packages', () => {
+    expect(tableBytes(tables(6))).toBeLessThanOrEqual(MAX_TABLE_BYTES);
+    expect(tableBytes(tables(6))).toBeGreaterThan(0.9 * MAX_TABLE_BYTES);
+    // One more each and the collector stores nothing.
+    expect(tableBytes(tables(7))).toBeGreaterThan(MAX_TABLE_BYTES);
+  });
+
+  it('loads again, written as a scan writes it, with room to spare', async () => {
+    const dir = await mkdtemp(join(tmpdir(), 'baip-lens-capacity-'));
+    created.push(dir);
+    const path = join(dir, 'snapshot.json');
+    const text = JSON.stringify(atTheLimits(tables(6)), null, 2);
+    // What the scan itself checks before it writes.
+    expect(snapshotExcess(text)).toBeUndefined();
+    await writeFile(path, text);
+    const bytes = await readFile(path);
+    expect(bytes.length).toBeLessThan(MAX_SNAPSHOT_BYTES / 4);
+    // The packages and both tables take under half of the keys and values a snapshot may hold.
+    expect(jsonShapeExcess(bytes, itemLimit(0.5 * MAX_SNAPSHOT_ITEMS))).toBeUndefined();
+    const snapshot = await readSnapshot(path);
+    expect(snapshot.raw.projects[0]?.dependencies?.packages).toHaveLength(PACKAGES);
+    expect(snapshot.raw.advisories).toHaveLength(PACKAGES);
+    expect(snapshot.raw.vulnerablePackages).toHaveLength(PACKAGES);
+    expect(snapshot.raw.vulnerablePackages.at(-1)?.advisories).toHaveLength(6);
+  }, 60_000);
 });

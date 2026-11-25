@@ -100,6 +100,8 @@ function raw(
     traffic,
     history: [],
     projects: [],
+    advisories: [],
+    vulnerablePackages: [],
   };
 }
 

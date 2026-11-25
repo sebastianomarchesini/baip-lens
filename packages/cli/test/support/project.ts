@@ -12,6 +12,7 @@ import type {
   RawCdsFile,
   RawCdsService,
   RawCdsServiceEntity,
+  RawAdvisory,
   RawData,
   RawDependency,
   RawHtmlBootstrap,
@@ -23,6 +24,7 @@ import type {
   RawProject,
   RawProjectDependencies,
   RawSeedData,
+  RawVulnerablePackage,
   RawXsApp,
   RawXsAppRoute,
   RawXsSecurity,
@@ -64,6 +66,24 @@ export const DEPENDENCIES_COLLECTOR_SKIPPED: CheckResult = {
   status: 'skipped',
   reasonCode: 'dependency_skipped',
   reason: 'needs collect.project, which did not run',
+};
+
+/**
+ * The lookup on OSV.dev a project scan records when it was handed one
+ * (`baip-lens project`); a rule that reads its answers requires it.
+ */
+export const OSV_COLLECTOR: CheckResult = {
+  id: 'collect.osv',
+  title: 'Known vulnerabilities of npm packages',
+  roles: [],
+  status: 'ran',
+};
+
+export const OSV_COLLECTOR_SKIPPED: CheckResult = {
+  ...OSV_COLLECTOR,
+  status: 'skipped',
+  reasonCode: 'unavailable',
+  reason: 'api.osv.dev could not be reached',
 };
 
 /**
@@ -517,6 +537,29 @@ export function rawData(...projects: RawProject[]): RawData {
     traffic: [],
     history: [],
     projects,
+    advisories: [],
+    vulnerablePackages: [],
+  };
+}
+
+/** An advisory as the lookup on OSV.dev stores it; nothing but the id unless the options say so. */
+export function advisory(id: string, opts: Partial<Omit<RawAdvisory, 'id'>> = {}): RawAdvisory {
+  return { id, aliases: [], summary: null, cvssV3: null, label: null, ...opts };
+}
+
+/**
+ * A package version with advisories: `vulnerablePackage('baip-fixture-merge', '4.17.20',
+ * { 'GHSA-fake-0001-baip': ['4.17.21'] })`, each id with the fixed versions it names.
+ */
+export function vulnerablePackage(
+  name: string,
+  version: string,
+  advisories: Record<string, string[]>,
+): RawVulnerablePackage {
+  return {
+    name,
+    version,
+    advisories: Object.entries(advisories).map(([id, fixed]) => ({ id, fixed })),
   };
 }
 

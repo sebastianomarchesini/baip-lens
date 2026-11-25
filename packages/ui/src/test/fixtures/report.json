@@ -17,7 +17,8 @@
     "trafficCheck": true,
     "minTrafficWindowHours": 12,
     "trafficPages": 5,
-    "previousScannedAt": "2026-09-22T00:00:00.000Z"
+    "previousScannedAt": "2026-09-22T00:00:00.000Z",
+    "dependencyCheck": false
   },
   "checks": [
     {

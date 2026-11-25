@@ -108,6 +108,32 @@ describe('project scan has no way out of the file system', () => {
     }
   });
 
+  it('gets its network step from the command line alone: one module builds the lookup, one file imports it', async () => {
+    const names = await readdir(SRC, { recursive: true });
+    const sources = names
+      .filter((name) => name.endsWith('.ts'))
+      .map((name) => name.replaceAll('\\', '/'));
+    // The modules that ask a public source about a package exist, outside the guarded files.
+    const requesters = ['dependencyCheck.ts', 'collectors/osv.ts', 'http/osvClient.ts'];
+    for (const requester of requesters) expect(sources, requester).toContain(requester);
+    const guarded = (await Promise.all(GUARDED.map(sourceFiles))).flat();
+    for (const requester of requesters)
+      expect(guarded, requester).not.toContain(join(SRC, requester));
+
+    const importers = async (module: string): Promise<string[]> => {
+      const found: string[] = [];
+      for (const source of sources) {
+        const imported = importedModules(await readFile(join(SRC, source), 'utf8'));
+        if (imported.some((specifier) => ownModuleName(specifier) === module)) found.push(source);
+      }
+      return found.sort();
+    };
+    // Only `main.ts` builds a lookup; the scans are handed one and never make it themselves.
+    expect(await importers('dependencyCheck')).toEqual(['main.ts']);
+    expect(await importers('osv')).toEqual(['dependencyCheck.ts']);
+    expect(await importers('osvClient')).toEqual(['collectors/osv.ts', 'dependencyCheck.ts']);
+  });
+
   it('recognises an import of a module that makes requests, however it is written', () => {
     const cases = [
       "import { HttpClient } from '../../http/httpClient.js';",

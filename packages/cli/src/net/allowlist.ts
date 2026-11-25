@@ -56,7 +56,7 @@ export const STATIC_EGRESS_RULES: readonly EgressRule[] = [
     host: 'api.osv.dev',
     allow: { POST: /^\/v1\/querybatch$/, GET: /^\/v1\/vulns\/[A-Za-z0-9._:-]+$/ },
     credentials: [],
-    purpose: 'Known-vulnerability lookups for SBOM packages (DEP_KNOWN_CVE)',
+    purpose: 'Known vulnerabilities of public npm packages from lockfiles (DEP_KNOWN_CVE)',
   },
   {
     host: 'endoflife.date',

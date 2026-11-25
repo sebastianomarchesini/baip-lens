@@ -76,6 +76,20 @@ export const COLLECTOR_CHECKS = {
     title: 'npm lockfiles of the deployed app (node_modules/.package-lock.json, package-lock.json)',
     roles: ['SpaceDeveloper'],
   },
+  /**
+   * The lookup of the lockfile packages on OSV.dev (`baip-lens project`,
+   * docs/data-sources.md §12.3): a public source, so no CF role, for a folder
+   * and for deployed apps alike. Recorded after the checks of the files, as
+   * ran, or as skipped when it was turned off, when the lockfiles were not
+   * read, or when OSV.dev could not be asked: its answers are stored all or
+   * not at all, and the rule that reads them requires this check, so "not
+   * looked up" never reads as "no finding".
+   */
+  osv: {
+    id: 'collect.osv',
+    title: 'Known vulnerabilities of npm packages (OSV.dev: POST /v1/querybatch, GET /v1/vulns)',
+    roles: [],
+  },
 } as const satisfies Record<string, CheckDefinition>;
 
 /** How much of an app name the title of a check repeats. */

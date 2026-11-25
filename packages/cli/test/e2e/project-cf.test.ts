@@ -8,7 +8,18 @@ import { ScriptedPrompter } from '../../src/guided/prompt.js';
 import { type CliIo, EXIT, main } from '../../src/main.js';
 import { MAX_FILE_BYTES } from '../../src/collectors/project/read.js';
 import { MAX_READ_BYTES } from '../../src/remote/sftpTree.js';
-import { FakeFetch, jsonResponse } from '../support/fakeFetch.js';
+import { type SshConnect, connectSsh } from '../../src/remote/session.js';
+import {
+  OSV_HOST,
+  OSV_POISON,
+  type OsvScript,
+  QUERYBATCH,
+  askedAdvisories,
+  askedPackages,
+  osvCalls,
+  scriptOsv,
+} from '../support/dependencyScript.js';
+import { FakeFetch, jsonResponse, noSleep } from '../support/fakeFetch.js';
 import {
   type FakeSshServer,
   READ_REQUESTS,
@@ -33,7 +44,9 @@ vi.mock('../../src/reporters/html.js', async (importOriginal) => {
  * `baip-lens project --cf` end to end: the CF API and UAA are scripted
  * (FakeFetch), the app SSH proxy is a real SSH server on 127.0.0.1 that
  * serves a fixture folder per app as /home/vcap/app and records every login,
- * channel and SFTP request. Nothing here reaches a real landscape.
+ * channel and SFTP request. OSV.dev is scripted as well: it knows no
+ * advisory unless a test gives it some, so every run can look its packages
+ * up. Nothing here reaches a real landscape, or any other real host.
  */
 
 const API = 'https://api.cf.example.org';
@@ -238,7 +251,12 @@ interface Landscape {
   uaaDownFrom?: number;
   /** The name of the targeted space (default: `dev`). */
   spaceName?: string;
+  /** What OSV.dev answers: the advisories it knows (default: none), or a script of its own. */
+  osv?: OsvAnswers;
 }
+
+/** The advisories the scripted OSV.dev knows, or a function that scripts its answers itself. */
+type OsvAnswers = OsvScript | ((fake: FakeFetch) => void);
 
 /** What Node's fetch throws when the connection is reset. */
 function connectionReset(): TypeError {
@@ -335,6 +353,8 @@ function landscape(options: Landscape): FakeFetch {
         );
     }
   }
+  if (typeof options.osv === 'function') options.osv(fake);
+  else scriptOsv(fake, options.osv);
   return fake;
 }
 
@@ -490,6 +510,10 @@ interface RunOptions {
   uaaDownFrom?: number;
   /** Environment variables next to CF_HOME. */
   env?: Record<string, string>;
+  /** See `Landscape.osv`. */
+  osv?: OsvAnswers;
+  /** Instead of the real SSH client: a test wraps it to see when a session is opened and closed. */
+  sshConnect?: SshConnect;
 }
 
 async function startServer(options: RunOptions): Promise<FakeSshServer> {
@@ -522,6 +546,7 @@ async function run(options: RunOptions = {}): Promise<Run> {
     roles: options.roles,
     uaaDownFrom: options.uaaDownFrom,
     spaceName: options.space?.name,
+    osv: options.osv,
     ...(options.space === undefined ? {} : { apps: options.space.apps, codes: CODES }),
   });
   const token = accessToken();
@@ -537,7 +562,10 @@ async function run(options: RunOptions = {}): Promise<Run> {
     isTTY: false,
     prompter,
     fetch: fake.fetch,
+    ...(options.sshConnect === undefined ? {} : { sshConnect: options.sshConnect }),
     now: () => NOW,
+    // No real wait between two tries of a lookup that fails.
+    sleep: noSleep,
   };
   const args = [
     'project',
@@ -2186,6 +2214,512 @@ describe('baip-lens project --cf and the npm lockfiles of a deployed app', () =>
         'DEP_LOCKFILE_MISSING',
       );
     });
+  });
+});
+
+/*
+ * The packages the lockfile step kept are looked up on OSV.dev, for one app
+ * and for every app of a project run together: after the last SSH session is
+ * closed, through an HTTP client of its own, which knows nothing of the CF
+ * login. The scripted OSV.dev of these tests knows the advisories each of
+ * them names; the ids are plainly fake.
+ */
+describe('baip-lens project --cf and the lookup of the installed packages on OSV.dev', () => {
+  const A1 = 'GHSA-fake-0001-baip';
+  const A2 = 'GHSA-fake-0002-baip';
+  /** An advisory of a package the container fixture has installed, with text that must be cleaned. */
+  const VULNERABLE_MERGE: OsvScript = {
+    vulnerable: { 'baip-fixture-merge@4.17.20': [A1, A2] },
+    advisories: {
+      [A1]: {
+        aliases: ['CVE-2026-00001'],
+        summary:
+          'Prototype pollution, reported by osv.poison@example.com\u001b[31m\u202e via ' +
+          'https://ci:POISON_osv_pw@advisories.example.org/x',
+        cvssV3: 'CVSS:3.1/AV:N/AC:L/PR:N/UI:N/S:U/C:H/I:H/A:H',
+        label: 'CRITICAL',
+        affected: [
+          { name: 'baip-fixture-merge', fixed: '4.17.21' },
+          { name: 'baip-fixture-other', fixed: '9.9.9' },
+        ],
+      },
+      // Taken back: it counts for nothing and is not stored.
+      [A2]: { withdrawn: '2026-09-15T00:00:00Z', label: 'HIGH' },
+    },
+  };
+  const INSTALLED_ASKED = [
+    '@baip-fixture/odata@3.1.0',
+    'baip-fixture-merge@4.17.20',
+    'baip-fixture-server@2.4.1',
+    'baip-fixture-watcher@2.3.3',
+  ];
+  const OSV_CHECK = {
+    id: 'collect.osv',
+    title: 'Known vulnerabilities of npm packages (OSV.dev: POST /v1/querybatch, GET /v1/vulns)',
+    roles: [],
+  };
+  const DISCLOSURE = (packages: number): string =>
+    `Looking up ${packages} public npm package(s) on api.osv.dev: only their names and versions ` +
+    'are sent (--no-dependency-check turns this off, --dependency-exclude holds packages back)\n';
+
+  interface LookedUpJson {
+    options: { dependencyCheck: boolean };
+    checks: CheckJson[];
+    raw: { advisories: unknown[]; vulnerablePackages: unknown[] };
+  }
+
+  /**
+   * The skipped checks of the scan itself. A rule that reads the answers of
+   * the lookup is skipped with it, and says so; nothing else is skipped.
+   */
+  function skippedLookups(report: ReportJson): CheckJson[] {
+    const skipped = skippedChecks(report);
+    for (const check of skipped.filter((item) => !item.id.startsWith('collect.'))) {
+      expect(check).toMatchObject({
+        reasonCode: 'dependency_skipped',
+        reason: 'needs collect.osv, which did not run',
+      });
+      expect(check.id).toMatch(/^rule\.DEP_/);
+    }
+    return skipped.filter((item) => item.id.startsWith('collect.'));
+  }
+
+  async function lookedUp(dir: string): Promise<LookedUpJson> {
+    return JSON.parse(await readFile(await snapshotPath(dir), 'utf8')) as LookedUpJson;
+  }
+
+  /** The real SSH client, with a note in `events` whenever a session is opened or closed. */
+  function watchedSsh(events: string[]): SshConnect {
+    return async (options) => {
+      const session = await connectSsh(options);
+      events.push('ssh opened');
+      return {
+        ...session,
+        close: () => {
+          events.push('ssh closed');
+          session.close();
+        },
+      };
+    };
+  }
+
+  /** OSV.dev as scripted, with a note in `events` for every request it gets. */
+  const watchedOsv =
+    (events: string[], script: OsvScript = {}) =>
+    (fake: FakeFetch): void => {
+      fake.on(
+        'POST',
+        (url) => {
+          if (url.host === OSV_HOST) events.push('osv asked');
+          return false;
+        },
+        jsonResponse({}),
+      );
+      scriptOsv(fake, script);
+    };
+
+  /** Everything a request to OSV.dev carried, as one text. */
+  const sentToOsv = (r: Run): string =>
+    osvCalls(r.fake)
+      .map((call) => `${call.url.href}\n${JSON.stringify(call.headers)}\n${call.body ?? ''}`)
+      .join('\n');
+
+  /** No credential went to OSV.dev, and the CF token to no host but the CF API and UAA. */
+  function expectNoCredentialSent(r: Run): void {
+    for (const call of osvCalls(r.fake)) {
+      expect(call.url.origin).toBe('https://api.osv.dev');
+      expect(Object.keys(call.headers).sort()).toEqual(
+        call.method === 'POST'
+          ? ['accept', 'content-type', 'user-agent']
+          : ['accept', 'user-agent'],
+      );
+      expect(call.redirect).toBe('manual');
+    }
+    const sent = sentToOsv(r);
+    for (const never of [r.token, ...CODES, ONE_TIME_CODE, 'bearer', 'cookie']) {
+      expect(sent.toLowerCase(), never).not.toContain(never.toLowerCase());
+    }
+    const withToken = r.fake.calls.filter((call) => 'authorization' in call.headers);
+    expect(withToken.length).toBeGreaterThan(3);
+    for (const call of withToken) expect([API_HOST, UAA_HOST]).toContain(call.url.host);
+  }
+
+  /** Nothing of the app, the space or the private packages of its lockfile went to OSV.dev. */
+  function expectOnlyPublicPackagesSent(r: Run, kept: string[]): void {
+    expect(askedPackages(r.fake)).toEqual(kept);
+    const sent = sentToOsv(r);
+    for (const never of [
+      ...POISON,
+      'poison',
+      'incidents-srv',
+      'acme',
+      'locked-srv',
+      'node_modules',
+      'package-lock',
+      '/home/vcap',
+      '@sap/',
+    ]) {
+      expect(sent, never).not.toContain(never);
+    }
+  }
+
+  it('looks the installed packages of one app up after its session is closed, and stores the answers', async () => {
+    const events: string[] = [];
+    const r = await run({
+      osv: watchedOsv(events, VULNERABLE_MERGE),
+      sshConnect: watchedSsh(events),
+    });
+    expect(r.code, r.err).toBe(EXIT.ok);
+
+    // One query for the four public packages of the installed tree, then each advisory once.
+    expect(osvCalls(r.fake).map((call) => `${call.method} ${call.url.pathname}`)).toEqual([
+      'POST /v1/querybatch',
+      `GET /v1/vulns/${A1}`,
+      `GET /v1/vulns/${A2}`,
+    ]);
+    expectOnlyPublicPackagesSent(r, INSTALLED_ASKED);
+    expectNoCredentialSent(r);
+    // The SSH session of the app was closed before anything was asked.
+    expect(events).toEqual(['ssh opened', 'ssh closed', 'osv asked']);
+    expectOnlyReads(r);
+
+    // Said before the request, and summed up after the answers.
+    const lines = r.err.split('\n');
+    const disclosed = lines.indexOf(DISCLOSURE(4).trimEnd());
+    expect(disclosed).toBeGreaterThan(-1);
+    expect(lines[disclosed - 1]).toBe(
+      'Read 1 npm lockfile(s): 4 package(s) from the public npm registry, 2 other package(s) not checked',
+    );
+    expect(lines[disclosed + 1]).toBe(
+      'api.osv.dev: 1 of 4 package(s) have a known vulnerability (1 advisories)',
+    );
+
+    const snapshot = await lookedUp(r.outDir);
+    const ids = snapshot.checks.map((check) => check.id);
+    expect(ids.slice(0, 3)).toEqual(['collect.project', 'collect.dependencies', 'collect.osv']);
+    expect(ids.slice(3).every((id) => id.startsWith('rule.'))).toBe(true);
+    // A public source: no CF role, also for a deployed app.
+    expect(snapshot.checks[2]).toEqual({ ...OSV_CHECK, status: 'ran' });
+    expect(snapshot.options.dependencyCheck).toBe(true);
+    expect(snapshot.raw.advisories).toEqual([
+      {
+        id: A1,
+        aliases: ['CVE-2026-00001'],
+        summary: 'Prototype pollution, reported by [e-mail] via https://advisories.example.org/x',
+        cvssV3: 'CVSS:3.1/AV:N/AC:L/PR:N/UI:N/S:U/C:H/I:H/A:H',
+        label: 'CRITICAL',
+      },
+    ]);
+    expect(snapshot.raw.vulnerablePackages).toEqual([
+      {
+        name: 'baip-fixture-merge',
+        version: '4.17.20',
+        advisories: [{ id: A1, fixed: ['4.17.21'] }],
+      },
+    ]);
+
+    // Nothing of a record but what the tables name reaches a file or the terminal.
+    const never = [...POISON, r.token, ...OSV_POISON, 'POISON_osv_pw', 'baip-fixture-other', A2];
+    expectNoLeaks({ stdout: r.out }, never);
+    expectNoLeaks({ stderr: r.err, ...(await written(r.outDir)) }, never, [ABSOLUTE_PATH]);
+    // The tables and the check load again, without a network.
+    await expectSameOffline(r);
+    const again = await mkdtemp(join(tmpdir(), 'baip-lens-cf-again-'));
+    const offline = {
+      stdout: () => undefined,
+      stderr: () => undefined,
+      env: {},
+      isTTY: false,
+      fetch: () => Promise.reject(new Error('network must not be used')),
+    };
+    const args = [
+      'report',
+      '--from',
+      await snapshotPath(r.outDir),
+      '--format',
+      'json',
+      '--out',
+      again,
+    ];
+    expect(await main(args, offline)).toBe(EXIT.ok);
+    expect((await reportOf(again)).checks).toContainEqual({ ...OSV_CHECK, status: 'ran' });
+  });
+
+  /** The project "acme": an approuter and a service, each with its installed tree; one package in both. */
+  async function lockedPair(): Promise<Space> {
+    const router = await appFolder({
+      'package.json': JSON.stringify({
+        name: 'acme-approuter',
+        dependencies: { 'baip-fixture-router': '^1.0.0', 'baip-fixture-server': '^2.0.0' },
+      }),
+      'xs-app.json': JSON.stringify({ authenticationMethod: 'route', routes: [] }),
+      'node_modules/.package-lock.json': hiddenLockfile('acme-approuter', {
+        'node_modules/baip-fixture-router': registryEntry('baip-fixture-router', '1.0.0'),
+        'node_modules/baip-fixture-server': registryEntry('baip-fixture-server', '2.4.1'),
+        'node_modules/@poison-scope/private': privateEntry('@poison-scope/private'),
+      }),
+      '.npmrc': NPMRC,
+    });
+    return {
+      apps: [
+        app(1, 'acme-router', { ...ready(1), metadata: deployed('acme', 'acme-approuter') }),
+        app(2, 'acme-srv', { ...ready(2), metadata: deployed('acme', 'acme-srv') }),
+      ],
+      folders: { [sshUser(1)]: router, [sshUser(2)]: await containerFixture() },
+    };
+  }
+  const mtaAcme = { args: ['--mta', 'acme'], answers: null };
+
+  it('looks the packages of every app of a project run up together: once each, after the last session', async () => {
+    const events: string[] = [];
+    const r = await run({
+      space: await lockedPair(),
+      ...mtaAcme,
+      osv: watchedOsv(events, {
+        vulnerable: { 'baip-fixture-server@2.4.1': [A1] },
+        advisories: { [A1]: { label: 'MODERATE' } },
+      }),
+      sshConnect: watchedSsh(events),
+    });
+    expect(r.code, r.err).toBe(EXIT.ok);
+
+    // Both sessions were opened and closed before the one query; the package both apps have is in it once.
+    expect(events).toEqual(['ssh opened', 'ssh closed', 'ssh opened', 'ssh closed', 'osv asked']);
+    expectOnlyPublicPackagesSent(r, [
+      '@baip-fixture/odata@3.1.0',
+      'baip-fixture-merge@4.17.20',
+      'baip-fixture-router@1.0.0',
+      'baip-fixture-server@2.4.1',
+      'baip-fixture-watcher@2.3.3',
+    ]);
+    expect(askedAdvisories(r.fake)).toEqual([A1]);
+    expectNoCredentialSent(r);
+    expectOnlyReads(r);
+    expect(r.err).toContain(DISCLOSURE(5));
+    expect(r.err.match(/Looking up/g)).toHaveLength(1);
+    expect(r.err).toContain(
+      'api.osv.dev: 1 of 5 package(s) have a known vulnerability (1 advisories)\n',
+    );
+
+    // One table for the scan: the package is in it once, whichever apps have it installed.
+    const snapshot = await lookedUp(r.outDir);
+    expect(snapshot.raw.vulnerablePackages).toEqual([
+      { name: 'baip-fixture-server', version: '2.4.1', advisories: [{ id: A1, fixed: [] }] },
+    ]);
+    expect(snapshot.checks.map((check) => check.id).slice(0, 3)).toEqual([
+      'collect.project',
+      'collect.dependencies',
+      'collect.osv',
+    ]);
+    await expectNothingLeaked(r);
+  }, 20_000);
+
+  it('records the lookup after the apps that were not read, and still makes it for the others', async () => {
+    const space = await lockedPair();
+    space.folders[sshUser(1)] = await javaFixture();
+    const r = await run({ space, ...mtaAcme });
+    expect(r.code, r.err).toBe(EXIT.ok);
+    const snapshot = await lookedUp(r.outDir);
+    expect(snapshot.checks.slice(0, 4).map((check) => [check.id, check.status])).toEqual([
+      ['collect.project', 'ran'],
+      ['collect.dependencies', 'ran'],
+      ['collect.project.acme-router', 'skipped'],
+      ['collect.osv', 'ran'],
+    ]);
+    expect(askedPackages(r.fake)).toEqual(INSTALLED_ASKED);
+  }, 20_000);
+
+  it('asks nothing with --no-dependency-check, and says in the report that it was turned off', async () => {
+    const r = await run({ args: ['--no-dependency-check'], osv: VULNERABLE_MERGE });
+    expect(r.code, r.err).toBe(EXIT.ok);
+    expect(osvCalls(r.fake)).toEqual([]);
+    expect(r.fake.calls.every((call) => [API_HOST, UAA_HOST].includes(call.url.host))).toBe(true);
+    expect(r.err).not.toContain('Looking up');
+    expect(r.err).toContain('skipped collect.osv: turned off with --no-dependency-check\n');
+    expect(r.out).toMatch(
+      /^Scanned deployed app incidents-srv: \d+ finding\(s\) \(.*\), \d+ check\(s\) skipped\.\n/,
+    );
+    expect(r.out).toContain('  skipped collect.osv: turned off with --no-dependency-check\n');
+
+    const snapshot = await lookedUp(r.outDir);
+    expect(snapshot.options.dependencyCheck).toBe(false);
+    expect(snapshot.raw.advisories).toEqual([]);
+    expect(snapshot.raw.vulnerablePackages).toEqual([]);
+    const report = await reportOf(r.outDir);
+    expect(skippedLookups(report)).toEqual([
+      {
+        ...OSV_CHECK,
+        status: 'skipped',
+        reasonCode: 'disabled',
+        reason: 'turned off with --no-dependency-check',
+      },
+    ]);
+    // The lockfile is still read, and what it says without a lookup is still reported.
+    expect((await dependencyFindings(r.outDir)).map((f) => f.id)).toEqual(['DEP_NOT_CHECKED']);
+    expectOnlyReads(r);
+  });
+
+  it('holds the packages of --dependency-exclude back from a run of one app: not asked, not kept', async () => {
+    const r = await run({ args: ['--dependency-exclude', '@baip-fixture/*, baip-fixture-MERGE'] });
+    expect(r.code, r.err).toBe(EXIT.ok);
+    expectOnlyPublicPackagesSent(r, ['baip-fixture-server@2.4.1', 'baip-fixture-watcher@2.3.3']);
+    expect(sentToOsv(r)).not.toContain('odata');
+    expect(sentToOsv(r)).not.toContain('merge');
+    expect(r.err).toContain(DISCLOSURE(2));
+
+    const [project] = await lockedProjects(r.outDir);
+    expect(project?.dependencies.packages.map((item) => item.name)).toEqual([
+      'baip-fixture-server',
+      'baip-fixture-watcher',
+    ]);
+    expect(project?.dependencies.lockfiles).toMatchObject([
+      { kind: 'hidden', status: 'read', kept: 2, notKept: { excluded: 2, otherRegistry: 1 } },
+    ]);
+    // Counted, never named: not among the packages, and in no report. The patterns are written nowhere.
+    expect(JSON.stringify(project?.dependencies)).not.toMatch(/odata|merge/);
+    const files = await written(r.outDir);
+    for (const [name, content] of Object.entries(files)) {
+      expect(content, name).not.toContain('baip-fixture-merge');
+      expect(content, name).not.toContain('@baip-fixture/*');
+      expect(content.toLowerCase(), name).not.toContain('baip-fixture-merge');
+      if (!name.startsWith('snapshot-')) expect(content, name).not.toContain('@baip-fixture/odata');
+    }
+    expect(`${r.out}${r.err}`).not.toMatch(/odata|baip-fixture-merge|@baip-fixture/i);
+    const [notChecked] = await dependencyFindings(r.outDir);
+    expect(notChecked?.evidence).toMatchObject({ excluded: 2, checked: 2 });
+  });
+
+  it('holds them back from every app of a project run', async () => {
+    const r = await run({
+      space: await lockedPair(),
+      args: ['--mta', 'acme', '--dependency-exclude', 'baip-fixture-server'],
+      answers: null,
+    });
+    expect(r.code, r.err).toBe(EXIT.ok);
+    expectOnlyPublicPackagesSent(r, [
+      '@baip-fixture/odata@3.1.0',
+      'baip-fixture-merge@4.17.20',
+      'baip-fixture-router@1.0.0',
+      'baip-fixture-watcher@2.3.3',
+    ]);
+    const projects = await lockedProjects(r.outDir);
+    expect(projects.map((p) => [p.id, p.dependencies.lockfiles[0]?.notKept.excluded])).toEqual([
+      ['acme-router', 1],
+      ['acme-srv', 1],
+    ]);
+    for (const project of projects) {
+      expect(project.dependencies.packages.map((item) => item.name)).not.toContain(
+        'baip-fixture-server',
+      );
+    }
+  }, 20_000);
+
+  it('refuses a --dependency-exclude that is no pattern before it signs in anywhere', async () => {
+    const r = await run({ args: ['--dependency-exclude', '@acme/* internal'] });
+    expect(r.code).toBe(EXIT.error);
+    expect(r.err).toContain('--dependency-exclude needs package names or patterns such as @acme/*');
+    expect(r.fake.calls).toEqual([]);
+    expect(r.server.connections).toBe(0);
+    expect(await readdir(r.outDir)).toEqual([]);
+  });
+
+  it('still reports the app when OSV.dev cannot be reached: the lookup is a skipped check', async () => {
+    const r = await run({
+      osv: (fake) =>
+        fake.on(
+          'POST',
+          (url) => url.host === OSV_HOST,
+          () => {
+            throw connectionReset();
+          },
+        ),
+    });
+    expect(r.code, r.err).toBe(EXIT.ok);
+    // One request, tried three times; nothing after it.
+    expect(osvCalls(r.fake).map((call) => `${call.method} ${call.url.pathname}`)).toEqual([
+      'POST /v1/querybatch',
+      'POST /v1/querybatch',
+      'POST /v1/querybatch',
+    ]);
+    expectNoCredentialSent(r);
+    const report = await reportOf(r.outDir);
+    expect(skippedLookups(report)).toEqual([
+      {
+        ...OSV_CHECK,
+        status: 'skipped',
+        reasonCode: 'unavailable',
+        reason: 'api.osv.dev could not be reached',
+      },
+    ]);
+    expect(r.err).toContain('skipped collect.osv: api.osv.dev could not be reached\n');
+    expect(r.err).not.toContain('ECONNRESET');
+    expect(r.err).not.toContain('have a known vulnerability');
+    expect(r.out).toContain('  skipped collect.osv: api.osv.dev could not be reached\n');
+    // The files were read and judged all the same.
+    const ids = report.findings.map((f) => f.id);
+    expect(ids).toContain('CAP_MOCKED_AUTH_IN_PROD');
+    expect(ids).toContain('DEP_NOT_CHECKED');
+    const snapshot = await lookedUp(r.outDir);
+    // It was allowed to ask; that it could not is what the check says.
+    expect(snapshot.options.dependencyCheck).toBe(true);
+    expect(snapshot.raw.advisories).toEqual([]);
+    expect(snapshot.raw.vulnerablePackages).toEqual([]);
+    await expectSameOffline(r);
+  });
+
+  it.each([
+    [
+      'an error',
+      jsonResponse({ code: 13, message: 'POISON_osv_message' }, 500),
+      'api.osv.dev answered HTTP 500',
+      3,
+    ],
+    [
+      'something that is not an answer',
+      new Response('<html>POISON_osv_message</html>', { status: 200 }),
+      'api.osv.dev sent an unexpected answer',
+      1,
+    ],
+    [
+      'a redirect',
+      new Response(null, {
+        status: 302,
+        headers: { location: 'https://poison-redirect.example.com/' },
+      }),
+      'api.osv.dev answered HTTP 302',
+      1,
+    ],
+  ])(
+    'records %s of OSV.dev with a fixed reason, and keeps nothing of it',
+    async (_name, response, reason, calls) => {
+      const r = await run({ osv: (fake) => fake.on('POST', QUERYBATCH, response) });
+      expect(r.code, r.err).toBe(EXIT.ok);
+      expect(osvCalls(r.fake)).toHaveLength(calls);
+      // Nothing but OSV.dev was asked about a package, whatever it answered.
+      expect(
+        r.fake.calls.every((call) => [API_HOST, UAA_HOST, OSV_HOST].includes(call.url.host)),
+      ).toBe(true);
+      const report = await reportOf(r.outDir);
+      expect(skippedLookups(report)).toEqual([
+        { ...OSV_CHECK, status: 'skipped', reasonCode: 'error', reason },
+      ]);
+      const snapshot = await lookedUp(r.outDir);
+      expect(snapshot.raw.advisories).toEqual([]);
+      expect(snapshot.raw.vulnerablePackages).toEqual([]);
+      expectNoLeaks({ stdout: r.out, stderr: r.err, ...(await written(r.outDir)) }, [
+        'POISON_osv_message',
+        'poison-redirect',
+      ]);
+    },
+  );
+
+  it('asks nothing when the app has no lockfile: there is no package to look up', async () => {
+    const r = await runOneApp(await approuterFixture());
+    expect(r.code, r.err).toBe(EXIT.ok);
+    expect(osvCalls(r.fake)).toEqual([]);
+    expect(r.err).not.toContain('Looking up');
+    const snapshot = await lookedUp(r.outDir);
+    expect(snapshot.checks[2]).toEqual({ ...OSV_CHECK, status: 'ran' });
   });
 });
 

@@ -234,6 +234,9 @@ export async function scan(options: ScanOptions): Promise<Snapshot> {
     traffic: [],
     history: [],
     projects: [],
+    // A CF scan reads no lockfiles, so it has no packages to look up.
+    advisories: [],
+    vulnerablePackages: [],
   };
   log(`Collected ${raw.apps.length} app(s)`);
 
@@ -246,6 +249,7 @@ export async function scan(options: ScanOptions): Promise<Snapshot> {
     minTrafficWindowHours: options.minTrafficWindowHours ?? 12,
     trafficPages: options.trafficPages ?? 5,
     previousScannedAt: options.previous?.scannedAt ?? null,
+    dependencyCheck: false,
   };
   raw.traffic = await collectTrafficCheck(recorder, raw, logCacheLink(root), snapshotOptions, {
     http,

@@ -84,6 +84,16 @@ export const SNAPSHOT_LIST_LIMITS = {
   history: 200_000,
   /** A scan of a local folder writes one; a scan of a deployed project one per app read, at most 50. */
   projects: 1_000,
+  /** Advisories OSV.dev lists for the packages of a project scan; with more, the lookup stores none. */
+  advisories: 20_000,
+  /** Packages with an advisory: at most the 20,000 packages a scan keeps from npm lockfiles. */
+  vulnerablePackages: 20_000,
+  /** Other ids of one advisory (CVE ids and the like); the lookup keeps the first 20. */
+  advisoryAliases: 20,
+  /** Advisories of one package version; with more, the lookup stores none. */
+  packageAdvisories: 200,
+  /** Fixed versions one advisory names for one package. */
+  fixedVersions: 10,
   findings: 1_000_000,
   checks: 1_000,
   /** Buildpacks of one app or droplet. */

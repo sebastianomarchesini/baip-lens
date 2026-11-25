@@ -11,6 +11,7 @@ import {
   parseReportConfig,
   parseScanConfig,
 } from './config.js';
+import { createDependencyLookup } from './dependencyCheck.js';
 import { formatDoctor, runDoctor } from './doctor.js';
 import { type OpenInBrowser, openInBrowser } from './guided/open.js';
 import { type Prompter, TerminalPrompter, WizardCancelled } from './guided/prompt.js';
@@ -21,13 +22,18 @@ import type { FetchLike } from './http/httpClient.js';
 import { sanitizeOutput } from './io/redact.js';
 import { meetsThreshold } from './model/severity.js';
 import type { ReportData, Snapshot } from './model/snapshot.js';
-import { scanProject } from './project.js';
+import { type DependencyLookup, scanProject } from './project.js';
 import type { SshConnect } from './remote/session.js';
 import { scanApp } from './remote/scanApp.js';
 import { writeReports } from './reporters/index.js';
 import { toReportData } from './reporters/reportData.js';
 import { scan } from './scan.js';
-import { readSnapshot, writeSnapshot } from './snapshot.js';
+import {
+  loadableSnapshotText,
+  readSnapshot,
+  writeSnapshot,
+  writeSnapshotText,
+} from './snapshot.js';
 import { TOOL_NAME, TOOL_VERSION } from './version.js';
 
 export interface CliIo {
@@ -48,6 +54,8 @@ export interface CliIo {
   sshConnect?: SshConnect;
   /** Injected in tests. */
   now?: () => Date;
+  /** Injected in tests to skip the backoff between two tries of a dependency lookup. */
+  sleep?: (ms: number) => Promise<void>;
 }
 
 export const EXIT = { ok: 0, findings: 1, error: 2 } as const;
@@ -146,6 +154,7 @@ async function scanDeployedApp(
   config: ProjectConfig,
   io: CliIo,
   log: (message: string) => void,
+  lookup: DependencyLookup,
 ): Promise<Snapshot> {
   const named = config.app !== undefined || config.mta !== undefined;
   const prompter = named ? undefined : appPrompter(io);
@@ -163,18 +172,34 @@ async function scanDeployedApp(
       sshConnect: io.sshConnect,
       now: io.now,
       log,
+      dependencyExclude: config.dependencyExclude,
+      lookup,
     });
   } finally {
     prompter?.close();
   }
 }
 
+/** What to do when the result of a project scan is larger than a snapshot may be. */
+const TOO_LARGE_ADVICE = {
+  cf: 'Read fewer apps at a time (--app <name>), or run it again with --no-dependency-check.',
+  path: 'Scan a part of the project at a time (--path <sub-folder>), or run it again with --no-dependency-check.',
+} as const;
+
 async function runProject(config: ProjectConfig, io: CliIo): Promise<number> {
   const log = config.quiet ? () => {} : (message: string) => io.stderr(`${message}\n`);
+  // The one place a project scan gets its network step from: the scan itself makes no request about a package.
+  const lookup = createDependencyLookup({
+    enabled: config.dependencyCheck,
+    userAgent: `${TOOL_NAME}/${TOOL_VERSION}`,
+    fetch: io.fetch,
+    sleep: io.sleep,
+    log,
+  });
   let snapshot: Snapshot;
   if (config.cf) {
     try {
-      snapshot = await scanDeployedApp(config, io, log);
+      snapshot = await scanDeployedApp(config, io, log, lookup);
     } catch (error) {
       if (!(error instanceof WizardCancelled)) throw error;
       io.stdout(`${error.message}\n`);
@@ -183,9 +208,18 @@ async function runProject(config: ProjectConfig, io: CliIo): Promise<number> {
   } else {
     if (config.path === undefined)
       throw new ConfigError("required option '--path <dir>' not specified");
-    snapshot = await scanProject({ path: config.path, outDir: config.out, now: io.now, log });
+    snapshot = await scanProject({
+      path: config.path,
+      outDir: config.out,
+      now: io.now,
+      log,
+      dependencyExclude: config.dependencyExclude,
+      lookup,
+    });
   }
-  const snapshotPath = await writeSnapshot(snapshot, config.out);
+  // Before anything is written: a result `report --from` would refuse leaves no file behind.
+  const text = loadableSnapshotText(snapshot, TOO_LARGE_ADVICE[config.cf ? 'cf' : 'path']);
+  const snapshotPath = await writeSnapshotText(text, snapshot.scannedAt, config.out);
   const data = toReportData(snapshot);
   const files = await writeReports(data, config.format, config.out);
   if (!config.quiet) printSummary(data, [snapshotPath, ...files], io);
@@ -284,7 +318,7 @@ function buildProgram(io: CliIo, setExit: (code: number) => void): Command {
   program
     .command('project')
     .description(
-      'scan a CAP or MTA project: a local folder (--path: file reads only, no network) or a deployed app or project (--cf: read-only over SSH)',
+      'scan a CAP or MTA project: a local folder (--path: file reads only) or a deployed app or project (--cf: read-only over SSH); the names and versions of its public npm packages are looked up on OSV.dev',
     )
     .option('--path <dir>', 'project directory (contains package.json, mta.yaml or .cdsrc.json)')
     .option(
@@ -304,6 +338,11 @@ function buildProgram(io: CliIo, setExit: (code: number) => void): Command {
     .option('--api <url>', 'with --cf: CF API endpoint or region (default: the cf CLI target)')
     .option('--org <name>', 'with --cf: org (default: the cf CLI target)')
     .option('--space <name>', 'with --cf: space (default: the cf CLI target)')
+    .option('--no-dependency-check', 'do not look up npm packages on OSV.dev')
+    .option(
+      '--dependency-exclude <list>',
+      'comma-separated package names or patterns such as @acme/* that are never looked up and never kept from a lockfile',
+    )
     .option('--out <dir>', 'output directory', './reports')
     .option('--format <list>', 'report formats: html,json,csv,sarif', DEFAULT_FORMATS)
     .option('--fail-on <severity>', FAIL_ON_HELP, 'none')

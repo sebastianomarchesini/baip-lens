@@ -1,4 +1,8 @@
 import { z } from 'zod';
+import {
+  DEPENDENCY_EXCLUDE_PATTERN,
+  MAX_DEPENDENCY_EXCLUDES,
+} from './collectors/project/lockfile.js';
 import { toApiEndpoint } from './guided/regions.js';
 import { ConfigError } from './http/errors.js';
 import { MTA_NAME_PATTERN, MTA_NAMESPACE_PATTERN } from './model/raw.js';
@@ -89,6 +93,32 @@ export const ReportConfigSchema = CommonSchema.extend({
 });
 export type ReportConfig = z.infer<typeof ReportConfigSchema>;
 
+const DEPENDENCY_EXCLUDE_HELP =
+  '--dependency-exclude needs package names or patterns such as @acme/*, separated by commas ' +
+  '(letters, digits and "@", "/", ".", "_", "~", "-", "*"; at most 214 characters each)';
+
+/**
+ * `--dependency-exclude`: the patterns of the list, trimmed. A pattern that
+ * is not one is refused, not skipped: a package the user wanted to keep at
+ * home would otherwise be looked up. The message does not repeat the value,
+ * which may name a private scope.
+ */
+const DependencyExcludeSchema = z.string().transform((value, ctx): string[] => {
+  const patterns = value.split(',').map((pattern) => pattern.trim());
+  if (patterns.some((pattern) => !DEPENDENCY_EXCLUDE_PATTERN.test(pattern))) {
+    ctx.addIssue({ code: 'custom', message: DEPENDENCY_EXCLUDE_HELP });
+    return z.NEVER;
+  }
+  if (patterns.length > MAX_DEPENDENCY_EXCLUDES) {
+    ctx.addIssue({
+      code: 'custom',
+      message: `--dependency-exclude takes at most ${MAX_DEPENDENCY_EXCLUDES} patterns`,
+    });
+    return z.NEVER;
+  }
+  return patterns;
+});
+
 /** The options that only mean something with --cf, each with the flag as the user types it. */
 const CF_ONLY_FLAGS = [
   ['app', '--app'],
@@ -122,6 +152,10 @@ export const ProjectConfigSchema = CommonSchema.extend({
   api: ApiUrlSchema.optional(),
   org: z.string().trim().min(1, '--org needs an org name').optional(),
   space: z.string().trim().min(1, '--space needs a space name').optional(),
+  /** `--no-dependency-check` sets this to false: no npm package is looked up on the network. */
+  dependencyCheck: z.boolean().default(true),
+  /** `--dependency-exclude`: patterns of package names that are never looked up and never kept from a lockfile. */
+  dependencyExclude: DependencyExcludeSchema.default([]),
   quiet: z.boolean(),
 }).superRefine((value, ctx) => {
   if (value.cf && value.path !== undefined) {
