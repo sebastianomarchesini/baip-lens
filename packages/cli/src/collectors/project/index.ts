@@ -21,6 +21,8 @@ import {
   exceedsConfigDepth,
 } from './cdsConfig.js';
 import {
+  HIDDEN_LOCKFILE,
+  type HiddenLockfile,
   MAX_LOCKFILE_TOTAL_BYTES,
   PackageTable,
   chooseLockfiles,
@@ -33,6 +35,7 @@ import { type GitignoreLayer, isIgnored, parseGitignore } from './gitignore.js';
 import { scanHtml } from './html.js';
 import { LocalProjectTree } from './localTree.js';
 import {
+  type LockfileOptions,
   type LockfileSource,
   type ParsedLockfile,
   excludeMatcher,
@@ -65,9 +68,12 @@ import { parseXsSecurity } from './xsSecurity.js';
  * repository root and the project root are read for their archive decision;
  * nothing about them is stored. The npm lockfiles are read last, with limits
  * of their own on their number, size and bytes; of their packages only those
- * resolved from the public npm registry are kept by name (`lockfile.ts`). A tree that
- * disappears during the walk (a closed connection to a deployed app) rejects
- * with its own error; that is the only error the tree collector lets through.
+ * resolved from the public npm registry are kept by name (`lockfile.ts`). For
+ * a deployed app, and only when the caller asks for it, the lockfile of the
+ * installed tree is read first: the one file under `node_modules` that is
+ * ever opened. A tree that disappears while it is read (a closed connection
+ * to a deployed app) rejects with its own error; that is the only error the
+ * tree collector lets through.
  */
 
 export interface DependencyOptions {
@@ -99,6 +105,17 @@ export interface CollectTreeOptions extends DependencyOptions {
   id?: string;
   /** For a deployed app: the app and its MTA identity, recorded with the project. */
   deployment?: RawDeployment;
+  /**
+   * For a deployed app: look for `node_modules/.package-lock.json`, the
+   * lockfile npm writes for the tree it installed, and read it in place of the
+   * root lockfile that was pushed with the app. When that file is not there,
+   * or cannot be used, the pushed root lockfile is read without its `dev`
+   * entries, which a production install leaves out. Never set for a local
+   * folder: the lockfile committed there is what a repository scan judges,
+   * and a `node_modules` that is a link would lead the read out of the
+   * project root.
+   */
+  hiddenLockfile?: boolean;
 }
 
 export const DEFAULT_PROJECT_ID = 'project';
@@ -428,7 +445,7 @@ async function collectEntry(entry: WalkedFile, collection: Collection): Promise<
 function parsedLockfile(
   text: string,
   source: LockfileSource,
-  options: { exclude: (name: string) => boolean; maxPackages: number },
+  options: LockfileOptions,
 ): ParsedLockfile {
   try {
     return parseLockfile(text, source, options);
@@ -444,16 +461,11 @@ function parsedLockfile(
  */
 async function collectLockfile(
   entry: WalkedFile,
+  source: LockfileSource,
   collection: Collection,
   table: PackageTable,
-  options: { exclude: (name: string) => boolean; maxPackages: number },
+  options: LockfileOptions,
 ): Promise<RawLockfile | undefined> {
-  const source: LockfileSource = {
-    file: entry.rel,
-    kind: npmLockfileKind(entry.rel),
-    // Only the root lockfile is described by the root package.json.
-    rootDirectNames: inProjectRoot(entry.rel) ? collection.directNames : null,
-  };
   const result = await collection.readLockfile(entry);
   if (result === undefined) return undefined;
   if (!result.ok) {
@@ -474,24 +486,79 @@ async function collectLockfile(
 }
 
 /**
+ * The lockfile npm wrote into `node_modules` of a deployed app, read into the
+ * table; undefined when there is none. The walk never enters `node_modules`,
+ * so the file is asked for by its full path: on Cloud Foundry `node_modules`
+ * is usually a link to the folder the buildpack installed into, which the
+ * path resolves, while the file itself must be a regular file. A file that is
+ * not there costs that one look and is neither opened nor unreadable.
+ */
+async function collectHiddenLockfile(
+  tree: ProjectTree,
+  collection: Collection,
+  table: PackageTable,
+  options: LockfileOptions,
+): Promise<RawLockfile | undefined> {
+  const [folder = '', name = ''] = HIDDEN_LOCKFILE.split('/');
+  const location = tree.join(tree.join(tree.root, folder), name);
+  if (!(await tree.isFile(location))) return undefined;
+  const entry: WalkedFile = { kind: 'lockfile', abs: location, rel: HIDDEN_LOCKFILE, size: 0 };
+  // It has no root entry of its own: the root package.json says which packages are direct.
+  const source: LockfileSource = {
+    file: HIDDEN_LOCKFILE,
+    kind: 'hidden',
+    rootDirectNames: collection.directNames,
+  };
+  const lockfile = await collectLockfile(entry, source, collection, table, options);
+  // Not opened: cannot happen for the first lockfile of the step, and is still one that was found.
+  return lockfile ?? lockfileRecord(source, 'too-large');
+}
+
+function hiddenOutcome(lockfile: RawLockfile | undefined): HiddenLockfile {
+  if (lockfile === undefined) return 'absent';
+  return lockfile.status === 'read' ? 'read' : 'not-read';
+}
+
+/**
  * The lockfile step: the npm lockfiles the walk listed, one per directory,
  * read after every other file, and the lockfiles of other package managers,
  * which are only listed. A lockfile that is not opened (beyond the limit on
  * lockfiles, or on their bytes) is counted, so that it cannot go unnoticed.
+ *
+ * For a deployed app the lockfile of the installed tree comes first. When it
+ * was read, it answers for the root and the root lockfile that was pushed is
+ * not opened. Otherwise the pushed root lockfile is read without its `dev`
+ * entries. Lockfiles in sub-folders are read as for a folder, `dev` entries
+ * included: nothing is known about how they are installed.
  */
 async function collectDependencies(
+  tree: ProjectTree,
   walked: readonly WalkedFile[],
   collection: Collection,
-  options: DependencyOptions,
+  options: CollectTreeOptions,
 ): Promise<RawProjectDependencies> {
-  const choice = chooseLockfiles(walked);
   const maxPackages = packageBudget(options.maxPackages);
   const table = new PackageTable(maxPackages);
   const parseOptions = { exclude: excludeMatcher(options.dependencyExclude ?? []), maxPackages };
-  const lockfiles = [...choice.foreign];
+  const deployed = options.hiddenLockfile === true;
+  const hidden = deployed
+    ? await collectHiddenLockfile(tree, collection, table, parseOptions)
+    : undefined;
+  const choice = chooseLockfiles(walked, hiddenOutcome(hidden));
+  const lockfiles = hidden === undefined ? [...choice.foreign] : [...choice.foreign, hidden];
   let lockfilesNotRead = choice.notRead;
   for (const entry of choice.toRead) {
-    const lockfile = await collectLockfile(entry, collection, table, parseOptions);
+    const inRoot = inProjectRoot(entry.rel);
+    const source: LockfileSource = {
+      file: entry.rel,
+      kind: npmLockfileKind(entry.rel),
+      // Only the root lockfile is described by the root package.json.
+      rootDirectNames: inRoot ? collection.directNames : null,
+    };
+    const lockfile = await collectLockfile(entry, source, collection, table, {
+      ...parseOptions,
+      omitDev: deployed && inRoot,
+    });
     if (lockfile === undefined) lockfilesNotRead += 1;
     else lockfiles.push(lockfile);
   }
@@ -563,7 +630,7 @@ export async function collectProjectTree(
   }
 
   // Last, so that the root package.json is parsed and no other file waits for a large lockfile.
-  const dependencies = await collectDependencies(walk.files, collection, options);
+  const dependencies = await collectDependencies(tree, walk.files, collection, options);
 
   const sources: CdsSourceValue[] = (['.cdsrc.yaml', '.cdsrc.json', 'package.json'] as const)
     .filter((source) => collection.cdsSources[source] !== undefined)

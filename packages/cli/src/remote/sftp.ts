@@ -32,7 +32,13 @@ export interface RemoteEntry extends RemoteStat {
 
 export interface RemoteFile {
   stat(): Promise<RemoteStat>;
-  /** Reads up to `length` bytes at `position` into `buffer` at `offset`; 0 at the end of the file. */
+  /**
+   * Reads up to `length` bytes at `position` into `buffer` at `offset`; 0 at
+   * the end of the file. A server may give fewer bytes than it was asked for.
+   * One call has one timeout: asked for more than the client puts into one
+   * READ request, it would send several, one after the other, under that one
+   * timeout, so the tree asks for no more (`MAX_READ_BYTES` in `sftpTree.ts`).
+   */
   read(buffer: Buffer, offset: number, length: number, position: number): Promise<number>;
   close(): Promise<void>;
 }

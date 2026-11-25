@@ -1,4 +1,4 @@
-import type { RawLockedPackage, RawLockfile } from '../../model/raw.js';
+import type { RawLockedPackage, RawLockfile, RawProject } from '../../model/raw.js';
 import {
   type LockedPackage,
   type NpmLockfileKind,
@@ -31,6 +31,19 @@ export const MAX_LOCKFILES_PER_PACKAGE = 20;
 export const MAX_PACKAGE_LOCKFILE_BYTES = 2048;
 
 const SHRINKWRAP = 'npm-shrinkwrap.json';
+/**
+ * The hidden lockfile npm 7+ writes into `node_modules` after an install: what
+ * is really installed there. Read for a deployed app only, where it is the one
+ * file under `node_modules` that is ever asked for.
+ */
+export const HIDDEN_LOCKFILE = 'node_modules/.package-lock.json';
+
+/**
+ * What the look for the hidden lockfile of a deployed app gave: `absent`
+ * (also for a local folder, where it is not looked for), `read`, or
+ * `not-read` when it is there and could not be used.
+ */
+export type HiddenLockfile = 'absent' | 'read' | 'not-read';
 
 function compareText(a: string, b: string): number {
   return a < b ? -1 : a > b ? 1 : 0;
@@ -69,8 +82,16 @@ export interface LockfileChoice {
  * for npm, and the loser is not opened. The root lockfile comes first, so
  * that neither the limit on lockfiles nor their byte budget can leave out the
  * one that answers for the root manifest.
+ *
+ * A hidden lockfile that was found takes one of the records. When it was
+ * read, the root lockfile is left out: not opened, not recorded and not
+ * counted as not read either, because the hidden lockfile says what is
+ * installed and the pushed one only what was asked for.
  */
-export function chooseLockfiles(files: readonly WalkedFile[]): LockfileChoice {
+export function chooseLockfiles(
+  files: readonly WalkedFile[],
+  hidden: HiddenLockfile = 'absent',
+): LockfileChoice {
   const foreign = files
     .filter((file) => file.kind === 'foreign-lockfile')
     .sort((a, b) => compareText(a.rel, b.rel))
@@ -89,11 +110,13 @@ export function chooseLockfiles(files: readonly WalkedFile[]): LockfileChoice {
       byDirectory.set(directory, file);
     }
   }
-  const ordered = [...byDirectory.values()].sort(
-    (a, b) =>
-      Number(inProjectRoot(b.rel)) - Number(inProjectRoot(a.rel)) || compareText(a.rel, b.rel),
-  );
-  const room = Math.max(0, MAX_LOCKFILES - foreign.length);
+  const ordered = [...byDirectory.values()]
+    .filter((file) => hidden !== 'read' || !inProjectRoot(file.rel))
+    .sort(
+      (a, b) =>
+        Number(inProjectRoot(b.rel)) - Number(inProjectRoot(a.rel)) || compareText(a.rel, b.rel),
+    );
+  const room = Math.max(0, MAX_LOCKFILES - foreign.length - (hidden === 'absent' ? 0 : 1));
   return {
     toRead: ordered.slice(0, room),
     foreign,
@@ -105,6 +128,34 @@ export function chooseLockfiles(files: readonly WalkedFile[]): LockfileChoice {
 export function packageBudget(maxPackages: number | undefined): number {
   if (maxPackages === undefined || !Number.isFinite(maxPackages)) return MAX_PACKAGES;
   return Math.max(0, Math.min(MAX_PACKAGES, Math.floor(maxPackages)));
+}
+
+/**
+ * The packages that the projects of one scan may keep together, when a scan
+ * reads several: every app of a deployed project is a project record of its
+ * own, and without a budget they share, a run over many apps could keep more
+ * packages than a snapshot may hold. Each project is collected with what is
+ * left as its `maxPackages`, and what it kept is taken off afterwards. A
+ * lockfile that does not fit into what is left is `too-many-packages`, as
+ * within one project.
+ */
+export class SharedPackageBudget {
+  private left: number;
+
+  constructor(max: number = MAX_PACKAGES) {
+    this.left = packageBudget(max);
+  }
+
+  /** What the next project may keep. */
+  get remaining(): number {
+    return this.left;
+  }
+
+  /** Takes off the packages a project kept. */
+  spend(project: Pick<RawProject, 'dependencies'>): void {
+    const kept = project.dependencies?.packages.length ?? 0;
+    this.left = Math.max(0, this.left - kept);
+  }
 }
 
 /**

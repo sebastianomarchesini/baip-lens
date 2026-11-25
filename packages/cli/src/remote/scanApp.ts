@@ -1,6 +1,7 @@
 import { z } from 'zod';
 import { COLLECTOR_CHECKS, deployedAppNotRead } from '../checks.js';
 import { listSpaces, resolveOrg } from '../collectors/orgs.js';
+import { SharedPackageBudget } from '../collectors/project/dependencies.js';
 import { PROJECT_MARKERS, collectProjectTree } from '../collectors/project/index.js';
 import { parseApiUrl } from '../config.js';
 import type { Prompter } from '../guided/prompt.js';
@@ -75,6 +76,11 @@ export { sshOffAdvice } from './selectApps.js';
  * allow-list and limits as a local project; the session is closed. All apps
  * of a run go into one snapshot, one project record per app. Nothing is
  * written to disk but the reports.
+ *
+ * The npm lockfile of an app is the one of the tree that is installed in its
+ * container (`node_modules/.package-lock.json`), read in the same session
+ * with read requests only; the lockfile that was pushed with the app is the
+ * fallback. The apps of one project run share one budget of packages.
  *
  * CF calls are GET only (apps, each app's SSH status, its web process and the
  * process stats), plus one one-time SSH code per session from UAA
@@ -455,12 +461,32 @@ function snapshotOptions(context: ReadContext): ProjectSnapshotOptions {
   };
 }
 
+/**
+ * Reads the files of one deployed app into a project record. `maxPackages`
+ * is what the run has left of its package budget; absent for a run of one
+ * app, which has the whole budget.
+ */
+function collectApp(
+  tree: SftpProjectTree,
+  app: CfApp,
+  id: string,
+  maxPackages?: number,
+): Promise<RawProject> {
+  return collectProjectTree(tree, {
+    id,
+    deployment: deploymentOf(app),
+    // What is installed in the container, not only what was pushed (see the collector).
+    hiddenLockfile: true,
+    maxPackages,
+  });
+}
+
 /** A run of one app: anything that keeps it from being read stops the run. */
 function scanOneApp(context: ReadContext, app: CfApp): Promise<Snapshot> {
-  const record = { id: projectIdOf(app.name), deployment: deploymentOf(app) };
+  const id = projectIdOf(app.name);
   return withAppFiles(context, app, (tree) =>
     projectSnapshot(
-      async () => ({ projects: [await collectProjectTree(tree, record)], notRead: [] }),
+      async () => ({ projects: [await collectApp(tree, app, id)], notRead: [] }),
       snapshotOptions(context),
     ),
   );
@@ -499,11 +525,10 @@ async function readProjectApp(
   context: ReadContext,
   app: CfApp,
   id: string,
+  maxPackages: number,
 ): Promise<RawProject | SkipReason> {
   try {
-    return await withAppFiles(context, app, (tree) =>
-      collectProjectTree(tree, { id, deployment: deploymentOf(app) }),
-    );
+    return await withAppFiles(context, app, (tree) => collectApp(tree, app, id, maxPackages));
   } catch (error) {
     const skip = skipReason(error, context.loggedIn);
     if (skip === null) throw error;
@@ -522,7 +547,9 @@ function isSkip(result: RawProject | SkipReason): result is SkipReason {
 /**
  * A project run: every app that can be read, one after the other, one
  * session each. An app that cannot be read is handed over as not read, with
- * its reason; when none could be read there is nothing to report.
+ * its reason; when none could be read there is nothing to report. The apps
+ * share one budget of packages kept from their lockfiles: each app is read
+ * with what the apps before it left.
  */
 async function readProject(
   context: ReadContext,
@@ -536,6 +563,7 @@ async function readProject(
   const projects: RawProject[] = [];
   const notRead: NotRead[] = [];
   const reasons: string[] = [];
+  const packages = new SharedPackageBudget();
   for (const { item, id } of withProjectIds(states, (state) => state.app.name)) {
     const { app, readiness } = item;
     const check = deployedAppNotRead(id, app.name);
@@ -546,8 +574,9 @@ async function readProject(
       reasons.push(`${app.name}: ${readiness.why}`);
       continue;
     }
-    const result = await readProjectApp(context, app, id);
+    const result = await readProjectApp(context, app, id, packages.remaining);
     if (!isSkip(result)) {
+      packages.spend(result);
       projects.push(result);
       continue;
     }

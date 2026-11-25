@@ -32,12 +32,30 @@ import {
  * will read (allow-listed, within the size limit and the scan's file and byte
  * budgets) are fetched ahead as soon as their directory is listed, a few at a
  * time. A session that ends mid-scan rejects with `RemoteSessionError`.
+ *
+ * A file is read in requests of a bounded size: first its head, which decides
+ * whether it is binary, then the rest in ranges, a few of them in flight.
+ * Every request is one call of the session and has its own timeout there, so
+ * a large file (an npm lockfile may have 32 MiB) is not held to the time one
+ * request may take. The file must give exactly the bytes its size promised:
+ * with ranges in flight, one that came back short would leave a hole.
  */
 
 /** Where Cloud Foundry unpacks the droplet of a buildpack app. */
 export const APP_ROOT = '/home/vcap/app';
-/** SFTP requests in flight for file reads. */
+/** Files being read at the same time. */
 export const READ_AHEAD = 8;
+/**
+ * The most bytes one read request asks for: what ssh2 puts into one READ for
+ * a server that identifies as neither OpenSSH nor Dropbear (34 000 bytes less
+ * 2 048 of overhead; the Diego SSH daemon answers with at most 32 KiB).
+ * Asked for more, ssh2 would split the read into requests of this size
+ * itself and send them one after the other inside one call: one timeout for
+ * all of them, and none in flight together.
+ */
+export const MAX_READ_BYTES = 31_952;
+/** Read requests in flight for one file, once its head is read. */
+export const READS_IN_FLIGHT = 4;
 
 interface Listed {
   size: number;
@@ -48,10 +66,17 @@ function byName(a: RemoteEntry, b: RemoteEntry): number {
   return a.name < b.name ? -1 : a.name > b.name ? 1 : 0;
 }
 
+function isSessionLost(error: unknown): boolean {
+  return error instanceof RemoteSessionError;
+}
+
 /**
  * Reads the bytes from `start` up to `end` of the file into the buffer, at
- * the same offsets, and returns where it stopped: at `end`, or earlier when
- * the file ended (it shrank since it was opened).
+ * the same offsets, one request after the other, and returns where it
+ * stopped: at `end`, or earlier when the file ended there (it shrank since
+ * it was opened). A server may answer with fewer bytes than it was asked
+ * for; the rest of the range is then asked for again. The range must not be
+ * longer than `MAX_READ_BYTES`, so that each call is one request.
  */
 async function readRange(
   file: RemoteFile,
@@ -66,6 +91,46 @@ async function readRange(
     at += bytesRead;
   }
   return at;
+}
+
+/**
+ * Reads the bytes from `start` to the end of the buffer in ranges of at most
+ * `MAX_READ_BYTES`, up to `READS_IN_FLIGHT` of them at a time, each into its
+ * own place, and returns how many bytes arrived. Once a range ends early no
+ * further range is asked for. When a request fails, the ranges in flight are
+ * awaited before the error is passed on, so that none of them is left to
+ * fail unnoticed and the file is closed only after its last request. Of
+ * several errors the lost session is the one passed on: it ends the scan,
+ * while any other error is about this file only.
+ */
+async function readRanges(file: RemoteFile, buffer: Buffer, start: number): Promise<number> {
+  let next = start;
+  let total = 0;
+  let cut = false;
+  let failure: { error: unknown } | undefined;
+  const stopped = (): boolean => cut || failure !== undefined;
+  const fail = (error: unknown): void => {
+    if (failure === undefined || (isSessionLost(error) && !isSessionLost(failure.error))) {
+      failure = { error };
+    }
+  };
+  const readNext = async (): Promise<void> => {
+    while (!stopped() && next < buffer.length) {
+      const from = next;
+      const to = Math.min(buffer.length, from + MAX_READ_BYTES);
+      next = to;
+      try {
+        const reached = await readRange(file, buffer, from, to);
+        total += reached - from;
+        if (reached < to) cut = true;
+      } catch (error) {
+        fail(error);
+      }
+    }
+  };
+  await Promise.all(Array.from({ length: READS_IN_FLIGHT }, readNext));
+  if (failure !== undefined) throw failure.error;
+  return total;
 }
 
 export interface SftpProjectTreeOptions {
@@ -125,7 +190,12 @@ export class SftpProjectTree implements ProjectTree {
 
   async isFile(location: string): Promise<boolean> {
     try {
-      return (await this.sftp.lstat(location)).type === 'file';
+      const stat = await this.sftp.lstat(location);
+      if (stat.type !== 'file') return false;
+      // Remembered like a listed file: one that is probed by its path and then
+      // read must still have this size and time once it is opened.
+      this.listed.set(location, { size: stat.size, mtime: stat.mtime });
+      return true;
     } catch (error) {
       if (error instanceof RemoteSessionError) throw error;
       return false;
@@ -181,12 +251,15 @@ export class SftpProjectTree implements ProjectTree {
       }
       if (stats.size > maxBytes) return { ok: false, reason: 'too-large' };
       const buffer = Buffer.alloc(stats.size);
-      // The head first: a binary file is given up before the rest of it is fetched.
+      // The head first, alone: a binary file is given up before anything else of it is asked for.
       const headEnd = Math.min(buffer.length, NUL_SCAN_BYTES);
       let total = await readRange(file, buffer, 0, headEnd);
       if (buffer.subarray(0, total).includes(0)) return { ok: false, reason: 'binary' };
-      if (total === headEnd) total = await readRange(file, buffer, headEnd, buffer.length);
-      return { ok: true, text: buffer.toString('utf8', 0, total), bytes: total };
+      if (total === headEnd) total += await readRanges(file, buffer, headEnd);
+      // Fewer bytes than fstat reported: the file changed while it was read, and
+      // a range that ended early has left a hole in the middle of the text.
+      if (total !== stats.size) return { ok: false, reason: 'unreadable' };
+      return { ok: true, text: buffer.toString('utf8'), bytes: total };
     } catch (error) {
       return this.failure(error);
     } finally {

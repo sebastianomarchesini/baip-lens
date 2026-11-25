@@ -1,4 +1,4 @@
-import { mkdtemp, readFile, readdir, rm, symlink, writeFile } from 'node:fs/promises';
+import { mkdir, mkdtemp, readFile, readdir, rm, symlink, writeFile } from 'node:fs/promises';
 import { tmpdir } from 'node:os';
 import { basename, join, resolve, sep } from 'node:path';
 import { afterAll, beforeAll, describe, expect, it, vi } from 'vitest';
@@ -13,6 +13,7 @@ import {
   ACME_NOT_KEPT,
   ACME_PUBLIC_PACKAGES,
   CLEAN_PUBLIC_PACKAGES,
+  hiddenLockfile,
   lockfileV3,
   registryEntry,
 } from '../support/lockfileFixture.js';
@@ -596,6 +597,82 @@ describe('baip-lens project and the npm lockfile of the root', () => {
         'Read 0 npm lockfile(s): 0 package(s) from the public npm registry, 0 other package(s) not checked\n',
       );
       expectCleanOutputs(await readOutputs(out), terminalText(c, out), fixture);
+    } finally {
+      await fixture.cleanup();
+    }
+  });
+});
+
+describe('baip-lens project and the lockfile npm writes into node_modules', () => {
+  /*
+   * `node_modules/.package-lock.json` is read for a deployed app only
+   * (`project --cf`). For a folder the committed lockfile is what the scan
+   * judges, and nothing under `node_modules` is touched: a `node_modules`
+   * that is a link would lead a read out of the project root.
+   */
+  const INSTALLED_ONLY = 'baip-fixture-installed-only';
+
+  async function installHiddenLockfile(root: string): Promise<void> {
+    await mkdir(join(root, 'node_modules'), { recursive: true });
+    await writeFile(
+      join(root, 'node_modules', '.package-lock.json'),
+      hiddenLockfile('clean-cap', {
+        [`node_modules/${INSTALLED_ONLY}`]: registryEntry(INSTALLED_ONLY, '9.9.9'),
+      }),
+    );
+  }
+
+  const underNodeModules = (project: RawProject): string[] =>
+    [...project.files, ...project.unreadable.map((entry) => entry.file)].filter((file) =>
+      file.includes('node_modules'),
+    );
+
+  it('(18) is not read for --path: the committed lockfile is read as before, dev entries included', async () => {
+    const fixture = await materializeFixture('clean-cap');
+    try {
+      await installHiddenLockfile(fixture.root);
+      const { code, out, c, snapshot } = await scanFixture(fixture);
+      expect(code).toBe(EXIT.ok);
+      const project = snapshot.raw.projects[0]!;
+      expect(project.dependencies?.lockfiles.map((l) => [l.file, l.kind, l.status])).toEqual([
+        ['package-lock.json', 'package-lock', 'read'],
+      ]);
+      // Every package of the committed lockfile, the dev one too; none of the installed tree.
+      expect(project.dependencies?.packages).toEqual(
+        CLEAN_PUBLIC_PACKAGES.map((item) => ({ ...item, lockfiles: ['package-lock.json'] })),
+      );
+      expect(project.dependencies?.packages.some((item) => item.scope === 'dev')).toBe(true);
+      expect(underNodeModules(project)).toEqual([]);
+      expect(project.filesOpened).toBe(project.files.length + project.unreadable.length);
+      expect(snapshot.findings).toEqual([]);
+      const outputs = await readOutputs(out);
+      for (const [name, content] of Object.entries(outputs)) {
+        expect(content, name).not.toContain(INSTALLED_ONLY);
+      }
+      expect(terminalText(c, out)).not.toContain(INSTALLED_ONLY);
+    } finally {
+      await fixture.cleanup();
+    }
+  });
+
+  it('(19) does not stand in for a missing lockfile of a folder', async () => {
+    const fixture = await materializeFixture('clean-cap');
+    try {
+      await rm(join(fixture.root, 'package-lock.json'));
+      await installHiddenLockfile(fixture.root);
+      const { code, c, snapshot } = await scanFixture(fixture);
+      expect(code).toBe(EXIT.ok);
+      const project = snapshot.raw.projects[0]!;
+      expect(project.dependencies).toEqual({ lockfiles: [], lockfilesNotRead: 0, packages: [] });
+      expect(underNodeModules(project)).toEqual([]);
+      expect(project.filesOpened).toBe(project.files.length + project.unreadable.length);
+      expect(
+        snapshot.findings
+          .filter((f) => f.id.startsWith('DEP_'))
+          .map((f) => [f.id, f.evidence.cause, f.location?.file]),
+      ).toEqual([['DEP_LOCKFILE_MISSING', 'none', 'package.json']]);
+      expect(c.err()).not.toContain('npm lockfile');
+      expect(JSON.stringify(snapshot)).not.toContain(INSTALLED_ONLY);
     } finally {
       await fixture.cleanup();
     }

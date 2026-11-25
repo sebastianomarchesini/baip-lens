@@ -134,6 +134,50 @@ describe('which lockfiles are read', () => {
     expect(choice.foreign).toHaveLength(1);
   });
 
+  it('leaves the root lockfile out when the hidden lockfile of a deployed app was read', () => {
+    const files = [
+      walked('srv/package-lock.json'),
+      walked('package-lock.json'),
+      walked('npm-shrinkwrap.json'),
+      walked('app/npm-shrinkwrap.json'),
+      walked('yarn.lock', 'foreign-lockfile'),
+    ];
+    const subFolders = ['app/npm-shrinkwrap.json', 'srv/package-lock.json'];
+    // Read: it answers for the root, and the pushed root lockfile is neither read nor counted.
+    const read = chooseLockfiles(files, 'read');
+    expect(read.toRead.map((entry) => entry.rel)).toEqual(subFolders);
+    expect(read.notRead).toBe(0);
+    expect(read.foreign.map((lockfile) => lockfile.file)).toEqual(['yarn.lock']);
+    // There but not usable, or not there at all: the root lockfile is the fallback, and comes first.
+    for (const hidden of ['not-read', 'absent'] as const) {
+      const choice = chooseLockfiles(files, hidden);
+      expect(choice.toRead.map((entry) => entry.rel)).toEqual([
+        'npm-shrinkwrap.json',
+        ...subFolders,
+      ]);
+      expect(choice.notRead).toBe(0);
+    }
+    expect(chooseLockfiles(files)).toEqual(chooseLockfiles(files, 'absent'));
+  });
+
+  it(`keeps one of the ${MAX_LOCKFILES} records for a hidden lockfile that was found`, () => {
+    const many = Array.from({ length: 60 }, (_, i) =>
+      walked(`app/m${String(i).padStart(2, '0')}/package-lock.json`),
+    );
+    const files = [...many, walked('package-lock.json'), walked('yarn.lock', 'foreign-lockfile')];
+    // The yarn lockfile and the hidden one take two records: 48 are left.
+    const read = chooseLockfiles(files, 'read');
+    expect(read.toRead).toHaveLength(MAX_LOCKFILES - 2);
+    expect(read.toRead[0]?.rel).toBe('app/m00/package-lock.json');
+    expect(read.notRead).toBe(12);
+    const notRead = chooseLockfiles(files, 'not-read');
+    expect(notRead.toRead).toHaveLength(MAX_LOCKFILES - 2);
+    expect(notRead.toRead[0]?.rel).toBe('package-lock.json');
+    expect(notRead.notRead).toBe(13);
+    // Without one the same files leave 49 records, as before.
+    expect(chooseLockfiles(files, 'absent').toRead).toHaveLength(MAX_LOCKFILES - 1);
+  });
+
   it('finds nothing to read in a project without lockfiles', () => {
     expect(chooseLockfiles([walked('package.json', 'package.json')])).toEqual({
       toRead: [],

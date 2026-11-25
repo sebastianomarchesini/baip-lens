@@ -940,6 +940,237 @@ describe('lockfile version 1', () => {
   });
 });
 
+describe('the lockfile pushed with a deployed app (omitDev)', () => {
+  /** What a production install leaves out, and what it installs, with one entry of every kind marked dev. */
+  const packages = {
+    'node_modules/baip-server': { version: '2.4.1', resolved: registry('baip-server', '2.4.1') },
+    'node_modules/baip-test-kit': {
+      version: '7.0.0',
+      resolved: registry('baip-test-kit', '7.0.0'),
+      dev: true,
+    },
+    // Needed by a dev package and by an optional one: npm marks it devOptional, and it may be installed.
+    'node_modules/baip-shared': {
+      version: '1.2.0',
+      resolved: registry('baip-shared', '1.2.0'),
+      devOptional: true,
+    },
+    'node_modules/baip-watcher': {
+      version: '2.3.3',
+      resolved: registry('baip-watcher', '2.3.3'),
+      optional: true,
+    },
+    // An optional dependency of a dev package: dev wins, it is not installed.
+    'node_modules/baip-dev-optional': {
+      version: '0.1.0',
+      resolved: registry('baip-dev-optional', '0.1.0'),
+      dev: true,
+      optional: true,
+    },
+    'node_modules/POISON-dev-mirror': {
+      version: '1.0.0',
+      resolved: 'https://npm.POISON.example.com/POISON-dev-mirror/-/POISON-dev-mirror-1.0.0.tgz',
+      dev: true,
+    },
+    'node_modules/POISON-dev-git': {
+      version: '1.0.0',
+      resolved: 'git+ssh://git@github.com/acme/POISON-dev-git.git#0123abc',
+      dev: true,
+    },
+    'node_modules/POISON-dev-bundled': { version: '1.0.0', inBundle: true, dev: true },
+    'node_modules/POISON-dev-unresolved': { version: '1.0.0', dev: true },
+    'node_modules/POISON-dev-invalid': {
+      version: 'POISON_version',
+      resolved: registry('POISON-dev-invalid'),
+      dev: true,
+    },
+    'node_modules/POISON-dev-link': { resolved: 'tools/POISON-dev-folder', link: true, dev: true },
+    'tools/POISON-dev-folder': { version: '0.1.0' },
+    'node_modules/POISON-prod-mirror': {
+      version: '1.0.0',
+      resolved: 'https://npm.POISON.example.com/POISON-prod-mirror/-/POISON-prod-mirror-1.0.0.tgz',
+    },
+  };
+  const root = {
+    dependencies: { 'baip-server': '^2' },
+    devDependencies: { 'baip-test-kit': '^7' },
+    optionalDependencies: { 'baip-watcher': '^2' },
+  };
+  const installed = [
+    { name: 'baip-server', version: '2.4.1', direct: true, scope: 'prod' },
+    { name: 'baip-shared', version: '1.2.0', direct: false, scope: 'optional' },
+    { name: 'baip-watcher', version: '2.3.3', direct: true, scope: 'optional' },
+  ];
+
+  it('version 3: drops the dev entries, neither kept nor counted, and keeps optional and devOptional ones', () => {
+    const result = parse(v3(packages, root), {}, { omitDev: true });
+    expect(result).toEqual({
+      lockfile: {
+        file: 'package-lock.json',
+        kind: 'package-lock',
+        lockfileVersion: 3,
+        status: 'read',
+        kept: 3,
+        // Only the one entry that a production install does install and that is not public.
+        notKept: counted({ otherRegistry: 1 }),
+      },
+      packages: installed,
+    });
+    expect(JSON.stringify(result)).not.toContain('POISON');
+    expect(RawLockfileSchema.safeParse(result.lockfile).success).toBe(true);
+  });
+
+  it('version 3: reads every entry without the option, as for a project folder', () => {
+    const result = parse(v3(packages, root));
+    expect(result.lockfile).toMatchObject({
+      status: 'read',
+      kept: 5,
+      notKept: counted({
+        otherRegistry: 2,
+        git: 1,
+        link: 1,
+        bundled: 1,
+        unknown: 1,
+        invalid: 1,
+      }),
+    });
+    expect(names(result)).toEqual([
+      'baip-dev-optional@0.1.0',
+      'baip-server@2.4.1',
+      'baip-shared@1.2.0',
+      'baip-test-kit@7.0.0',
+      'baip-watcher@2.3.3',
+    ]);
+    expect(parse(v3(packages, root), {}, { omitDev: false })).toEqual(result);
+  });
+
+  it('version 2: drops the dev entries of `packages`, whatever the legacy tree says', () => {
+    const result = parse(
+      {
+        ...v3(packages, root),
+        lockfileVersion: 2,
+        dependencies: {
+          'baip-test-kit': { version: '7.0.0', resolved: registry('baip-test-kit', '7.0.0') },
+        },
+      },
+      {},
+      { omitDev: true },
+    );
+    expect(result.lockfile).toMatchObject({
+      lockfileVersion: 2,
+      status: 'read',
+      kept: 3,
+      notKept: counted({ otherRegistry: 1 }),
+    });
+    expect(result.packages).toEqual(installed);
+  });
+
+  it('version 1: drops the dev entries of the tree, and still looks below them', () => {
+    const tree = v1({
+      'baip-server': {
+        version: '2.4.1',
+        resolved: registry('baip-server', '2.4.1'),
+        dependencies: {
+          'baip-nested-dev': {
+            version: '0.0.1',
+            resolved: registry('baip-nested-dev', '0.0.1'),
+            dev: true,
+          },
+        },
+      },
+      'baip-test-kit': {
+        version: '7.0.0',
+        resolved: registry('baip-test-kit', '7.0.0'),
+        dev: true,
+        dependencies: {
+          // Version 1 flags every entry on its own: this one is installed.
+          'baip-below-dev': { version: '1.0.0', resolved: registry('baip-below-dev') },
+          'POISON-below-dev': { version: 'github:acme/POISON-below-dev', dev: true },
+        },
+      },
+      'baip-watcher': {
+        version: '2.3.3',
+        resolved: registry('baip-watcher', '2.3.3'),
+        optional: true,
+      },
+      'baip-dev-optional': {
+        version: '0.1.0',
+        resolved: registry('baip-dev-optional', '0.1.0'),
+        dev: true,
+        optional: true,
+      },
+      'POISON-dev-git': { version: 'github:acme/POISON-dev-git#0123abc', dev: true },
+      'POISON-dev-bundled': { version: '1.0.0', bundled: true, dev: true },
+      'POISON-dev-local': { version: 'file:../POISON-dev-local', dev: true },
+      'POISON-prod-git': { version: 'github:acme/POISON-prod-git#0123abc' },
+    });
+    const source = { rootDirectNames: new Set(['baip-server', 'baip-test-kit', 'baip-watcher']) };
+    const result = parse(tree, source, { omitDev: true });
+    expect(result).toEqual({
+      lockfile: {
+        file: 'package-lock.json',
+        kind: 'package-lock',
+        lockfileVersion: 1,
+        status: 'read',
+        kept: 3,
+        notKept: counted({ git: 1 }),
+      },
+      packages: [
+        { name: 'baip-below-dev', version: '1.0.0', direct: false, scope: 'prod' },
+        { name: 'baip-server', version: '2.4.1', direct: true, scope: 'prod' },
+        { name: 'baip-watcher', version: '2.3.3', direct: true, scope: 'optional' },
+      ],
+    });
+    expect(JSON.stringify(result)).not.toContain('POISON');
+
+    // Without the option the same tree keeps its dev packages and counts the others.
+    const all = parse(tree, source);
+    expect(all.lockfile).toMatchObject({
+      kept: 6,
+      notKept: counted({ git: 3, file: 1, bundled: 1 }),
+    });
+    expect(all.packages.filter((item) => item.scope === 'dev').map((item) => item.name)).toEqual([
+      'baip-dev-optional',
+      'baip-nested-dev',
+      'baip-test-kit',
+    ]);
+  });
+
+  it('does not let dev packages count against the budget of packages', () => {
+    const lockfile = v3({
+      'node_modules/a': { version: '1.0.0', resolved: registry('a') },
+      'node_modules/b': { version: '1.0.0', resolved: registry('b'), dev: true },
+      'node_modules/c': { version: '1.0.0', resolved: registry('c'), dev: true },
+    });
+    expect(parse(lockfile, {}, { maxPackages: 1 }).lockfile.status).toBe('too-many-packages');
+    expect(parse(lockfile, {}, { maxPackages: 1, omitDev: true }).lockfile).toMatchObject({
+      status: 'read',
+      kept: 1,
+    });
+  });
+
+  it('keeps the dev entries of the hidden lockfile, which lists what is installed', () => {
+    const hidden = {
+      name: 'POISON_lock_name',
+      lockfileVersion: 3,
+      requires: true,
+      packages: {
+        'node_modules/a': { version: '1.0.0', resolved: registry('a') },
+        'node_modules/b': { version: '1.0.0', resolved: registry('b'), dev: true },
+      },
+    };
+    const result = parse(hidden, {
+      file: 'node_modules/.package-lock.json',
+      kind: 'hidden',
+      rootDirectNames: new Set(['a', 'b']),
+    });
+    expect(result.packages).toEqual([
+      { name: 'a', version: '1.0.0', direct: true, scope: 'prod' },
+      { name: 'b', version: '1.0.0', direct: true, scope: 'dev' },
+    ]);
+  });
+});
+
 describe('a file that is not a lockfile this tool reads', () => {
   const unread = (status: string) => ({
     lockfile: {

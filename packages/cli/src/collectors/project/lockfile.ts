@@ -99,6 +99,14 @@ export interface LockfileOptions {
   exclude?: (name: string) => boolean;
   /** Stop once the lockfile holds more packages than this; default `MAX_PACKAGES`. */
   maxPackages?: number;
+  /**
+   * Leave out the entries npm marks `dev: true`, for a lockfile that was
+   * pushed with a deployed app: a production install does not install them.
+   * Such an entry is neither kept nor counted, because a package that is not
+   * installed is not one that was left unchecked. Entries marked `optional`
+   * or `devOptional` stay.
+   */
+  omitDev?: boolean;
 }
 
 /** A package of one lockfile that was resolved from the public npm registry. */
@@ -363,6 +371,7 @@ function readPackages(
   packages: Record<string, unknown>,
   source: LockfileSource,
   tally: Tally,
+  omitDev: boolean,
 ): void {
   const root = packages[''];
   const directNames = isPlainObject(root)
@@ -378,6 +387,8 @@ function readPackages(
       tally.skip('invalid');
       continue;
     }
+    // Not installed in production, whatever it is: a registry package, a link, a bundled one.
+    if (omitDev && entry.dev === true) continue;
     const install = installOf(key);
     // A link to a local folder: a workspace member, or a `file:` folder.
     if (entry.link === true) {
@@ -441,6 +452,7 @@ function readLegacyTree(
   dependencies: Record<string, unknown>,
   source: LockfileSource,
   tally: Tally,
+  omitDev: boolean,
 ): void {
   const directNames = source.rootDirectNames ?? new Set<string>();
   const pending: { entries: Record<string, unknown>; topLevel: boolean }[] = [
@@ -453,9 +465,11 @@ function readLegacyTree(
         tally.skip('invalid');
         continue;
       }
+      // Every entry carries its own flag, so what is nested below a dev package is still looked at.
       if (isPlainObject(entry.dependencies)) {
         pending.push({ entries: entry.dependencies, topLevel: false });
       }
+      if (omitDev && entry.dev === true) continue;
       readLegacyEntry(key, entry, level.topLevel && directNames.has(key), tally);
     }
   }
@@ -499,10 +513,11 @@ export function parseLockfile(
   const legacyTree = json.dependencies === undefined ? {} : json.dependencies;
   const tally = new Tally(options.exclude ?? (() => false), options.maxPackages ?? MAX_PACKAGES);
   // Version 2 holds both forms; `packages` is the one npm itself reads.
+  const omitDev = options.omitDev === true;
   if (isPlainObject(json.packages)) {
-    readPackages(json.packages, source, tally);
+    readPackages(json.packages, source, tally, omitDev);
   } else if (lockfileVersion === 1 && isPlainObject(legacyTree)) {
-    readLegacyTree(legacyTree, source, tally);
+    readLegacyTree(legacyTree, source, tally, omitDev);
   } else {
     return unread('unreadable');
   }

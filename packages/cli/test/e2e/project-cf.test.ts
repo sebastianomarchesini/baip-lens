@@ -2,11 +2,12 @@ import { createHash } from 'node:crypto';
 import { mkdir, mkdtemp, readFile, readdir, symlink, truncate, writeFile } from 'node:fs/promises';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
-import { afterEach, describe, expect, it, vi } from 'vitest';
+import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 import type * as HtmlReporter from '../../src/reporters/html.js';
 import { ScriptedPrompter } from '../../src/guided/prompt.js';
 import { type CliIo, EXIT, main } from '../../src/main.js';
 import { MAX_FILE_BYTES } from '../../src/collectors/project/read.js';
+import { MAX_READ_BYTES } from '../../src/remote/sftpTree.js';
 import { FakeFetch, jsonResponse } from '../support/fakeFetch.js';
 import {
   type FakeSshServer,
@@ -16,6 +17,7 @@ import {
   startFakeSsh,
 } from '../support/fakeSshServer.js';
 import { ABSOLUTE_PATH, expectNoLeaks } from '../support/leak.js';
+import { hiddenLockfile, lockfileV3, registryEntry } from '../support/lockfileFixture.js';
 
 /* The real UI bundle is not under test here; a tiny template keeps the leak checks about our data. */
 vi.mock('../../src/reporters/html.js', async (importOriginal) => {
@@ -63,7 +65,104 @@ const POISON = [
   'POISON_spoofed_mta',
   'POISON_spoofed_module',
   'POISON_stats_body',
+  // Planted in the lockfiles of the containers and in `.npmrc` (see `installedLockfile`).
+  '@poison-scope/private',
+  'poison-internal.example.com',
+  'POISON_lock_token',
+  'POISON_lock_integrity',
+  'POISON_lock_license',
+  'poison-lock-git',
+  'POISON_lock_repo',
+  'poison-lock-link',
+  'poison-lock-folder',
+  'poison-pushed',
+  'poison-dev-private',
+  'POISON_npmrc',
 ];
+
+/** The lockfile npm writes into the tree it installed: the one path under `node_modules` ever asked for. */
+const HIDDEN = '/home/vcap/app/node_modules/.package-lock.json';
+const PRIVATE_REGISTRY = 'https://ci:POISON_lock_token@poison-internal.example.com/npm';
+
+/** A package from a company registry, with a token in its address: counted, never named. */
+const privateEntry = (name: string, extra: Record<string, unknown> = {}) => ({
+  version: '1.0.0',
+  resolved: `${PRIVATE_REGISTRY}/${name}/-/${name.slice(name.lastIndexOf('/') + 1)}-1.0.0.tgz`,
+  integrity: 'sha512-POISON_lock_integrity',
+  ...extra,
+});
+
+/**
+ * `node_modules/.package-lock.json` of the container fixture, as a production
+ * install leaves it: no dev package, no root entry, and next to the public
+ * packages one from another registry, one from git and a linked folder.
+ */
+function installedLockfile(): string {
+  return hiddenLockfile('acme-incidents', {
+    '../poison-lock-folder': { version: '0.1.0' },
+    'node_modules/@baip-fixture/odata': registryEntry('@baip-fixture/odata', '3.1.0'),
+    'node_modules/@poison-scope/private': privateEntry('@poison-scope/private'),
+    'node_modules/baip-fixture-merge': registryEntry('baip-fixture-merge', '4.17.20'),
+    'node_modules/baip-fixture-server': registryEntry('baip-fixture-server', '2.4.1'),
+    'node_modules/baip-fixture-watcher': registryEntry('baip-fixture-watcher', '2.3.3', {
+      optional: true,
+    }),
+    'node_modules/poison-lock-git': {
+      version: '1.4.0',
+      resolved: 'git+ssh://git@github.com/acme/POISON_lock_repo.git#semver:^1.4.0',
+    },
+    'node_modules/poison-lock-link': { resolved: '../poison-lock-folder', link: true },
+  });
+}
+
+/** The packages of `installedLockfile` from the public npm registry, as the project record keeps them. */
+const INSTALLED_PACKAGES = [
+  { name: '@baip-fixture/odata', version: '3.1.0', direct: true, scope: 'prod' },
+  { name: 'baip-fixture-merge', version: '4.17.20', direct: false, scope: 'prod' },
+  { name: 'baip-fixture-server', version: '2.4.1', direct: true, scope: 'prod' },
+  { name: 'baip-fixture-watcher', version: '2.3.3', direct: true, scope: 'optional' },
+].map((item) => ({ ...item, lockfiles: ['node_modules/.package-lock.json'] }));
+
+/**
+ * The `package-lock.json` that was pushed with an app: what was asked for,
+ * with other versions than the installed ones, the dev packages, and a
+ * private package for production and one for development.
+ */
+function pushedLockfile(): string {
+  return lockfileV3(
+    {
+      name: 'acme-incidents',
+      dependencies: { '@baip-fixture/odata': '^3.0.0', 'baip-fixture-server': '^2.0.0' },
+      devDependencies: { 'baip-fixture-test-kit': '^7.0.0' },
+    },
+    {
+      'node_modules/@baip-fixture/odata': registryEntry('@baip-fixture/odata', '3.0.0'),
+      'node_modules/baip-fixture-server': registryEntry('baip-fixture-server', '2.0.0'),
+      'node_modules/baip-fixture-shared': registryEntry('baip-fixture-shared', '1.2.0', {
+        devOptional: true,
+      }),
+      'node_modules/baip-fixture-test-kit': registryEntry('baip-fixture-test-kit', '7.0.0', {
+        dev: true,
+      }),
+      'node_modules/baip-fixture-mkdir': registryEntry('baip-fixture-mkdir', '0.5.1', {
+        dev: true,
+      }),
+      'node_modules/poison-pushed': privateEntry('poison-pushed'),
+      'node_modules/poison-dev-private': privateEntry('poison-dev-private', { dev: true }),
+    },
+  );
+}
+
+const NO_OTHER_PACKAGES = {
+  otherRegistry: 0,
+  git: 0,
+  file: 0,
+  link: 0,
+  bundled: 0,
+  unknown: 0,
+  excluded: 0,
+  invalid: 0,
+};
 
 function base64url(value: unknown): string {
   return Buffer.from(JSON.stringify(value)).toString('base64url');
@@ -252,7 +351,14 @@ async function containerFixture(): Promise<string> {
     'package.json',
     JSON.stringify({
       name: 'acme-incidents',
-      dependencies: { '@sap/cds': '^9', '@sap/xssec': '^4' },
+      dependencies: {
+        '@sap/cds': '^9',
+        '@sap/xssec': '^4',
+        '@baip-fixture/odata': '^3.0.0',
+        'baip-fixture-server': '^2.0.0',
+      },
+      devDependencies: { 'baip-fixture-test-kit': '^7.0.0' },
+      optionalDependencies: { 'baip-fixture-watcher': '^2.3.0' },
       cds: { requires: { auth: 'mocked' } },
     }),
   );
@@ -275,6 +381,10 @@ async function containerFixture(): Promise<string> {
   );
   await write('.env', 'SECRET=POISON_dotenv\n');
   await write('node_modules/@sap/cds/package.json', '{"name":"POISON_node_modules"}');
+  // What npm installed, what was pushed, and the file that can hold a registry token.
+  await write('node_modules/.package-lock.json', installedLockfile());
+  await write('package-lock.json', pushedLockfile());
+  await write('.npmrc', '//registry.npmjs.org/:_authToken=POISON_npmrc\n');
   await writeFile(join(root, 'outside.cds'), 'service LeakedThroughLink {}');
   await symlink(join(root, 'outside.cds'), join(app, 'srv', 'link.cds'));
   await write('db/data/acme-Big.csv', 'ID;name\n');
@@ -358,6 +468,8 @@ interface Space {
   accept?: string[];
   /** SSH users whose session is cut at its first file read. */
   dropOnOpen?: string[];
+  /** SSH users whose session is cut while the ranges of a large file are in flight. */
+  dropOnRead?: string[];
   /** The name of the space (default: `dev`). */
   name?: string;
 }
@@ -385,6 +497,7 @@ async function startServer(options: RunOptions): Promise<FakeSshServer> {
       users: space.folders,
       codes: space.accept ?? CODES,
       dropOnOpen: space.dropOnOpen,
+      dropOnRead: space.dropOnRead,
     });
   }
   return startFakeSsh({
@@ -442,6 +555,35 @@ async function written(dir: string): Promise<Record<string, string>> {
   return files;
 }
 
+/** The SFTP requests that named a path under `node_modules`, as `TYPE path`. */
+const underNodeModules = (r: Run): string[] =>
+  r.server.requests
+    .filter((q) => (q.path ?? '').includes('node_modules'))
+    .map((q) => `${q.type} ${q.path ?? ''}`);
+
+/**
+ * What must hold for every session of every run: only read requests, files
+ * opened read-only, no read request larger than one SFTP packet carries,
+ * `.npmrc` never asked for, and under `node_modules` nothing but the lockfile
+ * of the installed tree, by its full path.
+ */
+function expectOnlyReads(r: Run): void {
+  expect(r.server.requests.length).toBeGreaterThan(5);
+  for (const request of r.server.requests) {
+    expect(READ_REQUESTS.has(request.type), request.type).toBe(true);
+    if (request.type === 'OPEN') expect(request.flags).toBe('r');
+    if (request.type === 'READ') expect(request.length).toBeLessThanOrEqual(MAX_READ_BYTES);
+    const path = request.path ?? '';
+    expect(path, `${request.type} ${path}`).not.toContain('.npmrc');
+    if (path.includes('node_modules')) expect(path, request.type).toBe(HIDDEN);
+  }
+  // `node_modules` itself is never listed, looked at or opened.
+  expect(r.server.requests.some((q) => q.type === 'OPENDIR' && q.path !== undefined)).toBe(true);
+  expect(
+    r.server.requests.some((q) => q.type === 'OPENDIR' && (q.path ?? '').includes('node_modules')),
+  ).toBe(false);
+}
+
 describe('baip-lens project --cf', () => {
   it('lists the apps of the cf target space, reads the chosen one over read-only SFTP and reports it', async () => {
     const r = await run();
@@ -470,18 +612,25 @@ describe('baip-lens project --cf', () => {
     // Only the SFTP subsystem: no shell, no command, no port forwarding.
     expect(r.server.channels).toEqual(['sftp']);
     // Only read requests, files opened read-only.
-    expect(r.server.requests.length).toBeGreaterThan(5);
-    for (const request of r.server.requests) {
-      expect(READ_REQUESTS.has(request.type), request.type).toBe(true);
-      if (request.type === 'OPEN') expect(request.flags).toBe('r');
-    }
+    expectOnlyReads(r);
     const touched = r.server.requests.map((q) => q.path ?? '');
-    for (const never of ['default-env.json', '/.env', 'node_modules', 'link.cds']) {
+    for (const never of ['default-env.json', '/.env', '.npmrc', '@sap', 'link.cds']) {
       expect(
         touched.some((path) => path.includes(never)),
         never,
       ).toBe(false);
     }
+    // Under node_modules one path is asked for and no other: the lockfile of the installed
+    // tree, looked at (LSTAT) and then read in the same way as every other file.
+    expect([...new Set(underNodeModules(r))]).toEqual([
+      `LSTAT ${HIDDEN}`,
+      `OPEN ${HIDDEN}`,
+      `FSTAT ${HIDDEN}`,
+      `READ ${HIDDEN}`,
+      `CLOSE ${HIDDEN}`,
+    ]);
+    // It says what is installed, so the lockfile that was pushed is not opened.
+    expect(touched).not.toContain('/home/vcap/app/package-lock.json');
     // The oversized seed file is checked with fstat and never read.
     expect(touched).toContain('/home/vcap/app/db/data/acme-Big.csv');
     expect(
@@ -514,11 +663,49 @@ describe('baip-lens project --cf', () => {
     // The snapshot records the oversized file as unreadable, never its content.
     const snapshotName = (await readdir(r.outDir)).find((f) => f.startsWith('snapshot-')) ?? '';
     const snapshot = JSON.parse(await readFile(join(r.outDir, snapshotName), 'utf8')) as {
-      raw: { projects: { files: string[]; unreadable: { file: string; kind: string }[] }[] };
+      raw: {
+        projects: {
+          files: string[];
+          filesOpened: number;
+          unreadable: { file: string; kind: string }[];
+          dependencies: unknown;
+        }[];
+      };
     };
     const project = snapshot.raw.projects[0];
-    expect(project?.files).toEqual(['package.json', 'srv/cat-service.cds', 'xs-app.json']);
+    expect(project?.files).toEqual([
+      'node_modules/.package-lock.json',
+      'package.json',
+      'srv/cat-service.cds',
+      'xs-app.json',
+    ]);
     expect(project?.unreadable).toEqual([{ file: 'db/data/acme-Big.csv', kind: 'too-large' }]);
+    expect(project?.filesOpened).toBe(5);
+
+    // The installed tree: its public packages by name, direct by the root package.json; the
+    // private, git and linked ones as counts. No record of the lockfile that was pushed.
+    expect(project?.dependencies).toEqual({
+      lockfiles: [
+        {
+          file: 'node_modules/.package-lock.json',
+          kind: 'hidden',
+          lockfileVersion: 3,
+          status: 'read',
+          kept: 4,
+          notKept: { ...NO_OTHER_PACKAGES, otherRegistry: 1, git: 1, link: 1 },
+        },
+      ],
+      lockfilesNotRead: 0,
+      packages: INSTALLED_PACKAGES,
+    });
+    expect(r.err).toContain(
+      'Read 1 npm lockfile(s): 4 package(s) from the public npm registry, 2 other package(s) not checked\n',
+    );
+    // The versions are known, so nothing is missing; the packages left unchecked are said.
+    const dependencyFindings = report.findings.filter((f) => f.id.startsWith('DEP_'));
+    expect(dependencyFindings.map((f) => f.id)).toEqual(['DEP_NOT_CHECKED']);
+    // A finding never points into node_modules.
+    expect(JSON.stringify(report.findings)).not.toContain('node_modules');
 
     // stdout lists the report files it wrote, so only the others must be free of absolute paths.
     expectNoLeaks({ stdout: r.out }, [...POISON, r.token]);
@@ -762,6 +949,7 @@ describe('baip-lens project --cf with a deployed MTA project', () => {
       expect(READ_REQUESTS.has(request.type), request.type).toBe(true);
       if (request.type === 'OPEN') expect(request.flags).toBe('r');
     }
+    expectOnlyReads(r);
     // The stopped app is never asked for its SSH status or its process.
     expect(r.fake.calls.some((c) => c.url.pathname.includes(numbered('a', 1)))).toBe(false);
 
@@ -1428,6 +1616,504 @@ describe('baip-lens project --cf when apps of a project cannot be read', () => {
     );
     expect(picked.transcript.some((line) => /^\s+\d+\) /.test(line))).toBe(false);
     expect(await readdir(picked.outDir)).toEqual([]);
+  });
+});
+
+/*
+ * The npm lockfiles of a deployed app: the lockfile npm wrote into the tree
+ * it installed is read in place of the one that was pushed, through the same
+ * session and with read requests only; without it the pushed lockfile is the
+ * fallback, without the dev packages a production install leaves out.
+ */
+
+/** A `package.json` whose dependencies the lockfiles of these tests pin. */
+const LOCKED_MANIFEST = JSON.stringify({
+  name: 'acme-incidents',
+  dependencies: { '@baip-fixture/odata': '^3.0.0', 'baip-fixture-server': '^2.0.0' },
+  devDependencies: { 'baip-fixture-test-kit': '^7.0.0' },
+  optionalDependencies: { 'baip-fixture-watcher': '^2.3.0' },
+});
+const NPMRC = '//registry.npmjs.org/:_authToken=POISON_npmrc\n';
+
+interface LockfileJson {
+  file: string;
+  kind: string;
+  lockfileVersion: number | null;
+  status: string;
+  kept: number;
+  notKept: Record<string, number>;
+}
+
+interface DependenciesJson {
+  lockfiles: LockfileJson[];
+  lockfilesNotRead: number;
+  packages: {
+    name: string;
+    version: string;
+    direct: boolean;
+    scope: string;
+    lockfiles: string[];
+  }[];
+}
+
+interface LockedProjectJson {
+  id: string;
+  files: string[];
+  filesOpened: number;
+  unreadable: { file: string; kind: string }[];
+  dependencies: DependenciesJson;
+}
+
+interface LockedReportJson {
+  checks: CheckJson[];
+  findings: {
+    id: string;
+    severity: string;
+    app: { guid: string };
+    evidence: Record<string, unknown>;
+    location?: { file: string };
+    remediation: string;
+  }[];
+}
+
+async function lockedProjects(dir: string): Promise<LockedProjectJson[]> {
+  const snapshot = JSON.parse(await readFile(await snapshotPath(dir), 'utf8')) as {
+    raw: { projects: LockedProjectJson[] };
+  };
+  // Every file the collector opened is listed, as read or as unreadable.
+  for (const project of snapshot.raw.projects) {
+    expect(project.filesOpened).toBe(project.files.length + project.unreadable.length);
+  }
+  return snapshot.raw.projects;
+}
+
+async function dependencyFindings(dir: string): Promise<LockedReportJson['findings']> {
+  const report = JSON.parse(
+    await readFile(join(dir, 'baip-lens-report.json'), 'utf8'),
+  ) as LockedReportJson;
+  return report.findings.filter((finding) => finding.id.startsWith('DEP_'));
+}
+
+/** One app on its own in the space, read with --app. */
+async function runOneApp(folder: string): Promise<Run> {
+  const space: Space = {
+    apps: [app(1, 'locked-srv', ready(1))],
+    folders: { [sshUser(1)]: folder },
+  };
+  return run({ space, args: ['--app', 'locked-srv'], answers: null });
+}
+
+/** `report --from` on the snapshot of a run, without a network: the same findings and checks. */
+async function expectSameOffline(r: Run): Promise<void> {
+  const again = await mkdtemp(join(tmpdir(), 'baip-lens-cf-again-'));
+  const code = await main(
+    ['report', '--from', await snapshotPath(r.outDir), '--format', 'json', '--out', again],
+    {
+      stdout: () => undefined,
+      stderr: () => undefined,
+      env: {},
+      isTTY: false,
+      fetch: () => Promise.reject(new Error('network must not be used')),
+    },
+  );
+  expect(code).toBe(EXIT.ok);
+  const findings = await dependencyFindings(r.outDir);
+  expect(findings.length).toBeGreaterThan(0);
+  expect(await dependencyFindings(again)).toEqual(findings);
+  expect((await reportOf(again)).checks).toEqual((await reportOf(r.outDir)).checks);
+}
+
+async function expectNothingLeaked(r: Run): Promise<void> {
+  expectNoLeaks({ stdout: r.out }, [...POISON, r.token]);
+  expectNoLeaks(
+    { stderr: r.err, ...(await written(r.outDir)) },
+    [...POISON, r.token],
+    [ABSOLUTE_PATH],
+  );
+}
+
+describe('baip-lens project --cf and the npm lockfiles of a deployed app', () => {
+  it('reads the lockfile of the installed tree through a node_modules that is a symbolic link', async () => {
+    // As the Node.js buildpack leaves it: node_modules is a link to a folder next to the app.
+    const folder = await appFolder({
+      'package.json': LOCKED_MANIFEST,
+      'package-lock.json': pushedLockfile(),
+      '.npmrc': NPMRC,
+    });
+    const installed = join(folder, '..', 'deps', '0', 'node_modules');
+    await mkdir(join(installed, 'baip-fixture-server'), { recursive: true });
+    await writeFile(join(installed, '.package-lock.json'), installedLockfile());
+    await writeFile(
+      join(installed, 'baip-fixture-server', 'package.json'),
+      '{"name":"POISON_node_modules"}',
+    );
+    await symlink(join('..', 'deps', '0', 'node_modules'), join(folder, 'node_modules'));
+
+    const r = await runOneApp(folder);
+    expect(r.code, r.err).toBe(EXIT.ok);
+    const [project] = await lockedProjects(r.outDir);
+    expect(project?.dependencies).toEqual({
+      lockfiles: [
+        {
+          file: 'node_modules/.package-lock.json',
+          kind: 'hidden',
+          lockfileVersion: 3,
+          status: 'read',
+          kept: 4,
+          notKept: { ...NO_OTHER_PACKAGES, otherRegistry: 1, git: 1, link: 1 },
+        },
+      ],
+      lockfilesNotRead: 0,
+      packages: INSTALLED_PACKAGES,
+    });
+    expect(project?.files).toEqual(['node_modules/.package-lock.json', 'package.json']);
+
+    // The link is never listed or entered; the one file behind it is asked for by its full path.
+    expectOnlyReads(r);
+    expect([...new Set(underNodeModules(r))]).toEqual([
+      `LSTAT ${HIDDEN}`,
+      `OPEN ${HIDDEN}`,
+      `FSTAT ${HIDDEN}`,
+      `READ ${HIDDEN}`,
+      `CLOSE ${HIDDEN}`,
+    ]);
+    const touched = r.server.requests.map((q) => q.path ?? '');
+    expect(touched.some((path) => path.includes('deps'))).toBe(false);
+    expect(touched).not.toContain('/home/vcap/app/package-lock.json');
+    expect((await dependencyFindings(r.outDir)).map((f) => f.id)).toEqual(['DEP_NOT_CHECKED']);
+    await expectNothingLeaked(r);
+    // The record of the hidden lockfile loads again: the same findings offline.
+    await expectSameOffline(r);
+  });
+
+  it('does not follow a hidden lockfile that is itself a link, and falls back to the pushed one', async () => {
+    const folder = await appFolder({
+      'package.json': LOCKED_MANIFEST,
+      'package-lock.json': pushedLockfile(),
+      'node_modules/baip-fixture-server/package.json': '{"name":"POISON_node_modules"}',
+    });
+    const outside = join(folder, '..', 'outside-lock.json');
+    await writeFile(
+      outside,
+      hiddenLockfile('outside', {
+        'node_modules/baip-fixture-outside': registryEntry('baip-fixture-outside', '9.9.9'),
+      }),
+    );
+    await symlink(outside, join(folder, 'node_modules', '.package-lock.json'));
+
+    const r = await runOneApp(folder);
+    expect(r.code, r.err).toBe(EXIT.ok);
+    // Looked at once, found to be no regular file, and never opened.
+    expect(underNodeModules(r)).toEqual([`LSTAT ${HIDDEN}`]);
+    const [project] = await lockedProjects(r.outDir);
+    expect(project?.dependencies.lockfiles.map((l) => [l.file, l.kind, l.status])).toEqual([
+      ['package-lock.json', 'package-lock', 'read'],
+    ]);
+    expect(project?.dependencies.packages.map((item) => item.name)).not.toContain(
+      'baip-fixture-outside',
+    );
+    expect(project?.unreadable).toEqual([]);
+    expectOnlyReads(r);
+  });
+
+  it('falls back to the pushed package-lock.json, without its dev entries, when nothing else is there', async () => {
+    const folder = await appFolder({
+      'package.json': LOCKED_MANIFEST,
+      'package-lock.json': pushedLockfile(),
+      '.npmrc': NPMRC,
+    });
+    const r = await runOneApp(folder);
+    expect(r.code, r.err).toBe(EXIT.ok);
+
+    // One look for the hidden lockfile, which costs nothing else.
+    expect(underNodeModules(r)).toEqual([`LSTAT ${HIDDEN}`]);
+    expectOnlyReads(r);
+    const [project] = await lockedProjects(r.outDir);
+    expect(project?.files).toEqual(['package-lock.json', 'package.json']);
+    expect(project?.unreadable).toEqual([]);
+    expect(project?.filesOpened).toBe(2);
+    // The two dev packages and the private dev package are not installed: not kept, not counted.
+    expect(project?.dependencies).toEqual({
+      lockfiles: [
+        {
+          file: 'package-lock.json',
+          kind: 'package-lock',
+          lockfileVersion: 3,
+          status: 'read',
+          kept: 3,
+          notKept: { ...NO_OTHER_PACKAGES, otherRegistry: 1 },
+        },
+      ],
+      lockfilesNotRead: 0,
+      packages: [
+        { name: '@baip-fixture/odata', version: '3.0.0', direct: true, scope: 'prod' },
+        { name: 'baip-fixture-server', version: '2.0.0', direct: true, scope: 'prod' },
+        { name: 'baip-fixture-shared', version: '1.2.0', direct: false, scope: 'optional' },
+      ].map((item) => ({ ...item, lockfiles: ['package-lock.json'] })),
+    });
+    expect(r.err).toContain(
+      'Read 1 npm lockfile(s): 3 package(s) from the public npm registry, 1 other package(s) not checked\n',
+    );
+    const findings = await dependencyFindings(r.outDir);
+    expect(findings.map((f) => [f.id, f.evidence.otherRegistry, f.evidence.checked])).toEqual([
+      ['DEP_NOT_CHECKED', 1, 3],
+    ]);
+    await expectNothingLeaked(r);
+
+    await expectSameOffline(r);
+  });
+
+  it('says that an app without any lockfile has none, with the advice for a deployed app', async () => {
+    const r = await runOneApp(await approuterFixture());
+    expect(r.code, r.err).toBe(EXIT.ok);
+    expect(underNodeModules(r)).toEqual([`LSTAT ${HIDDEN}`]);
+    const [project] = await lockedProjects(r.outDir);
+    expect(project?.dependencies).toEqual({ lockfiles: [], lockfilesNotRead: 0, packages: [] });
+    expect(project?.files).toEqual(['package.json', 'xs-app.json']);
+    expect(r.err).not.toContain('npm lockfile');
+    const findings = await dependencyFindings(r.outDir);
+    expect(
+      findings.map((f) => [f.id, f.severity, f.evidence.cause, f.evidence.subject, f.location]),
+    ).toEqual([['DEP_LOCKFILE_MISSING', 'low', 'none', 'package.json', { file: 'package.json' }]]);
+    expect(findings[0]?.remediation).toContain('Push the lockfile with the app');
+  });
+
+  it('reads the lockfiles of every app of a project run, each in its own session', async () => {
+    const router = await appFolder({
+      'package.json': JSON.stringify({
+        name: 'acme-approuter',
+        dependencies: { 'baip-fixture-router': '^1.0.0', 'baip-fixture-server': '^2.0.0' },
+      }),
+      'xs-app.json': JSON.stringify({ authenticationMethod: 'route', routes: [] }),
+      'node_modules/.package-lock.json': hiddenLockfile('acme-approuter', {
+        'node_modules/baip-fixture-router': registryEntry('baip-fixture-router', '1.0.0'),
+        'node_modules/baip-fixture-server': registryEntry('baip-fixture-server', '2.4.1'),
+        'node_modules/@poison-scope/private': privateEntry('@poison-scope/private'),
+      }),
+      '.npmrc': NPMRC,
+    });
+    const space: Space = {
+      apps: [
+        app(1, 'acme-router', { ...ready(1), metadata: deployed('acme', 'acme-approuter') }),
+        app(2, 'acme-srv', { ...ready(2), metadata: deployed('acme', 'acme-srv') }),
+      ],
+      folders: { [sshUser(1)]: router, [sshUser(2)]: await containerFixture() },
+    };
+    const r = await run({ space, args: ['--mta', 'acme'], answers: null });
+    expect(r.code, r.err).toBe(EXIT.ok);
+
+    const projects = await lockedProjects(r.outDir);
+    expect(projects.map((p) => [p.id, p.dependencies.lockfiles.map((l) => l.kind)])).toEqual([
+      ['acme-router', ['hidden']],
+      ['acme-srv', ['hidden']],
+    ]);
+    // A package both apps have installed is kept for each of them.
+    expect(projects[0]?.dependencies.packages).toEqual(
+      [
+        { name: 'baip-fixture-router', version: '1.0.0', direct: true, scope: 'prod' },
+        { name: 'baip-fixture-server', version: '2.4.1', direct: true, scope: 'prod' },
+      ].map((item) => ({ ...item, lockfiles: ['node_modules/.package-lock.json'] })),
+    );
+    expect(projects[1]?.dependencies.packages).toEqual(INSTALLED_PACKAGES);
+
+    // One line per app, right after the line about its files.
+    const lines = r.err.split('\n');
+    const after = (start: RegExp): string | undefined =>
+      lines[lines.findIndex((line) => start.test(line)) + 1];
+    expect(after(/^Read \d+ project file\(s\) in project acme-router$/)).toBe(
+      'Read 1 npm lockfile(s): 2 package(s) from the public npm registry, 1 other package(s) not checked',
+    );
+    expect(after(/^Read \d+ project file\(s\), 1 unreadable in project acme-srv$/)).toBe(
+      'Read 1 npm lockfile(s): 4 package(s) from the public npm registry, 2 other package(s) not checked',
+    );
+
+    // Each session asked for its own hidden lockfile, and for nothing else under node_modules.
+    expectOnlyReads(r);
+    for (const user of [sshUser(1), sshUser(2)]) {
+      const asked = r.server.requests
+        .filter((q) => q.username === user && (q.path ?? '').includes('node_modules'))
+        .map((q) => `${q.type} ${q.path ?? ''}`);
+      expect(asked[0], user).toBe(`LSTAT ${HIDDEN}`);
+      expect(asked).toContain(`OPEN ${HIDDEN}`);
+    }
+    const findings = await dependencyFindings(r.outDir);
+    expect(findings.map((f) => [f.id, f.app.guid, f.evidence.checked])).toEqual([
+      ['DEP_NOT_CHECKED', 'project:acme-router', 2],
+      ['DEP_NOT_CHECKED', 'project:acme-srv', 4],
+    ]);
+    const report = await reportOf(r.outDir);
+    expect(report.checks.find((check) => check.id === 'collect.dependencies')).toMatchObject({
+      status: 'ran',
+      roles: ['SpaceDeveloper'],
+    });
+    await expectNothingLeaked(r);
+  }, 20_000);
+
+  /** A hidden lockfile of `count` public packages with invented names. */
+  function bulkLockfile(prefix: string, count: number): string {
+    const packages: Record<string, unknown> = {};
+    for (let i = 0; i < count; i += 1) {
+      const name = `baip-bulk-${prefix}-${String(i).padStart(5, '0')}`;
+      packages[`node_modules/${name}`] = {
+        version: '1.0.0',
+        resolved: `https://registry.npmjs.org/${name}/-/${name}-1.0.0.tgz`,
+      };
+    }
+    return hiddenLockfile('bulk', packages);
+  }
+
+  it('shares one budget of 20,000 packages among the apps of a project run', async () => {
+    const bulkApp = (prefix: string): Promise<string> =>
+      appFolder({
+        'package.json': JSON.stringify({
+          name: `bulk-${prefix}`,
+          dependencies: { [`baip-bulk-${prefix}-00000`]: '^1.0.0' },
+        }),
+        'node_modules/.package-lock.json': bulkLockfile(prefix, 10_500),
+      });
+    const space: Space = {
+      apps: [
+        app(1, 'bulk-a', { ...ready(1), metadata: deployed('bulk', 'a') }),
+        app(2, 'bulk-b', { ...ready(2), metadata: deployed('bulk', 'b') }),
+      ],
+      folders: { [sshUser(1)]: await bulkApp('a'), [sshUser(2)]: await bulkApp('b') },
+    };
+    const r = await run({ space, args: ['--mta', 'bulk'], answers: null });
+    expect(r.code, r.err).toBe(EXIT.ok);
+
+    // The first app keeps its 10,500 packages; the 10,500 of the second do not fit into what is left.
+    const projects = await lockedProjects(r.outDir);
+    expect(
+      projects.map((p) => [
+        p.id,
+        p.dependencies.lockfiles.map((l) => [l.kind, l.status, l.kept]),
+        p.dependencies.packages.length,
+      ]),
+    ).toEqual([
+      ['bulk-a', [['hidden', 'read', 10_500]], 10_500],
+      ['bulk-b', [['hidden', 'too-many-packages', 0]], 0],
+    ]);
+    expect(projects[0]?.dependencies.packages[0]).toEqual({
+      name: 'baip-bulk-a-00000',
+      version: '1.0.0',
+      direct: true,
+      scope: 'prod',
+      lockfiles: ['node_modules/.package-lock.json'],
+    });
+    // A lockfile that does not fit is reported, never passed over; the finding points nowhere.
+    const findings = await dependencyFindings(r.outDir);
+    expect(
+      findings.map((f) => [f.id, f.app.guid, f.evidence.cause ?? null, f.location ?? null]),
+    ).toEqual([
+      ['DEP_LOCKFILE_MISSING', 'project:bulk-b', 'too-many-packages', null],
+      ['DEP_NOT_CHECKED', 'project:bulk-b', null, null],
+    ]);
+
+    // A lockfile of more than a megabyte, in requests that each fit one SFTP packet.
+    expectOnlyReads(r);
+    const reads = r.server.requests.filter(
+      (q) => q.username === sshUser(1) && q.type === 'READ' && q.path === HIDDEN,
+    );
+    expect(reads.length).toBeGreaterThan(30);
+    expect(Math.max(...reads.map((q) => q.length ?? 0))).toBe(MAX_READ_BYTES);
+    // Every byte was asked for once, in order, from the first to the last.
+    const offsets = reads.map((q) => q.offset ?? -1);
+    expect(offsets).toEqual([...offsets].sort((a, b) => a - b));
+    expect(new Set(offsets).size).toBe(offsets.length);
+
+    // On its own the second app has the whole budget.
+    const alone = await run({ space, args: ['--app', 'bulk-b'], answers: null });
+    expect(alone.code, alone.err).toBe(EXIT.ok);
+    const [second] = await lockedProjects(alone.outDir);
+    expect(second?.dependencies.lockfiles.map((l) => [l.kind, l.status, l.kept])).toEqual([
+      ['hidden', 'read', 10_500],
+    ]);
+    expect(await dependencyFindings(alone.outDir)).toEqual([]);
+  }, 60_000);
+
+  describe('when the session is lost while the ranges of a lockfile are in flight', () => {
+    const unhandled: unknown[] = [];
+    const onUnhandled = (reason: unknown): void => {
+      unhandled.push(reason);
+    };
+    beforeEach(() => {
+      unhandled.length = 0;
+      process.on('unhandledRejection', onUnhandled);
+    });
+    afterEach(() => {
+      process.off('unhandledRejection', onUnhandled);
+    });
+
+    /** An app whose hidden lockfile needs its head and more than four ranges. */
+    const largeLockfileApp = (): Promise<string> =>
+      appFolder({
+        'package.json': LOCKED_MANIFEST,
+        'node_modules/.package-lock.json': bulkLockfile('lost', 2_000),
+        'package-lock.json': pushedLockfile(),
+      });
+
+    /** The head was answered, and the session went with requests for what follows it sent. */
+    function expectLostInFlight(r: Run, user: string): void {
+      const reads = r.server.requests.filter(
+        (q) => q.username === user && q.type === 'READ' && q.path === HIDDEN,
+      );
+      expect(reads[0]).toMatchObject({ offset: 0 });
+      expect(reads.some((q) => (q.offset ?? 0) > 0)).toBe(true);
+      // The lockfile that was pushed does not stand in for a hidden one that was half read.
+      expect(r.server.requests.map((q) => q.path ?? '')).not.toContain(
+        '/home/vcap/app/package-lock.json',
+      );
+    }
+
+    it('ends a run of one app with exit code 2, writes nothing and leaves no request to fail unnoticed', async () => {
+      const space: Space = {
+        apps: [app(1, 'locked-srv', ready(1))],
+        folders: { [sshUser(1)]: await largeLockfileApp() },
+        dropOnRead: [sshUser(1)],
+      };
+      const r = await run({ space, args: ['--app', 'locked-srv'], answers: null });
+      expect(r.code).toBe(EXIT.error);
+      expect(r.err).toContain(
+        'The connection to the app closed before the scan finished, so nothing was written. Run the command again.',
+      );
+      expectLostInFlight(r, sshUser(1));
+      expect(r.out).toBe('');
+      expect(await readdir(r.outDir)).toEqual([]);
+      await new Promise((resolve) => setImmediate(resolve));
+      expect(unhandled).toEqual([]);
+    });
+
+    it('keeps nothing of that app in a project run, and still reads the next one', async () => {
+      const space: Space = {
+        apps: [
+          app(1, 'acme-lost', { ...ready(1), metadata: deployed('acme', 'acme-lost') }),
+          app(2, 'acme-srv', { ...ready(2), metadata: deployed('acme', 'acme-srv') }),
+        ],
+        folders: { [sshUser(1)]: await largeLockfileApp(), [sshUser(2)]: await containerFixture() },
+        dropOnRead: [sshUser(1)],
+      };
+      const r = await run({ space, args: ['--mta', 'acme'], answers: null });
+      expect(r.code, r.err).toBe(EXIT.ok);
+      expectLostInFlight(r, sshUser(1));
+      const report = await reportOf(r.outDir);
+      expect(skippedChecks(report)).toEqual([
+        {
+          id: 'collect.project.acme-lost',
+          title: 'Files of deployed app acme-lost',
+          roles: ['SpaceDeveloper'],
+          status: 'skipped',
+          reasonCode: 'error',
+          reason: 'the connection closed before the app was read',
+        },
+      ]);
+      // No package of the half-read lockfile is kept, and none of its budget is spent.
+      const projects = await lockedProjects(r.outDir);
+      expect(projects.map((p) => p.id)).toEqual(['acme-srv']);
+      expect(projects[0]?.dependencies.packages).toEqual(INSTALLED_PACKAGES);
+      expect(JSON.stringify(await written(r.outDir))).not.toContain('baip-bulk-lost');
+      await new Promise((resolve) => setImmediate(resolve));
+      expect(unhandled).toEqual([]);
+    });
   });
 });
 

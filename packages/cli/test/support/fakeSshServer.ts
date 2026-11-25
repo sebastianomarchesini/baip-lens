@@ -67,6 +67,10 @@ export interface SftpRequest {
   path?: string;
   /** For OPEN: the flags as ssh2 spells them ('r', 'w', 'a+', ...). */
   flags?: string;
+  /** For READ: where in the file the bytes were asked for. */
+  offset?: number;
+  /** For READ: how many bytes were asked for. */
+  length?: number;
 }
 
 export interface FakeSshServer {
@@ -100,6 +104,17 @@ export interface FakeSshApps {
   codes: string[];
   /** Users whose connection is cut at their first OPEN request: a session lost mid-scan. */
   dropOnOpen?: string[];
+  /**
+   * Users whose connection is cut at the first READ request that asks for
+   * bytes beyond the start of a file: a session lost while the ranges of a
+   * large file are in flight, after its head was answered.
+   */
+  dropOnRead?: string[];
+  /**
+   * Every SFTP answer is held back this long, each on its own: a stand-in for
+   * the round trip of a real network, where requests in flight wait together.
+   */
+  delayMs?: number;
 }
 
 export type FakeSshOptions = FakeSshApp | FakeSshApps;
@@ -143,13 +158,47 @@ async function attrsOf(path: string): Promise<Attributes> {
   };
 }
 
+/** The calls that answer an SFTP request. */
+type SftpAnswers = Pick<SFTPWrapper, 'status' | 'handle' | 'attrs' | 'data' | 'name'>;
+
+/** The answers of a session, each held back by `delayMs`; an answer to a session that is gone is dropped. */
+function answersOf(sftp: SFTPWrapper, delayMs: number): SftpAnswers {
+  if (delayMs <= 0) return sftp;
+  const later =
+    <A extends unknown[]>(send: (...args: A) => void) =>
+    (...args: A): void => {
+      setTimeout(() => {
+        try {
+          send(...args);
+        } catch {
+          // The client hung up while the answer was on its way.
+        }
+      }, delayMs);
+    };
+  return {
+    status: later((...args: Parameters<SFTPWrapper['status']>) => sftp.status(...args)),
+    handle: later((...args: Parameters<SFTPWrapper['handle']>) => sftp.handle(...args)),
+    attrs: later((...args: Parameters<SFTPWrapper['attrs']>) => sftp.attrs(...args)),
+    data: later((...args: Parameters<SFTPWrapper['data']>) => sftp.data(...args)),
+    name: later((...args: Parameters<SFTPWrapper['name']>) => sftp.name(...args)),
+  };
+}
+
+interface ServeOptions {
+  /** Called at the first OPEN instead of answering it, when the session is to be lost there. */
+  cut?: () => void;
+  /** Called at a READ beyond the start of a file instead of answering it, when the session is to be lost there. */
+  cutRead?: () => void;
+  delayMs?: number;
+}
+
 function serveSftp(
-  sftp: SFTPWrapper,
+  channel: SFTPWrapper,
   appDir: string,
   record: (r: Omit<SftpRequest, 'username'>) => void,
-  /** Called at the first OPEN instead of answering it, when the session is to be lost there. */
-  cut?: () => void,
+  { cut, cutRead, delayMs = 0 }: ServeOptions = {},
 ): void {
+  const sftp = answersOf(channel, delayMs);
   const files = new Map<string, { file: FileHandle; path: string }>();
   const dirs = new Map<string, { path: string; done: boolean }>();
   let next = 0;
@@ -164,13 +213,13 @@ function serveSftp(
 
   for (const type of SFTP_REQUESTS) {
     if (READ_REQUESTS.has(type)) continue;
-    sftp.on(type, (reqid: number) => {
+    channel.on(type, (reqid: number) => {
       record({ type });
       sftp.status(reqid, STATUS.OP_UNSUPPORTED);
     });
   }
 
-  sftp.on('OPEN', (reqid, filename, flags) => {
+  channel.on('OPEN', (reqid, filename, flags) => {
     const flagText = utils.sftp.flagsToString(flags) ?? String(flags);
     record({ type: 'OPEN', path: filename, flags: flagText });
     if (cut !== undefined) return cut();
@@ -186,7 +235,7 @@ function serveSftp(
     );
   });
 
-  sftp.on('FSTAT', (reqid, handle) => {
+  channel.on('FSTAT', (reqid, handle) => {
     const entry = files.get(handle.toString());
     record({ type: 'FSTAT', path: entry?.path });
     if (entry === undefined) return sftp.status(reqid, STATUS.FAILURE);
@@ -204,9 +253,10 @@ function serveSftp(
     );
   });
 
-  sftp.on('READ', (reqid, handle, offset, length) => {
+  channel.on('READ', (reqid, handle, offset, length) => {
     const entry = files.get(handle.toString());
-    record({ type: 'READ', path: entry?.path });
+    record({ type: 'READ', path: entry?.path, offset, length });
+    if (cutRead !== undefined && offset > 0) return cutRead();
     if (entry === undefined) return sftp.status(reqid, STATUS.FAILURE);
     const buffer = Buffer.alloc(Math.min(length, MAX_READ));
     entry.file.read(buffer, 0, buffer.length, offset).then(
@@ -218,7 +268,7 @@ function serveSftp(
     );
   });
 
-  sftp.on('OPENDIR', (reqid, path) => {
+  channel.on('OPENDIR', (reqid, path) => {
     record({ type: 'OPENDIR', path });
     const dir = local(path);
     if (dir === null) return sftp.status(reqid, STATUS.NO_SUCH_FILE);
@@ -233,7 +283,7 @@ function serveSftp(
     );
   });
 
-  sftp.on('READDIR', (reqid, handle) => {
+  channel.on('READDIR', (reqid, handle) => {
     const entry = dirs.get(handle.toString());
     record({ type: 'READDIR', path: entry?.path });
     if (entry === undefined) return sftp.status(reqid, STATUS.FAILURE);
@@ -256,7 +306,7 @@ function serveSftp(
       );
   });
 
-  sftp.on('LSTAT', (reqid, path) => {
+  channel.on('LSTAT', (reqid, path) => {
     record({ type: 'LSTAT', path });
     const target = local(path);
     if (target === null) return sftp.status(reqid, STATUS.NO_SUCH_FILE);
@@ -266,7 +316,7 @@ function serveSftp(
     );
   });
 
-  sftp.on('CLOSE', (reqid, handle) => {
+  channel.on('CLOSE', (reqid, handle) => {
     const key = handle.toString();
     const file = files.get(key);
     record({ type: 'CLOSE', path: file?.path ?? dirs.get(key)?.path });
@@ -325,12 +375,11 @@ export async function startFakeSsh(options: FakeSshOptions): Promise<FakeSshServ
           state.channels.push('sftp');
           if (login === undefined) return;
           const { username, appDir } = login;
-          serveSftp(
-            acceptSftp(),
-            appDir,
-            (r) => state.requests.push({ ...r, username }),
-            apps.dropOnOpen?.includes(username) ? () => client.end() : undefined,
-          );
+          serveSftp(acceptSftp(), appDir, (r) => state.requests.push({ ...r, username }), {
+            cut: apps.dropOnOpen?.includes(username) ? () => client.end() : undefined,
+            cutRead: apps.dropOnRead?.includes(username) ? () => client.end() : undefined,
+            delayMs: apps.delayMs,
+          });
         });
         for (const name of ['exec', 'shell', 'pty', 'env', 'subsystem', 'x11'] as const) {
           session.on(name as 'exec', (_accept: unknown, reject: () => void) => {

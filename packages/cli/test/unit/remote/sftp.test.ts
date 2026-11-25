@@ -9,10 +9,6 @@ import {
   NUL_SCAN_BYTES,
 } from '../../../src/collectors/project/read.js';
 import {
-  type ReadOnlySftp,
-  type RemoteEntry,
-  type RemoteFile,
-  type RemoteStat,
   RemoteSessionError,
   Ssh2ReadOnlySftp,
   type SftpReadRequests,
@@ -20,6 +16,7 @@ import {
 } from '../../../src/remote/sftp.js';
 import { APP_ROOT, SftpProjectTree } from '../../../src/remote/sftpTree.js';
 import { lockfileV3, registryEntry } from '../../support/lockfileFixture.js';
+import { MemorySftp } from '../../support/memorySftp.js';
 
 const FILE = 0o100644;
 const DIR = 0o040755;
@@ -216,67 +213,6 @@ describe('the remote code has no write path', () => {
     expect(text).toContain("this.sftp.open(path, 'r', done)");
   });
 });
-
-/** An in-memory ReadOnlySftp over a map of container paths, recording each request. */
-class MemorySftp implements ReadOnlySftp {
-  readonly requests: string[] = [];
-  gone = false;
-  /** Paths whose content changes between the listing and the read. */
-  readonly swapped = new Set<string>();
-
-  constructor(private readonly files: Record<string, string | { size: number }>) {}
-
-  private stat(path: string): RemoteStat | undefined {
-    const value = this.files[path];
-    if (value !== undefined) {
-      const size = typeof value === 'string' ? Buffer.byteLength(value) : value.size;
-      return { type: 'file', size, mtime: 100 };
-    }
-    const isDir = Object.keys(this.files).some((p) => p.startsWith(`${path}/`));
-    return isDir ? { type: 'directory', size: 0, mtime: 100 } : undefined;
-  }
-
-  list(path: string, max: number): Promise<RemoteEntry[]> {
-    this.requests.push(`list ${path}`);
-    if (this.gone) return Promise.reject(new RemoteSessionError('gone'));
-    const names = new Set<string>();
-    for (const p of Object.keys(this.files)) {
-      if (p.startsWith(`${path}/`)) names.add(p.slice(path.length + 1).split('/')[0] ?? '');
-    }
-    const entries = [...names]
-      .reverse()
-      .map((name) => ({ name, ...this.stat(`${path}/${name}`)! }));
-    return Promise.resolve(entries.slice(0, max));
-  }
-
-  lstat(path: string): Promise<RemoteStat> {
-    this.requests.push(`lstat ${path}`);
-    if (this.gone) return Promise.reject(new RemoteSessionError('gone'));
-    const stat = this.stat(path);
-    return stat ? Promise.resolve(stat) : Promise.reject(new Error('No such file'));
-  }
-
-  openForReading(path: string): Promise<RemoteFile> {
-    this.requests.push(`open ${path}`);
-    if (this.gone) return Promise.reject(new RemoteSessionError('gone'));
-    const value = this.files[path];
-    if (value === undefined) return Promise.reject(new Error('No such file'));
-    const content = Buffer.from(typeof value === 'string' ? value : '');
-    const stat = this.stat(path)!;
-    return Promise.resolve({
-      stat: () => Promise.resolve(this.swapped.has(path) ? { ...stat, mtime: 999 } : stat),
-      read: (buffer: Buffer, offset: number, length: number, position: number) => {
-        this.requests.push(`read ${path}`);
-        // Short reads, as a real server gives them.
-        const n = Math.min(length, 4, content.length - position);
-        if (n <= 0) return Promise.resolve(0);
-        content.copy(buffer, offset, position, position + n);
-        return Promise.resolve(n);
-      },
-      close: () => Promise.resolve(),
-    });
-  }
-}
 
 const ZERO = {
   otherRegistry: 0,

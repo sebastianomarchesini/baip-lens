@@ -61,6 +61,16 @@ export function lockfileV3(root: RootManifest, packages: Record<string, unknown>
 }
 
 /**
+ * `node_modules/.package-lock.json` as text: the lockfile npm 7+ writes into
+ * the tree it installed. Always version 3, and without a root entry: which
+ * packages are direct is known from the root `package.json` only.
+ */
+export function hiddenLockfile(name: string, packages: Record<string, unknown>): string {
+  const lockfile = { name, version: '1.0.0', lockfileVersion: 3, requires: true, packages };
+  return `${JSON.stringify(lockfile, null, 2)}\n`;
+}
+
+/**
  * The packages of the acme-incidents lockfile that come from the public npm
  * registry, as the project record keeps them: sorted by name, then version.
  * Later slices script answers about some of them (a vulnerable version, a
