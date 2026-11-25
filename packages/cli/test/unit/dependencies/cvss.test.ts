@@ -1,3 +1,4 @@
+import { createHash } from 'node:crypto';
 import { describe, expect, it } from 'vitest';
 import { cvssV3BaseScore } from '../../../src/analyzers/dependencies/cvss.js';
 
@@ -162,6 +163,45 @@ describe('cvssV3BaseScore', () => {
     expect(scores.has(10)).toBe(true);
   });
 
+  /*
+   * Every combination of the eight base metrics, for both versions, against
+   * an independent implementation: the Python library `cvss` 3.6 (Red Hat
+   * Product Security) computed the same 2,592 scores per version on
+   * 2026-11-25, and the digests below are those of its list as well. The
+   * list is `<vector>=<score with one decimal>`, one vector per line, the
+   * metrics in the order of the specification and each with its values in
+   * the order given here. A weight or a rounding that changes for one vector
+   * only changes the digest.
+   */
+  it.each([
+    ['3.0', '05b8fc759c884b19aca554d540aeb815633aeaf8f8c925b1b3ad0189fe52f9f5'],
+    ['3.1', 'acec74d9a4420dc631180a006db694cbc71b740a596bf4ddbb19e2e87fb4def4'],
+  ])(
+    'gives every base vector of CVSS %s the score an independent implementation gives',
+    (version, digest) => {
+      const metrics: [string, string[]][] = [
+        ['AV', ['N', 'A', 'L', 'P']],
+        ['AC', ['L', 'H']],
+        ['PR', ['N', 'L', 'H']],
+        ['UI', ['N', 'R']],
+        ['S', ['U', 'C']],
+        ['C', ['H', 'L', 'N']],
+        ['I', ['H', 'L', 'N']],
+        ['A', ['H', 'L', 'N']],
+      ];
+      let vectors = [`CVSS:${version}`];
+      for (const [metric, values] of metrics) {
+        vectors = vectors.flatMap((head) => values.map((value) => `${head}/${metric}:${value}`));
+      }
+      expect(vectors).toHaveLength(2592);
+      expect(vectors[0]).toBe(`CVSS:${version}/AV:N/AC:L/PR:N/UI:N/S:U/C:H/I:H/A:H`);
+      const lines = vectors.map(
+        (vector) => `${vector}=${(cvssV3BaseScore(vector) ?? NaN).toFixed(1)}`,
+      );
+      expect(createHash('sha256').update(lines.join('\n')).digest('hex')).toBe(digest);
+    },
+  );
+
   describe('gives null for a text that is not a CVSS v3 vector', () => {
     it.each([
       ['an empty text', ''],
@@ -173,6 +213,9 @@ describe('cvssV3BaseScore', () => {
       ['version 4', 'CVSS:4.0/AV:N/AC:L/AT:N/PR:N/UI:N/VC:H/VI:H/VA:H/SC:N/SI:N/SA:N'],
       ['a version 3 that does not exist', `CVSS:3.2/${BASE}`],
       ['a prefix in lower case', `cvss:3.1/${BASE}`],
+      ['text before the prefix', `xCVSS:3.1/${BASE}`],
+      ['text after the version', `CVSS:3.1x/${BASE}`],
+      ['a blank before the prefix', ` CVSS:3.1/${BASE}`],
       ['a base metric that is missing', 'CVSS:3.1/AV:N/AC:L/PR:N/UI:N/S:U/C:H/I:H'],
       ['only temporal metrics', 'CVSS:3.1/E:U/RL:O/RC:C'],
       ['a metric named twice', `CVSS:3.1/${BASE}/AV:L`],
@@ -198,11 +241,20 @@ describe('cvssV3BaseScore', () => {
       expect(cvssV3BaseScore(vector)).toBeNull();
     });
 
-    it('a text far longer than a vector can be, without taking it apart', () => {
+    // No vector is longer than 117 characters: every metric of the three groups, once. A
+    // longer text names a metric twice or one that does not exist, and ends there.
+    it('a text far longer than a vector can be, quickly', () => {
       const long = `CVSS:3.1/${BASE}${'/E:U'.repeat(100_000)}`;
       const started = performance.now();
       expect(cvssV3BaseScore(long)).toBeNull();
+      expect(cvssV3BaseScore(`CVSS:3.1/${BASE}/${'X'.repeat(1_000_000)}`)).toBeNull();
       expect(performance.now() - started).toBeLessThan(200);
+    });
+
+    it('the longest vector there is has a score', () => {
+      const longest = `CVSS:3.1/${BASE}/E:P/RL:T/RC:R/CR:H/IR:M/AR:L/MAV:P/MAC:H/MPR:H/MUI:R/MS:C/MC:N/MI:N/MA:N`;
+      expect(longest).toHaveLength(117);
+      expect(cvssV3BaseScore(longest)).toBe(9.8);
     });
   });
 });

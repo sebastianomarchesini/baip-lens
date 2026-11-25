@@ -417,6 +417,136 @@ describe('collectOsv', () => {
     });
   });
 
+  describe('what is held while the other advisories are read', () => {
+    const MIB = 1024 * 1024;
+    const COUNT = 16;
+    const ids = Array.from({ length: COUNT }, (_, i) => `GHSA-fake-${String(i).padStart(4, '0')}`);
+
+    /**
+     * Reads `COUNT` advisories of one package, one at a time, each answer
+     * built by `record`, and measures the heap when the first and when the
+     * last of them is asked for: what lies between is what was kept of the
+     * fourteen others, in bytes.
+     */
+    async function heldMeanwhile(
+      record: (id: string) => string,
+    ): Promise<{ tables: OsvTables; bytes: number }> {
+      const collectGarbage = globalThis.gc;
+      if (collectGarbage === undefined) throw new Error('run with --expose-gc (vitest.config.ts)');
+      const heap: number[] = [];
+      const fake = new FakeFetch()
+        .on('POST', QUERYBATCH, jsonResponse({ results: [{ vulns: ids.map((id) => ({ id })) }] }))
+        .on(
+          'GET',
+          (url) => url.host === OSV_HOST,
+          (call) => {
+            const id = call.url.pathname.slice('/v1/vulns/'.length);
+            if (id === ids[0] || id === ids[COUNT - 1]) {
+              collectGarbage();
+              heap.push(process.memoryUsage().heapUsed);
+            }
+            return new Response(record(id), { status: 200 });
+          },
+        );
+      const tables = await collectOsv(clientOn(fake), [MERGE], { concurrency: 1 });
+      expect(askedAdvisories(fake)).toEqual(ids);
+      expect(heap).toHaveLength(2);
+      const [first = 0, last = 0] = heap;
+      return { tables, bytes: last - first };
+    }
+
+    it('is the 200 characters of a summary, not the megabytes it came with', async () => {
+      // 7 MiB of words: an answer just below what the client reads at all.
+      const text = 'word '.repeat((7 * MIB) / 5);
+      const { tables, bytes } = await heldMeanwhile((id) => JSON.stringify({ id, summary: text }));
+      expect(tables.advisories).toHaveLength(COUNT);
+      expect(tables.advisories[0]?.summary).toHaveLength(200);
+      // Held as they came, the fourteen summaries take 98 MiB and more (measured: 110).
+      // Reduced, under 6 MiB are measured, for 14 answers as for 38: about one text,
+      // which does not grow with their number.
+      expect(bytes).toBeLessThan(14 * MIB);
+    }, 60_000);
+
+    it.each([
+      ['one word', `${'A'.repeat(150)} ${'B'.repeat(7 * MIB)}`, 'A'.repeat(150)],
+      ['one short word', `Vulnerability ${'B'.repeat(7 * MIB)}`, 'Vulnerability'],
+    ])(
+      'is a copy of its own when what is kept of a summary is %s: no part of the megabytes',
+      async (_name, text, kept) => {
+        // Nothing in the kept part is replaced, so without a copy it would be a part of the
+        // text it was cut from, and would keep all of it in memory (measured: 105 MiB for 16).
+        const { tables, bytes } = await heldMeanwhile((id) =>
+          JSON.stringify({ id, summary: text }),
+        );
+        expect(tables.advisories).toHaveLength(COUNT);
+        expect(tables.advisories[0]?.summary).toBe(kept);
+        expect(bytes).toBeLessThan(14 * MIB);
+      },
+      60_000,
+    );
+
+    it('is the ten fixed versions that are stored, not every one an answer names', async () => {
+      // 300,000 fixed versions of the package, in one range.
+      const events = Array.from({ length: 300_000 }, (_, i) => `{"fixed":"1.${i}.0"}`).join(',');
+      const { tables, bytes } = await heldMeanwhile(
+        (id) =>
+          `{"id":"${id}","affected":[{"package":{"name":"${MERGE.name}","ecosystem":"npm"},` +
+          `"ranges":[{"type":"SEMVER","events":[${events}]}]}]}`,
+      );
+      expect(tables.vulnerablePackages[0]?.advisories).toHaveLength(COUNT);
+      expect(tables.vulnerablePackages[0]?.advisories[0]?.fixed).toEqual(
+        Array.from({ length: 10 }, (_, i) => `1.${299_990 + i}.0`),
+      );
+      // Held as they came, the versions of fourteen answers take over 100 MiB (measured:
+      // 129); reduced, about 0.1 MiB.
+      expect(bytes).toBeLessThan(4 * MIB);
+    }, 60_000);
+  });
+
+  describe('the fixed versions of an advisory', () => {
+    it('are read for the packages that have the advisory, not for every package of the scan', async () => {
+      // Each record names fixed versions for BOTH packages; each package has one advisory of its own.
+      const both = (id: string): string =>
+        JSON.stringify({
+          id,
+          affected: [MERGE, SERVER].map(({ name }) => ({
+            package: { name, ecosystem: 'npm' },
+            ranges: [{ type: 'SEMVER', events: [{ introduced: '0' }, { fixed: '9.9.9' }] }],
+          })),
+        });
+      const fake = new FakeFetch()
+        .on(
+          'POST',
+          QUERYBATCH,
+          jsonResponse({ results: [{ vulns: [{ id: A1 }] }, { vulns: [{ id: A2 }] }] }),
+        )
+        .on(
+          'GET',
+          (url) => url.host === OSV_HOST,
+          (call) =>
+            new Response(both(call.url.pathname.slice('/v1/vulns/'.length)), { status: 200 }),
+        );
+      const client = clientOn(fake);
+      const asked: [string, string[]][] = [];
+      const advisory = client.advisory.bind(client);
+      client.advisory = (id, names) => {
+        asked.push([id, [...names].sort()]);
+        return advisory(id, names);
+      };
+      const tables = await collectOsv(client, [MERGE, SERVER], { concurrency: 1 });
+      // What is held of an answer grows with these names: all names for every id would be the
+      // number of advisories times the number of packages.
+      expect(asked).toEqual([
+        [A1, [MERGE.name]],
+        [A2, [SERVER.name]],
+      ]);
+      expect(tables.vulnerablePackages).toEqual([
+        { ...MERGE, advisories: [{ id: A1, fixed: ['9.9.9'] }] },
+        { ...SERVER, advisories: [{ id: A2, fixed: ['9.9.9'] }] },
+      ]);
+    });
+  });
+
   describe('when OSV.dev cannot be reached', () => {
     const down = (): never => {
       throw new TypeError('fetch failed', {
@@ -465,6 +595,137 @@ describe('collectOsv', () => {
       expect(asked.filter((id) => id === ids[10])).toHaveLength(3);
       expect(new Set(asked).size).toBeLessThanOrEqual(16);
       expect(asked.every((id) => ids.indexOf(id) < 16)).toBe(true);
+    });
+  });
+
+  describe('when the connection fails while an answer is read', () => {
+    /** The headers and the first bytes of an answer, and then `error`. */
+    function brokenAnswer(error: Error): Response {
+      return new Response(
+        new ReadableStream<Uint8Array>({
+          start(controller) {
+            controller.enqueue(new TextEncoder().encode('{"'));
+          },
+          pull(controller) {
+            controller.error(error);
+          },
+        }),
+      );
+    }
+    const reset = (): Error =>
+      new TypeError('terminated', {
+        cause: Object.assign(new Error('read ECONNRESET POISON_osv_address'), {
+          code: 'ECONNRESET',
+        }),
+      });
+    const timeout = (): Error =>
+      new DOMException('The operation was aborted due to timeout', 'TimeoutError');
+    const UNREACHABLE: [string, string] = ['unavailable', 'api.osv.dev could not be reached'];
+
+    it.each([
+      ['a connection that is reset', reset],
+      ['a timeout', timeout],
+    ])(
+      'records %s in the answer to the query as "could not be reached", after three tries',
+      async (_name, error) => {
+        const fake = new FakeFetch().on('POST', QUERYBATCH, () => brokenAnswer(error()));
+        expect(await skip(collect(fake, [MERGE]))).toEqual(UNREACHABLE);
+        expect(fake.calls).toHaveLength(3);
+      },
+    );
+
+    it.each([
+      ['a connection that is reset', reset],
+      ['a timeout', timeout],
+    ])('records %s in an advisory the same way, after three tries', async (_name, error) => {
+      const fake = scriptOsv(
+        new FakeFetch().on('GET', `${OSV_HOST}/v1/vulns/${A1}`, () => brokenAnswer(error())),
+        { vulnerable: { 'baip-fixture-merge@4.17.20': [A1] } },
+      );
+      expect(await skip(collect(fake, [MERGE]))).toEqual(UNREACHABLE);
+      expect(askedAdvisories(fake)).toEqual([A1, A1, A1]);
+    });
+
+    it('reads on when the second try arrives whole', async () => {
+      const fake = scriptOsv(
+        new FakeFetch()
+          .on('POST', QUERYBATCH, () => brokenAnswer(reset()), 1)
+          .on('GET', `${OSV_HOST}/v1/vulns/${A2}`, () => brokenAnswer(timeout()), 1),
+        SAMPLE,
+      );
+      expect(await collect(fake, [MERGE, ODATA])).toEqual(SAMPLE_TABLES);
+      expect(fake.calls.filter((call) => call.method === 'POST')).toHaveLength(2);
+      expect(askedAdvisories(fake).filter((id) => id === A2)).toHaveLength(2);
+    });
+  });
+
+  describe('a batch that has further pages when another one fails', () => {
+    /**
+     * Three batches: the first is answered, the third fails as `failing`
+     * says, and the second, whose first answer arrives a moment after the
+     * last try of the third, would have a further page.
+     */
+    async function afterFailure(
+      failing: () => Response,
+      tries: number,
+    ): Promise<{ outcome: [string, string]; posts: (string | undefined)[][] }> {
+      let failed = 0;
+      let release = (): void => {};
+      const lost = new Promise<void>((resolve) => {
+        release = resolve;
+      });
+      const fake = new FakeFetch().on('POST', QUERYBATCH, async (call) => {
+        const queries = sentQueries(call);
+        const first = queries[0]?.package.name;
+        if (first === 'baip-bulk-02000') {
+          failed += 1;
+          if (failed === tries) release();
+          return failing();
+        }
+        if (first === 'baip-bulk-01000') {
+          await lost;
+          // An answer takes a moment; the failure has reached the lookup by then.
+          await new Promise((resolve) => setTimeout(resolve, 20));
+        }
+        return jsonResponse({
+          results: queries.map(() =>
+            first === 'baip-bulk-01000' ? { vulns: [{ id: A1 }], next_page_token: 'page-1' } : {},
+          ),
+        });
+      });
+      const outcome = await skip(collect(fake, bulk(3_000)));
+      return {
+        outcome,
+        posts: fake.calls
+          .map(sentQueries)
+          .map(([first]) => [first?.package.name, first?.page_token]),
+      };
+    }
+
+    it('asks for no further page once OSV.dev could not be reached', async () => {
+      const { outcome, posts } = await afterFailure(() => {
+        throw new TypeError('fetch failed');
+      }, 3);
+      expect(outcome).toEqual(['unavailable', 'api.osv.dev could not be reached']);
+      // The first batch, the second once, the third three times: no `page_token` followed.
+      expect(posts.map(([, token]) => token)).toEqual(Array.from({ length: 5 }, () => undefined));
+      expect(posts.map(([first]) => first).sort()).toEqual([
+        'baip-bulk-00000',
+        'baip-bulk-01000',
+        'baip-bulk-02000',
+        'baip-bulk-02000',
+        'baip-bulk-02000',
+      ]);
+    });
+
+    it('asks for no further page once OSV.dev refused a batch', async () => {
+      const { outcome, posts } = await afterFailure(
+        () => jsonResponse({ code: 3, message: 'POISON_osv_message' }, 400),
+        1,
+      );
+      expect(outcome).toEqual(['error', 'api.osv.dev answered HTTP 400']);
+      expect(posts).toHaveLength(3);
+      expect(posts.every(([, token]) => token === undefined)).toBe(true);
     });
   });
 
@@ -561,6 +822,17 @@ describe('collectOsv', () => {
       // Known from the first answer: no advisory was asked for.
       expect(over.calls).toHaveLength(1);
     });
+
+    it('stores 20,000 advisories, the most a snapshot holds', async () => {
+      // 100 packages with 200 advisories each, none shared.
+      const fake = flood((index) =>
+        Array.from({ length: 200 }, (_, i) => `GHSA-fake-${index}-${String(i).padStart(3, '0')}`),
+      );
+      const fits = await collect(fake, bulk(100));
+      expect(fits.advisories).toHaveLength(20_000);
+      expect(fits.vulnerablePackages).toHaveLength(100);
+      expect(fits.vulnerablePackages.every((item) => item.advisories.length === 200)).toBe(true);
+    }, 60_000);
 
     it('stores nothing when the packages have more than 20,000 advisories between them', async () => {
       // 101 packages with 200 advisories each, none shared.

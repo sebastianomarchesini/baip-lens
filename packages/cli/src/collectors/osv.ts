@@ -29,7 +29,11 @@ import { cleanExternalText } from './sanitize.js';
  * `CheckSkipError` with one of a few fixed reasons, the check is recorded as
  * skipped and nothing of what was already answered is kept, so that "no
  * finding" never stands for "not looked up". After a failure no further
- * request is started.
+ * request is started, a further page of a batch that is being read included.
+ *
+ * An answer is reduced to what the snapshot stores of it as soon as it
+ * arrives: what is held while the other advisories are read is bounded by
+ * the numbers of ids and of packages, not by what OSV.dev chose to send.
  *
  * The result does not depend on the order of the packages handed in, nor on
  * the order in which answers arrive: packages and advisories are sorted.
@@ -92,24 +96,31 @@ export function distinctPackages(packages: readonly PackageRef[]): PackageRef[] 
   return distinct.sort((a, b) => compareText(a.name, b.name) || compareText(a.version, b.version));
 }
 
+/** True once the lookup has failed: work that is under way starts no further request. */
+type Stopped = () => boolean;
+
+const NEVER_STOPPED: Stopped = () => false;
+
 /**
  * Runs `work` on every item, at most `size` at a time. After the first
  * failure no further item is started; the ones in flight are waited for, and
- * the first failure is thrown.
+ * the first failure is thrown. Work that makes more than one request asks
+ * `stopped` before each further one.
  */
 async function inPool<T>(
   items: readonly T[],
   size: number,
-  work: (item: T) => Promise<void>,
+  work: (item: T, stopped: Stopped) => Promise<void>,
 ): Promise<void> {
   let next = 0;
   let failed = false;
   let failure: unknown;
+  const stopped: Stopped = () => failed;
   const worker = async (): Promise<void> => {
     while (!failed && next < items.length) {
       const item = items[next++] as T;
       try {
-        await work(item);
+        await work(item, stopped);
       } catch (error) {
         if (!failed) failure = error;
         failed = true;
@@ -161,19 +172,22 @@ class AdvisoryIds {
 /**
  * One batch of at most 1,000 packages, with the further pages of the
  * packages that have more advisories than one answer holds. `offset` is the
- * place of the batch's first package among all packages.
+ * place of the batch's first package among all packages. Once the lookup has
+ * failed elsewhere, no further page is asked for: its answer would be thrown
+ * away.
  */
 async function queryBatch(
   client: OsvClient,
   batch: readonly PackageRef[],
   offset: number,
   ids: AdvisoryIds,
+  stopped: Stopped,
 ): Promise<void> {
   let pending: { index: number; query: OsvQuery }[] = batch.map((query, at) => ({
     index: offset + at,
     query,
   }));
-  for (let page = 0; pending.length > 0; page += 1) {
+  for (let page = 0; pending.length > 0 && !stopped(); page += 1) {
     if (page >= MAX_QUERY_PAGES) throw new OsvError('unexpected');
     const results = await client.queryBatch(pending.map((item) => item.query));
     const next: typeof pending = [];
@@ -207,8 +221,10 @@ async function queryAll(
   if (first === undefined) return ids;
   // The first request decides whether OSV.dev can be asked at all: when it
   // cannot, one request failed, not one per batch.
-  await queryBatch(client, first.batch, first.offset, ids);
-  await inPool(rest, concurrency, ({ batch, offset }) => queryBatch(client, batch, offset, ids));
+  await queryBatch(client, first.batch, first.offset, ids, NEVER_STOPPED);
+  await inPool(rest, concurrency, ({ batch, offset }, stopped) =>
+    queryBatch(client, batch, offset, ids, stopped),
+  );
   return ids;
 }
 
@@ -246,26 +262,61 @@ function toRawAdvisory(advisory: OsvAdvisory): RawAdvisory {
   };
 }
 
+/**
+ * What is held of an advisory until the tables are built: what a snapshot
+ * stores of it, and nothing else of the answer.
+ */
+interface KeptAdvisory {
+  /** The row of the advisory; null for one that was withdrawn, of which nothing is stored. */
+  row: RawAdvisory | null;
+  /** Per package name that has the advisory: the fixed versions that are stored for it. */
+  fixed: ReadonlyMap<string, string[]>;
+}
+
+/**
+ * An answer of OSV.dev, reduced as it arrives: the summary cleaned and cut,
+ * and of the fixed versions as many per package as a snapshot keeps. `names`
+ * are the packages that have the advisory.
+ */
+function keptOf(advisory: OsvAdvisory, names: Iterable<string>): KeptAdvisory {
+  if (advisory.withdrawn) return { row: null, fixed: new Map() };
+  const fixed = new Map<string, string[]>();
+  for (const name of names) fixed.set(name, fixedFor(advisory, name));
+  return { row: toRawAdvisory(advisory), fixed };
+}
+
+/** Per advisory id, the names of the packages that have it: an answer is read for those only. */
+function namesById(packages: readonly PackageRef[], ids: AdvisoryIds): Map<string, Set<string>> {
+  const names = new Map<string, Set<string>>();
+  for (const [index, { name }] of packages.entries()) {
+    for (const id of ids.byPackage[index] ?? []) {
+      const own = names.get(id) ?? new Set<string>();
+      names.set(id, own.add(name));
+    }
+  }
+  return names;
+}
+
 /** The rows of the tables, from the ids per package and the advisories that are not withdrawn. */
 function toTables(
   packages: readonly PackageRef[],
   ids: AdvisoryIds,
-  advisories: ReadonlyMap<string, OsvAdvisory>,
+  advisories: ReadonlyMap<string, KeptAdvisory>,
 ): OsvTables {
-  const kept = [...advisories.values()]
-    .filter((advisory) => !advisory.withdrawn)
-    .sort((a, b) => compareText(a.id, b.id));
+  const rows: RawAdvisory[] = [];
+  for (const { row } of advisories.values()) if (row !== null) rows.push(row);
   const vulnerablePackages: RawVulnerablePackage[] = [];
   for (const [index, { name, version }] of packages.entries()) {
     const own: RawPackageAdvisory[] = [];
     for (const id of [...(ids.byPackage[index] ?? [])].sort(compareText)) {
       const advisory = advisories.get(id);
       if (advisory === undefined) throw new OsvError('unexpected');
-      if (!advisory.withdrawn) own.push({ id, fixed: fixedFor(advisory, name) });
+      // A list of its own for every row: two versions of a package share the advisory, not the list.
+      if (advisory.row !== null) own.push({ id, fixed: [...(advisory.fixed.get(name) ?? [])] });
     }
     if (own.length > 0) vulnerablePackages.push({ name, version, advisories: own });
   }
-  return { advisories: kept.map(toRawAdvisory), vulnerablePackages };
+  return { advisories: rows.sort((a, b) => compareText(a.id, b.id)), vulnerablePackages };
 }
 
 /**
@@ -304,10 +355,12 @@ async function collect(
     throw new CheckSkipError('error', TOO_MANY_PACKAGES);
   }
   const ids = await queryAll(client, packages, concurrency);
-  const names = new Set(packages.map((item) => item.name));
-  const advisories = new Map<string, OsvAdvisory>();
+  const names = namesById(packages, ids);
+  const advisories = new Map<string, KeptAdvisory>();
   await inPool([...ids.distinct].sort(compareText), concurrency, async (id) => {
-    advisories.set(id, await client.advisory(id, names));
+    const asked = names.get(id) ?? new Set<string>();
+    // Reduced before the next one is read: no answer is held as it came.
+    advisories.set(id, keptOf(await client.advisory(id, asked), asked));
   });
   const tables = toTables(packages, ids, advisories);
   assertStorable(tables);

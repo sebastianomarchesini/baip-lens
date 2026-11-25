@@ -163,6 +163,74 @@ describe('HttpClient', () => {
     expect(fake.calls).toHaveLength(1);
   });
 
+  describe('a connection that fails while the answer is read', () => {
+    /** An answer whose headers and first bytes arrive, and then the connection is gone. */
+    function brokenAnswer(error: Error = new TypeError('terminated')): Response {
+      return new Response(
+        new ReadableStream<Uint8Array>({
+          start(controller) {
+            controller.enqueue(new TextEncoder().encode('{"resources":['));
+          },
+          pull(controller) {
+            controller.error(error);
+          },
+        }),
+      );
+    }
+
+    it('reads again, like after a connection that failed before the answer', async () => {
+      const fake = new FakeFetch()
+        .on('GET', 'api.cf.example.org/v3/apps', () => brokenAnswer(), 2)
+        .on('GET', 'api.cf.example.org/v3/apps', () => jsonResponse({ resources: [] }));
+      const sleep = vi.fn(noSleep);
+      const res = await client(fake, { maxRetries: 2, sleep }).request({
+        url: new URL('/v3/apps', api),
+      });
+      expect(res.text).toBe('{"resources":[]}');
+      expect(fake.calls).toHaveLength(3);
+      // Backoff between the tries, as after a failed connection: 500 ms, then 1 s, at 75%.
+      expect(sleep.mock.calls).toEqual([[375], [750]]);
+    });
+
+    it('reports a network error once the repeats are used up, without the query string', async () => {
+      const fake = new FakeFetch().on('GET', /api\.cf\.example\.org/, () => brokenAnswer());
+      const request = client(fake, { maxRetries: 2 }).request({
+        url: new URL('/v3/apps?names=secret-app', api),
+      });
+      await expect(request).rejects.toBeInstanceOf(HttpNetworkError);
+      await expect(request).rejects.toThrow(/terminated/);
+      await expect(request).rejects.not.toThrow(/secret-app/);
+      expect(fake.calls).toHaveLength(3);
+    });
+
+    it('treats a timeout that fires while the answer is read the same way', async () => {
+      const timeout = new DOMException('The operation was aborted due to timeout', 'TimeoutError');
+      const fake = new FakeFetch().on('GET', /api\.cf\.example\.org/, () => brokenAnswer(timeout));
+      const request = client(fake, { maxRetries: 1 }).request({ url: new URL('/v3/apps', api) });
+      await expect(request).rejects.toBeInstanceOf(HttpNetworkError);
+      expect(fake.calls).toHaveLength(2);
+    });
+
+    it('does not read again when retry is false', async () => {
+      const fake = new FakeFetch().on('GET', /api\.cf\.example\.org/, () => brokenAnswer());
+      const request = client(fake).request({ url: new URL('/v3/apps', api), retry: false });
+      await expect(request).rejects.toBeInstanceOf(HttpNetworkError);
+      expect(fake.calls).toHaveLength(1);
+    });
+
+    it('does not read an answer again that was too large', async () => {
+      const fake = new FakeFetch().on(
+        'GET',
+        'api.cf.example.org/v3/apps',
+        () => new Response('x'.repeat(2048)),
+      );
+      await expect(
+        client(fake, { maxRetries: 2 }).request({ url: new URL('/v3/apps', api), maxBytes: 1024 }),
+      ).rejects.toBeInstanceOf(HttpBodyTooLargeError);
+      expect(fake.calls).toHaveLength(1);
+    });
+  });
+
   it('cuts off bodies above the size limit', async () => {
     const fake = new FakeFetch().on(
       'GET',

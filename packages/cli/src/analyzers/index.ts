@@ -238,7 +238,8 @@ export function analyze(
       });
       continue;
     }
-    findings.push(...analyzer.analyze(context));
+    // Not spread into `push`: a rule may report more findings than a call takes arguments.
+    for (const finding of analyzer.analyze(context)) findings.push(finding);
     ruleChecks.push({ id: check.id, title: check.title, roles: [...check.roles], status: 'ran' });
   }
 

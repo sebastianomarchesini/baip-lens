@@ -10,13 +10,26 @@ import { afterEach, expect, vi } from 'vitest';
 
 let reached: string[] = [];
 
-vi.stubGlobal('fetch', (input: unknown) => {
-  reached.push(String(input instanceof Request ? input.url : input));
-  return Promise.reject(new Error('the real network must not be used in a test'));
-});
-
-afterEach(() => {
+/**
+ * The addresses the global fetch was asked for since the last look, which
+ * are then forgotten. It hangs on the replaced `fetch` itself, as
+ * `fetch.takeReached`, for the one test that reaches it on purpose
+ * (test/unit/noRealNetwork.test.ts): that test shows that this file is
+ * loaded, so it must find the guard without importing it.
+ */
+function takeReached(): string[] {
   const requests = reached;
   reached = [];
-  expect(requests, 'a test reached the global fetch: hand it a scripted one').toEqual([]);
+  return requests;
+}
+
+function refuse(input: unknown): Promise<never> {
+  reached.push(String(input instanceof Request ? input.url : input));
+  return Promise.reject(new Error('the real network must not be used in a test'));
+}
+
+vi.stubGlobal('fetch', Object.assign(refuse, { takeReached }));
+
+afterEach(() => {
+  expect(takeReached(), 'a test reached the global fetch: hand it a scripted one').toEqual([]);
 });

@@ -47,6 +47,15 @@ const INVISIBLE =
 const HALF_CHARACTER = /[\ud800-\udbff](?![\udc00-\udfff])|(?<![\ud800-\udbff])[\udc00-\udfff]/g;
 /** Any userinfo of a URL, up to the last `@` before the host ends. */
 const URL_USERINFO = /([a-z][a-z0-9+.-]*:\/\/)[^\s/]*@/gi;
+/** The query and the fragment of a URL: where a token travels when it is not in the userinfo. */
+const URL_QUERY = /([a-z][a-z0-9+.-]*:\/\/[^\s?#]*)[?#]\S*/gi;
+/**
+ * `name=value` where the name is, or ends in, a word for a credential, however
+ * the word is joined to what stands before it (`api_key=`, `NPM_TOKEN=`,
+ * `authToken=`, `sessiontoken=`, `secret=`).
+ */
+const NAMED_SECRET =
+  /([a-z0-9_-]*(?:token|secret|api[_-]?key|passwd))(\s*=\s*["']?)[^\s"'&,;)}]+/gi;
 /** An address, with any further `@domain` glued to it. */
 const EMAIL = /[\w.+-]+(?:@(?:[a-z0-9-]+\.)+[a-z]{2,})+/gi;
 /** Two base64url segments after the JSON header `{"`: a token, also when its signature was cut off. */
@@ -70,9 +79,19 @@ function head(text: string, length: number): string {
 /**
  * One line of external text, safe to store and to show: without control
  * characters, escape sequences, direction marks and invisible characters;
- * whitespace collapsed; anything shaped like a token, a credential in a URL
- * or an e-mail address replaced; cut to `max` characters. The schema of the
- * field it is stored in bounds it again.
+ * whitespace collapsed; cut to `max` characters. What can carry a credential
+ * or name a person is taken out by its shape: the userinfo, the query and
+ * the fragment of a URL that begins with a scheme (`https://…`) are removed;
+ * a JWT, the value after `bearer` or `basic`, the value of a field whose
+ * name is or ends in a word for a credential (`password: …`,
+ * `client_secret: …`, `api_key=…`, `authToken=…`) and an e-mail address are
+ * replaced. A key that stands in the text with nothing that names it is not
+ * recognised, and neither is the query of an address written without a
+ * scheme. The schema of the field the text is stored in bounds it again.
+ *
+ * The line that is returned is a string of its own. A part of a string
+ * keeps the whole string in memory, and what is stored of megabytes of text
+ * must not hold on to them.
  */
 export function cleanExternalText(text: string, max = 200): string {
   const visible = stripControlCharacters(text.replace(LINE_BREAKS, ' '))
@@ -83,8 +102,12 @@ export function cleanExternalText(text: string, max = 200): string {
   const safe = redactSecrets(head(visible, max * LOOKED_AT_FACTOR))
     .replace(TOKEN, '[redacted-token]')
     .replace(AUTHORIZATION, '$1 [redacted]')
+    .replace(NAMED_SECRET, '$1$2[redacted]')
     .replace(URL_USERINFO, '$1')
+    .replace(URL_QUERY, '$1')
     .replace(EMAIL, '[e-mail]');
   // A cut can go through a character; what is left of it goes as well.
-  return (truncate(safe, max) ?? '').replace(HALF_CHARACTER, '');
+  const line = (truncate(safe, max) ?? '').replace(HALF_CHARACTER, '');
+  // Copied: no half character is left, so the bytes give the same text back.
+  return Buffer.from(line, 'utf8').toString('utf8');
 }

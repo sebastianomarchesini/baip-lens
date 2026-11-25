@@ -222,8 +222,10 @@ function lowestFixAbove(installed: SemVer | null, fixed: Iterable<string>): Fix 
 }
 
 /**
- * The version that clears every advisory: the highest of their fixes, or
- * null when one of them has none.
+ * The highest of the fixes of the advisories, or null when one of them has
+ * none. It is a version to try, not a promise: each advisory was asked for
+ * its lowest fix above the installed version, and the highest of those can
+ * still lie inside a later range of another advisory.
  */
 function fixForAll(fixes: readonly (Fix | null)[]): string | null {
   let highest: Fix | null = null;
@@ -281,14 +283,6 @@ interface Verdict {
   references: string[];
 }
 
-function highestScore(advisories: readonly PackageAdvisory[]): number | null {
-  let highest: number | null = null;
-  for (const { score } of advisories) {
-    if (score !== null && score > (highest ?? 0)) highest = score;
-  }
-  return highest;
-}
-
 /** Undefined for a package the tables list without an advisory: there is nothing to report. */
 function verdictOf(advisories: readonly PackageAdvisory[]): Verdict | undefined {
   const [worst] = advisories;
@@ -306,7 +300,9 @@ function verdictOf(advisories: readonly PackageAdvisory[]): Verdict | undefined 
       advisoryCount: advisories.length,
       aliases: aliases.slice(0, MAX_IDS),
       fixedIn,
-      score: highestScore(advisories),
+      // The score that gave the severity, or none: a score of another advisory
+      // next to a severity it did not decide would read as a mistake.
+      score: worst.from === 'cvss' ? worst.score : null,
       severityFrom: worst.from,
       summary: worst.summary,
     },

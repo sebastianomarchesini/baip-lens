@@ -43,6 +43,21 @@ async function failure(request: Promise<unknown>): Promise<unknown[]> {
 }
 
 const UNEXPECTED = ['unexpected', undefined, 'api.osv.dev sent an unexpected answer'];
+const UNREACHABLE = ['unreachable', undefined, 'api.osv.dev could not be reached'];
+
+/** The headers and the first bytes of an answer, and then the connection fails with `error`. */
+function brokenAnswer(error: Error): Response {
+  return new Response(
+    new ReadableStream<Uint8Array>({
+      start(controller) {
+        controller.enqueue(new TextEncoder().encode('{"results":[{'));
+      },
+      pull(controller) {
+        controller.error(error);
+      },
+    }),
+  );
+}
 const QUERY = [{ name: 'baip-fixture-merge', version: '4.17.20' }];
 
 describe('OsvClient.queryBatch', () => {
@@ -89,9 +104,17 @@ describe('OsvClient.queryBatch', () => {
     ]);
   });
 
-  it('reads an answer without `results` as no advisory for any query', async () => {
-    const fake = new FakeFetch().on('POST', QUERYBATCH, jsonResponse({}));
-    expect(await client(fake).queryBatch([...QUERY, ...QUERY])).toEqual([{ ids: [] }, { ids: [] }]);
+  // OSV.dev answers every query it was sent. A 200 without `results` comes from something in
+  // between (a gateway, a portal), and "no advisory" must not be read into it.
+  it.each([
+    ['an empty object', {}],
+    ['the words of a gateway', { status: 'blocked', message: 'POISON_osv_gateway' }],
+    ['an error in the shape of the API', { code: 13, message: 'internal' }],
+    ['results that are null', { results: null }],
+  ])('refuses %s without `results` as a whole: it is not "no advisory"', async (_name, body) => {
+    const fake = new FakeFetch().on('POST', QUERYBATCH, jsonResponse(body));
+    expect(await failure(client(fake).queryBatch([...QUERY, ...QUERY]))).toEqual(UNEXPECTED);
+    expect(fake.calls).toHaveLength(1);
   });
 
   it('sends a page token with the query it belongs to, and hands back the next one', async () => {
@@ -173,6 +196,18 @@ describe('OsvClient.queryBatch', () => {
     expect(fake.calls).toHaveLength(1);
   });
 
+  it.each([
+    [204, (): Response => new Response(null, { status: 204 })],
+    [206, (body: unknown): Response => jsonResponse(body, 206)],
+    [201, (body: unknown): Response => jsonResponse(body, 201)],
+  ])('reads no answer but a 200: a %i is reported by its status', async (status, respond) => {
+    const reported = ['status', status, `api.osv.dev answered HTTP ${status}`];
+    const fake = new FakeFetch().on('POST', QUERYBATCH, () => respond({ results: [{}] }));
+    expect(await failure(client(fake).queryBatch(QUERY))).toEqual(reported);
+    const record = new FakeFetch().on('GET', VULN(ID), () => respond(osvRecord(ID)));
+    expect(await failure(client(record).advisory(ID, new Set()))).toEqual(reported);
+  });
+
   it('asks again twice after a server error, then reports it', async () => {
     const fake = new FakeFetch().on('POST', QUERYBATCH, new Response('busy', { status: 503 }));
     expect(await failure(client(fake).queryBatch(QUERY))).toEqual([
@@ -222,6 +257,53 @@ describe('OsvClient.queryBatch', () => {
   });
 
   it.each([
+    ['is reset', () => new TypeError('terminated', { cause: new Error('POISON_osv_cause') })],
+    [
+      'runs out of time',
+      () => new DOMException('The operation was aborted due to timeout', 'TimeoutError'),
+    ],
+  ])('says the same when the connection %s while the answer is read', async (_name, error) => {
+    const fake = new FakeFetch().on('POST', QUERYBATCH, () => brokenAnswer(error()));
+    expect(await failure(client(fake).queryBatch(QUERY))).toEqual(UNREACHABLE);
+    expect(fake.calls).toHaveLength(3);
+    const record = new FakeFetch().on('GET', VULN(ID), () => brokenAnswer(error()));
+    expect(await failure(client(record).advisory(ID, new Set()))).toEqual(UNREACHABLE);
+    expect(record.calls).toHaveLength(3);
+  });
+
+  it('reads the answer of the second try when the first broke off', async () => {
+    const fake = new FakeFetch()
+      .on('POST', QUERYBATCH, () => brokenAnswer(new TypeError('terminated')), 1)
+      .on('POST', QUERYBATCH, jsonResponse({ results: [{ vulns: [{ id: ID }] }] }));
+    expect(await client(fake).queryBatch(QUERY)).toEqual([{ ids: [ID] }]);
+    expect(fake.calls).toHaveLength(2);
+  });
+
+  it('gives a batch 40 seconds, and an advisory the time of the lookup', async () => {
+    const seen: HttpRequest[] = [];
+    const recording = new OsvClient({
+      request: (request) => {
+        seen.push(request);
+        const text = request.method === 'POST' ? '{"results":[{}]}' : `{"id":"${ID}"}`;
+        return Promise.resolve({ url: request.url, status: 200, headers: new Headers(), text });
+      },
+    });
+    await recording.queryBatch(QUERY);
+    await recording.advisory(ID, new Set());
+    // OSV.dev allows itself 35 seconds for a batch; an advisory has no time of its own.
+    expect(seen.map((request) => [request.method ?? 'GET', request.timeoutMs])).toEqual([
+      ['POST', 40_000],
+      ['GET', undefined],
+    ]);
+    // Nothing turns the repeats off either.
+    expect(seen.map((request) => [request.retry, request.retryOn])).toEqual([
+      [undefined, undefined],
+      [undefined, undefined],
+    ]);
+    expect(seen.map((request) => request.maxBytes)).toEqual([32 * MIB, 8 * MIB]);
+  });
+
+  it.each([
     ['text that is not JSON', new Response('<html>POISON_osv_page</html>', { status: 200 })],
     ['an empty body', new Response('', { status: 200 })],
     ['a list', jsonResponse([{}])],
@@ -243,14 +325,6 @@ describe('OsvClient.queryBatch', () => {
       jsonResponse({ results: [{ next_page_token: 't'.repeat(4_097) }] }),
     ],
     [
-      'an answer nested deeper than any real one',
-      new Response(`{"results":[${'['.repeat(40)}${']'.repeat(40)}]}`, { status: 200 }),
-    ],
-    [
-      'more values than any real answer holds',
-      new Response(`{"results":[{"vulns":[${'{},'.repeat(1_000_000)}{}]}]}`, { status: 200 }),
-    ],
-    [
       'an answer that says it is larger than 32 MiB',
       jsonResponse({ results: [{}] }, 200, { 'content-length': String(32 * MIB + 1) }),
     ],
@@ -258,6 +332,42 @@ describe('OsvClient.queryBatch', () => {
     const fake = new FakeFetch().on('POST', QUERYBATCH, response);
     expect(await failure(client(fake).queryBatch(QUERY))).toEqual(UNEXPECTED);
     expect(fake.calls).toHaveLength(1);
+  });
+
+  /*
+   * What an answer may cost to parse (docs/data-sources.md §12.3). The part
+   * that goes past a limit sits under a key the client does not read, so
+   * nothing but the look at the shape of the text can refuse it; next to
+   * each, the largest answer that is still read.
+   */
+  describe('the shape of an answer, before it is parsed', () => {
+    const nested = (levels: number): string => `${'['.repeat(levels)}${']'.repeat(levels)}`;
+    const values = (count: number): string => `[${'0,'.repeat(count - 1)}0]`;
+    const keys = (count: number): string =>
+      `{${Array.from({ length: count }, (_, i) => `"k${i}":0`).join(',')}}`;
+    const answer = (extra: string): Response =>
+      new Response(`{"results":[{}],"x":${extra}}`, { status: 200 });
+
+    it.each([
+      // The answer itself is one level.
+      ['16 levels of nesting', nested(15)],
+      // The answer, `results`, its one result, the key `x` and its list are six values.
+      ['1,000,000 values', values(999_994)],
+      ['an object of 100 keys', keys(100)],
+    ])('reads an answer with %s', async (_name, extra) => {
+      const fake = new FakeFetch().on('POST', QUERYBATCH, () => answer(extra));
+      expect(await client(fake).queryBatch(QUERY)).toEqual([{ ids: [] }]);
+    });
+
+    it.each([
+      ['17 levels of nesting', nested(16)],
+      ['1,000,001 values', values(999_995)],
+      ['an object of 101 keys', keys(101)],
+    ])('refuses an answer with %s as a whole', async (_name, extra) => {
+      const fake = new FakeFetch().on('POST', QUERYBATCH, () => answer(extra));
+      expect(await failure(client(fake).queryBatch(QUERY))).toEqual(UNEXPECTED);
+      expect(fake.calls).toHaveLength(1);
+    });
   });
 
   it('stops reading an answer that grows past 32 MiB without saying so', async () => {
@@ -361,6 +471,17 @@ describe('OsvClient.advisory', () => {
     expect((await client(fake).advisory(ID, NAMES)).withdrawn).toBe(true);
     const nulled = new FakeFetch().on('GET', VULN(ID), jsonResponse({ id: ID, withdrawn: null }));
     expect((await client(nulled).advisory(ID, NAMES)).withdrawn).toBe(false);
+  });
+
+  // "Present" decides, not what the field holds: a record that carries it is not counted.
+  it.each([
+    ['an empty text', ''],
+    ['false', false],
+    ['zero', 0],
+    ['an object', {}],
+  ])('says so as well when `withdrawn` is %s', async (_name, withdrawn) => {
+    const fake = new FakeFetch().on('GET', VULN(ID), jsonResponse({ id: ID, withdrawn }));
+    expect((await client(fake).advisory(ID, NAMES)).withdrawn).toBe(true);
   });
 
   it('keeps the fixed versions of the packages that were asked about, and of npm, only', async () => {

@@ -184,7 +184,19 @@ export class HttpClient implements ReadOnlyHttp {
         await this.sleep(this.retryDelay(res.headers, attempt));
         continue;
       }
-      const text = await readBody(res, req.url, req.maxBytes ?? DEFAULT_MAX_BYTES);
+      let text: string;
+      try {
+        text = await readBody(res, req.url, req.maxBytes ?? DEFAULT_MAX_BYTES);
+      } catch (error) {
+        if (error instanceof HttpBodyTooLargeError) throw error;
+        // A connection that breaks, or runs out of time, while the answer is
+        // read failed like one that broke before the answer began.
+        if (attempt < maxRetries) {
+          await this.sleep(this.backoff(attempt));
+          continue;
+        }
+        throw new HttpNetworkError(req.url, error);
+      }
       return { url: req.url, status: res.status, headers: res.headers, text };
     }
   }

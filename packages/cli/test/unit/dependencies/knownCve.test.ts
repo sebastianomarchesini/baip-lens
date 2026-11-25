@@ -292,7 +292,8 @@ describe('DEP_KNOWN_CVE', () => {
       });
       const rated = mergeFinding({ [MALICIOUS]: [{ cvssV3: VECTOR[1.6], label: 'LOW' }, []] });
       expect(rated.severity).toBe('critical');
-      expect(rated.evidence).toMatchObject({ score: 1.6, severityFrom: 'malicious' });
+      // The score of its vector is not what makes it critical, so it is not shown next to it.
+      expect(rated.evidence).toMatchObject({ score: null, severityFrom: 'malicious' });
       // The id alone says it, also when the table of advisories does not hold the record.
       const unknown = mergeFinding({ [MALICIOUS]: [null, []] });
       expect(unknown.severity).toBe('critical');
@@ -323,17 +324,54 @@ describe('DEP_KNOWN_CVE', () => {
       });
     });
 
-    it('names the highest score among the advisories, also when another source decides the severity', () => {
+    it('names the score that gave the severity, and none when another source decided it', () => {
       const finding = mergeFinding({
         [A1]: [{ cvssV3: VECTOR[5.3], summary: 'Scored' }, []],
         [A2]: [{ label: 'CRITICAL', summary: 'Labelled' }, []],
       });
       expect(finding.severity).toBe('critical');
       expect(finding.evidence).toMatchObject({
-        score: 5.3,
+        score: null,
         severityFrom: 'label',
         summary: 'Labelled',
       });
+      // "critical, 7.5" would read as a mistake: the label of one advisory decides, and the
+      // score belongs to another, which rates the package lower.
+      const mixed = mergeFinding({
+        [A1]: [{ label: 'CRITICAL', summary: 'Critical in words, without a vector' }, ['4.17.21']],
+        [A2]: [{ cvssV3: VECTOR[7.5], label: 'HIGH', summary: 'High by its vector' }, ['4.17.21']],
+      });
+      expect(mixed.severity).toBe('critical');
+      expect(mixed.evidence).toMatchObject({
+        advisories: [A1, A2],
+        score: null,
+        severityFrom: 'label',
+        summary: 'Critical in words, without a vector',
+      });
+      // No advisory says anything: the default decides, and there is no score to show.
+      const unrated = mergeFinding({ [A1]: [{}, []], [A2]: [{ cvssV3: VECTOR['0.0'] }, []] });
+      expect(unrated.evidence).toMatchObject({ score: null, severityFrom: 'default' });
+    });
+
+    it('names the score of the advisory that decides when two share a severity', () => {
+      // Both are high: the one with a score comes first, and its score is the one shown.
+      const finding = mergeFinding({
+        [A1]: [{ label: 'HIGH', summary: 'High in words' }, []],
+        [A2]: [{ cvssV3: VECTOR['7.0'], summary: 'High by its vector' }, []],
+      });
+      expect(finding.severity).toBe('high');
+      expect(finding.evidence).toMatchObject({
+        score: 7,
+        severityFrom: 'cvss',
+        summary: 'High by its vector',
+      });
+      // Two scores in one band: the higher one decides, and the lower is not shown.
+      const both = mergeFinding({
+        [A1]: [{ cvssV3: VECTOR['7.0'] }, []],
+        [A2]: [{ cvssV3: VECTOR[8.9] }, []],
+        [A3]: [{ cvssV3: VECTOR[5.3] }, []],
+      });
+      expect(both.evidence).toMatchObject({ score: 8.9, severityFrom: 'cvss' });
     });
 
     it('puts a report of malicious code before a critical score: it changes what has to be done', () => {
@@ -343,7 +381,7 @@ describe('DEP_KNOWN_CVE', () => {
       });
       expect(finding.severity).toBe('critical');
       expect(finding.evidence).toMatchObject({
-        score: 9.8,
+        score: null,
         severityFrom: 'malicious',
         summary: 'Malicious code',
       });
@@ -361,7 +399,11 @@ describe('DEP_KNOWN_CVE', () => {
         [A2]: [{ label: 'MODERATE', summary: 'Labelled' }, []],
         [A3]: [{ cvssV3: VECTOR[5.3], summary: 'Scored' }, []],
       });
-      expect(bySource.evidence).toMatchObject({ severityFrom: 'cvss', summary: 'Scored' });
+      expect(bySource.evidence).toMatchObject({
+        score: 5.3,
+        severityFrom: 'cvss',
+        summary: 'Scored',
+      });
       const byLabel = mergeFinding({
         [A1]: [{ summary: 'No severity stated' }, []],
         [A2]: [{ label: 'MODERATE', summary: 'Labelled' }, []],
@@ -430,7 +472,7 @@ describe('DEP_KNOWN_CVE', () => {
       expect(fixedIn(['4.18.0'], '4.17.20-')).toBeNull();
     });
 
-    it('is the highest of the fixes of all advisories: the version that clears every one', () => {
+    it('is the highest of the fixes of the advisories: below it, one of them is not fixed', () => {
       const finding = mergeFinding({
         [A1]: [{ label: 'HIGH' }, ['4.17.21']],
         [A2]: [{ label: 'LOW' }, ['4.17.5', '4.18.2', '5.1.0']],
@@ -438,6 +480,19 @@ describe('DEP_KNOWN_CVE', () => {
       });
       expect(finding.evidence.fixedIn).toBe('4.18.2');
       expect(finding.remediation).toMatch(/^Upgrade the package to the version in `fixedIn`/);
+    });
+
+    it('is a version to try, not a promise: it is not checked against the other ranges of an advisory', () => {
+      // A1 is fixed in 1.2.5 for the 1.x line and affects 2.x again until 2.3.1; A2 is fixed in
+      // 2.0.1. The highest of the two lowest fixes lies inside the second range of A1: the
+      // advice names it all the same, and says to scan again after the upgrade.
+      const finding = mergeFinding(
+        { [A1]: [{ label: 'HIGH' }, ['1.2.5', '2.3.1']], [A2]: [{ label: 'LOW' }, ['2.0.1']] },
+        '1.0.0',
+      );
+      expect(finding.evidence.fixedIn).toBe('2.0.1');
+      expect(finding.remediation).toContain('scan again');
+      expect(finding.remediation).toContain('says the upgrade did not go far enough');
     });
 
     it('is null as soon as one advisory names no fix, and the advice changes with it', () => {
@@ -710,6 +765,23 @@ describe('DEP_KNOWN_CVE', () => {
       expect(findings[1]!.references).toHaveLength(13);
       expect(elapsed).toBeLessThan(3_000);
     });
+
+    it('reports 150,000 findings of one scan: as many as a snapshot of 1,000 projects can ask for', () => {
+      // More findings of one rule than a function call takes arguments.
+      const names = Array.from({ length: 150 }, (_, i) => `baip-bulk-${i}`);
+      const packages = names.map((name) => lockedPackage(name, '1.0.0'));
+      const data = raw(
+        Array.from({ length: 1_000 }, (_, i) => project(packages, `app-${i}`)),
+        {
+          advisories: [advisory(A1, { label: 'LOW' })],
+          vulnerable: names.map((name) => vulnerablePackage(name, '1.0.0', { [A1]: [] })),
+        },
+      );
+      const findings = result(data).findings;
+      expect(findings).toHaveLength(150_000);
+      expect(findings.every((finding) => finding.id === RULE_ID)).toBe(true);
+      expect(new Set(findings.map((finding) => finding.app.guid)).size).toBe(1_000);
+    }, 60_000);
   });
 
   describe('location', () => {
@@ -978,6 +1050,16 @@ describe('DEP_KNOWN_CVE', () => {
       const one = [project(packages, 'one'), project(packages, 'two')];
       expect(run(one, { advisories, vulnerable: split })).toEqual(expected);
       expect(run(one, { advisories, vulnerable: [...split].reverse() })).toEqual(expected);
+      // One id in both rows, with a fixed version each: both count, whichever row comes first.
+      const rows = [
+        vulnerablePackage(MERGE, '4.17.21', { [A1]: ['4.17.21'] }),
+        vulnerablePackage(MERGE, '4.17.21', { [A1]: ['4.18.0'] }),
+      ];
+      const installed = project([lockedPackage(MERGE, '4.17.21')]);
+      for (const order of [rows, [...rows].reverse()]) {
+        const [finding] = run(installed, { vulnerable: order });
+        expect(finding?.evidence).toMatchObject({ advisoryCount: 1, fixedIn: '4.18.0' });
+      }
     });
 
     it('reads an advisory the tables list twice once: the worse reading, whichever comes first', () => {

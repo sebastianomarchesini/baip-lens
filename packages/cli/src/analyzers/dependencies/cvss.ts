@@ -62,16 +62,14 @@ const OTHER_METRICS: Readonly<Record<string, readonly string[]>> = {
   MA: ['X', 'H', 'L', 'N'],
 };
 
-/** No real vector is longer: every metric of the three groups, once. */
-const MAX_VECTOR_LENGTH = 200;
-
 /**
  * The metrics of a vector by name, or undefined when it is not a CVSS v3
  * vector: another version, a metric that does not exist, a value a metric
  * cannot take, a metric named twice, or a base metric that is missing.
+ * Because a metric may be named once, no text longer than the longest vector
+ * (117 characters) gets through, whatever its length.
  */
 function metricsOf(vector: string): ReadonlyMap<string, string> | undefined {
-  if (vector.length > MAX_VECTOR_LENGTH) return undefined;
   const [prefix, ...parts] = vector.split('/');
   if (prefix === undefined || !PREFIX.test(prefix)) return undefined;
   const metrics = new Map<string, string>();

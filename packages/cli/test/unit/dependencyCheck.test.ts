@@ -1,15 +1,18 @@
-import { describe, expect, it } from 'vitest';
+import { describe, expect, it, vi } from 'vitest';
 import { CheckRecorder, COLLECTOR_CHECKS } from '../../src/checks.js';
 import { createDependencyLookup, packagesToLookUp } from '../../src/dependencyCheck.js';
 import type { RawProject } from '../../src/model/raw.js';
 import { SnapshotSchema } from '../../src/model/snapshot.js';
 import { type ProjectCollection, projectSnapshot } from '../../src/project.js';
 import {
+  OSV_HOST,
   type OsvScript,
   QUERYBATCH,
   askedAdvisories,
   askedPackages,
   osvFetch,
+  osvRecord,
+  sentQueries,
 } from '../support/dependencyScript.js';
 import { FakeFetch, jsonResponse } from '../support/fakeFetch.js';
 import {
@@ -184,6 +187,68 @@ describe('the dependency lookup', () => {
     expect(run.log[1]).toBe(
       'api.osv.dev: 0 of 2 package(s) have a known vulnerability (0 advisories)',
     );
+  });
+
+  it('counts the packages that have an advisory and the advisories, each on its own', async () => {
+    const A2 = 'GHSA-fake-0002-baip';
+    const A3 = 'GHSA-fake-0003-baip';
+    const line = async (vulnerable: Record<string, string[]>): Promise<string | undefined> => {
+      const fake = osvFetch({ vulnerable, advisories: { [A1]: {}, [A2]: {}, [A3]: {} } });
+      const run = scan();
+      await lookupOn(fake, run).run([SRV, UI], run.recorder);
+      return run.log.at(-1);
+    };
+    // One package with three advisories.
+    expect(await line({ 'baip-fixture-merge@4.17.20': [A1, A2, A3] })).toBe(
+      'api.osv.dev: 1 of 3 package(s) have a known vulnerability (3 advisories)',
+    );
+    // Two packages that share one.
+    expect(
+      await line({ 'baip-fixture-merge@4.17.20': [A1], '@baip-fixture/odata@3.1.0': [A1] }),
+    ).toBe('api.osv.dev: 2 of 3 package(s) have a known vulnerability (1 advisories)');
+  });
+
+  it('gives a batch 40 seconds and an advisory 20', async () => {
+    const timeouts = vi.spyOn(AbortSignal, 'timeout');
+    try {
+      const run = scan();
+      await lookupOn(osvFetch(SCRIPT), run).run([SRV, UI], run.recorder);
+      expect(osvCheck(run)?.status).toBe('ran');
+      // One time limit per request: the batch (OSV.dev allows itself 35 seconds), then the advisory.
+      expect(timeouts.mock.calls).toEqual([[40_000], [20_000]]);
+    } finally {
+      timeouts.mockRestore();
+    }
+  });
+
+  it('has eight requests in flight at a time, and never more', async () => {
+    const ids = Array.from({ length: 60 }, (_, i) => `GHSA-fake-${String(i).padStart(4, '0')}`);
+    let inFlight = 0;
+    let most = 0;
+    const answered = async (response: Response): Promise<Response> => {
+      inFlight += 1;
+      most = Math.max(most, inFlight);
+      await new Promise((resolve) => setTimeout(resolve, 2));
+      inFlight -= 1;
+      return response;
+    };
+    const fake = new FakeFetch()
+      .on('POST', QUERYBATCH, (call) =>
+        answered(
+          jsonResponse({
+            results: sentQueries(call).map(() => ({ vulns: ids.map((id) => ({ id })) })),
+          }),
+        ),
+      )
+      .on(
+        'GET',
+        (url) => url.host === OSV_HOST,
+        (call) => answered(jsonResponse(osvRecord(call.url.pathname.slice('/v1/vulns/'.length)))),
+      );
+    const run = scan();
+    const tables = await lookupOn(fake, run).run([SRV], run.recorder);
+    expect(tables.advisories).toHaveLength(60);
+    expect(most).toBe(8);
   });
 
   it('is recorded as turned off with --no-dependency-check, and makes no request', async () => {

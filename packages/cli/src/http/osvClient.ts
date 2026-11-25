@@ -284,11 +284,14 @@ export class OsvClient {
     });
     const batch = BatchSchema.safeParse(parseJson(text, QUERYBATCH_SHAPE));
     if (!batch.success) throw unexpected();
-    // OSV.dev leaves `results` out when it has nothing to say.
-    if (batch.data.results === undefined) return queries.map(() => ({ ids: [] }));
+    // OSV.dev answers every query that was sent, an empty object for a package
+    // without advisories. An answer without `results` is not one of its
+    // answers to this request (a gateway or a portal can answer 200 as well),
+    // and "nothing found" must not be read into it.
+    const { results } = batch.data;
     // Results are matched to the queries by position: one more or one less and none can be trusted.
-    if (batch.data.results.length !== queries.length) throw unexpected();
-    return batch.data.results.map(toResult);
+    if (results === undefined || results.length !== queries.length) throw unexpected();
+    return results.map(toResult);
   }
 
   /**
