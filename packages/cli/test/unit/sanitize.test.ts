@@ -124,9 +124,30 @@ describe('cleanExternalText', () => {
     expect(
       cleanExternalText('appSecret = POISON_s3 and X-API-Key=POISON_k1, myapikey=POISON_k2'),
     ).toBe('appSecret = [redacted] and X-API-Key=[redacted], myapikey=[redacted]');
+    expect(
+      cleanExternalText(
+        'dbPassword=POISON_pw1 MYSQL_ROOT_PASSWORD=POISON_pw2 mfa_passcode=POISON_3',
+      ),
+    ).toBe('dbPassword=[redacted] MYSQL_ROOT_PASSWORD=[redacted] mfa_passcode=[redacted]');
     // Only the value goes; a name that merely holds the word elsewhere is no credential.
     expect(cleanExternalText('tokenizer=fast secretary=jane broken=1')).toBe(
       'tokenizer=fast secretary=jane broken=1',
+    );
+    // A comparison and an arrow function assign nothing: the sentence stays as it was written.
+    for (const sentence of [
+      'Auth bypass when resetToken == null in password reset',
+      'Timing attack: compares csrfToken === expected with ==',
+      'Arrow function (token=>verify(token)) skips the expiry check',
+      'fails when maxToken >= 5 or apiKey != null',
+    ]) {
+      expect(cleanExternalText(sentence)).toBe(sentence);
+    }
+    // After a colon only the few exact names are taken: elsewhere a colon is punctuation.
+    expect(cleanExternalText('password: POISON_a client_secret: POISON_b passcode: POISON_c')).toBe(
+      'password: [redacted] client_secret: [redacted] passcode: [redacted]',
+    );
+    expect(cleanExternalText('authToken: abc12345 and api_key: def67890')).toBe(
+      'authToken: abc12345 and api_key: def67890',
     );
     // A sentence about a token is not a field.
     expect(cleanExternalText('Leaks the session token: an attacker can read secret data')).toBe(
@@ -223,6 +244,8 @@ describe('cleanExternalText', () => {
     ['2,000 characters of one word that never names a credential', 'toke'.repeat(500)],
     ['2,000 characters of names of credentials without a value', 'token'.repeat(400)],
     ['2,000 characters of names of credentials with an empty value', 'token='.repeat(333)],
+    ['2,000 characters of the longest name of a credential', 'passcode'.repeat(250)],
+    ['2,000 characters of comparisons with such a name', 'token=='.repeat(285)],
     ['2,000 characters of one address with a query', `a://${'a?'.repeat(998)}`],
     ['a megabyte of half characters', '\ud83d'.repeat(1024 * 1024)],
   ])('stays fast on %s', (_name, text) => {

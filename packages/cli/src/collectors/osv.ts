@@ -275,13 +275,16 @@ interface KeptAdvisory {
 
 /**
  * An answer of OSV.dev, reduced as it arrives: the summary cleaned and cut,
- * and of the fixed versions as many per package as a snapshot keeps. `names`
- * are the packages that have the advisory.
+ * and of the fixed versions as many per package as a snapshot keeps. The
+ * packages are the ones the answer holds, which the client has cut to the
+ * names it was asked for: the packages that have the advisory, never every
+ * package of the scan, or what is kept would grow with advisories times
+ * packages.
  */
-function keptOf(advisory: OsvAdvisory, names: Iterable<string>): KeptAdvisory {
+function keptOf(advisory: OsvAdvisory): KeptAdvisory {
   if (advisory.withdrawn) return { row: null, fixed: new Map() };
   const fixed = new Map<string, string[]>();
-  for (const name of names) fixed.set(name, fixedFor(advisory, name));
+  for (const name of advisory.fixed.keys()) fixed.set(name, fixedFor(advisory, name));
   return { row: toRawAdvisory(advisory), fixed };
 }
 
@@ -360,7 +363,7 @@ async function collect(
   await inPool([...ids.distinct].sort(compareText), concurrency, async (id) => {
     const asked = names.get(id) ?? new Set<string>();
     // Reduced before the next one is read: no answer is held as it came.
-    advisories.set(id, keptOf(await client.advisory(id, asked), asked));
+    advisories.set(id, keptOf(await client.advisory(id, asked)));
   });
   const tables = toTables(packages, ids, advisories);
   assertStorable(tables);

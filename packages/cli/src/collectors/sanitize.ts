@@ -52,10 +52,14 @@ const URL_QUERY = /([a-z][a-z0-9+.-]*:\/\/[^\s?#]*)[?#]\S*/gi;
 /**
  * `name=value` where the name is, or ends in, a word for a credential, however
  * the word is joined to what stands before it (`api_key=`, `NPM_TOKEN=`,
- * `authToken=`, `sessiontoken=`, `secret=`).
+ * `authToken=`, `sessiontoken=`, `DB_PASSWORD=`, `secret=`). A comparison
+ * (`token == null`) and an arrow function (`token => …`) assign nothing and
+ * are left as they are. After a colon only the few names `redactSecrets`
+ * knows are taken (`password: …`, `client_secret: …`): in a sentence a colon
+ * after such a word is punctuation ("leaks the session token: an attacker …").
  */
 const NAMED_SECRET =
-  /([a-z0-9_-]*(?:token|secret|api[_-]?key|passwd))(\s*=\s*["']?)[^\s"'&,;)}]+/gi;
+  /([a-z0-9_-]*(?:token|secret|api[_-]?key|passwd|password|passcode))(\s*=(?![=>])\s*["']?)[^\s"'&,;)}]+/gi;
 /** An address, with any further `@domain` glued to it. */
 const EMAIL = /[\w.+-]+(?:@(?:[a-z0-9-]+\.)+[a-z]{2,})+/gi;
 /** Two base64url segments after the JSON header `{"`: a token, also when its signature was cut off. */
@@ -82,12 +86,14 @@ function head(text: string, length: number): string {
  * whitespace collapsed; cut to `max` characters. What can carry a credential
  * or name a person is taken out by its shape: the userinfo, the query and
  * the fragment of a URL that begins with a scheme (`https://…`) are removed;
- * a JWT, the value after `bearer` or `basic`, the value of a field whose
- * name is or ends in a word for a credential (`password: …`,
- * `client_secret: …`, `api_key=…`, `authToken=…`) and an e-mail address are
- * replaced. A key that stands in the text with nothing that names it is not
- * recognised, and neither is the query of an address written without a
- * scheme. The schema of the field the text is stored in bounds it again.
+ * a JWT, the value after `bearer` or `basic`, the value after `name=` for a
+ * name that is or ends in token, secret, api_key, apikey, passwd, password or
+ * passcode (`api_key=…`, `authToken=…`, `DB_PASSWORD=…`), the value after
+ * `password:`, `passcode:`, `client_secret:`, `access_token:` or
+ * `refresh_token:`, and an e-mail address are replaced. Not recognised: a key
+ * that stands in the text with nothing that names it, a value after a colon
+ * for any other name, and the query of an address written without a scheme.
+ * The schema of the field the text is stored in bounds it again.
  *
  * The line that is returned is a string of its own. A part of a string
  * keeps the whole string in memory, and what is stored of megabytes of text
