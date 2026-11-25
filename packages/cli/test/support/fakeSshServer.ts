@@ -111,6 +111,11 @@ export interface FakeSshApps {
    */
   dropOnRead?: string[];
   /**
+   * Users whose connection is cut at the first LSTAT request for a path under
+   * `node_modules`: a session lost at the look for the hidden lockfile.
+   */
+  dropOnLstat?: string[];
+  /**
    * Every SFTP answer is held back this long, each on its own: a stand-in for
    * the round trip of a real network, where requests in flight wait together.
    */
@@ -189,6 +194,8 @@ interface ServeOptions {
   cut?: () => void;
   /** Called at a READ beyond the start of a file instead of answering it, when the session is to be lost there. */
   cutRead?: () => void;
+  /** Called at an LSTAT of a path under `node_modules` instead of answering it, when the session is to be lost there. */
+  cutLstat?: () => void;
   delayMs?: number;
 }
 
@@ -196,7 +203,7 @@ function serveSftp(
   channel: SFTPWrapper,
   appDir: string,
   record: (r: Omit<SftpRequest, 'username'>) => void,
-  { cut, cutRead, delayMs = 0 }: ServeOptions = {},
+  { cut, cutRead, cutLstat, delayMs = 0 }: ServeOptions = {},
 ): void {
   const sftp = answersOf(channel, delayMs);
   const files = new Map<string, { file: FileHandle; path: string }>();
@@ -308,6 +315,7 @@ function serveSftp(
 
   channel.on('LSTAT', (reqid, path) => {
     record({ type: 'LSTAT', path });
+    if (cutLstat !== undefined && path.includes('/node_modules/')) return cutLstat();
     const target = local(path);
     if (target === null) return sftp.status(reqid, STATUS.NO_SUCH_FILE);
     attrsOf(target).then(
@@ -378,6 +386,7 @@ export async function startFakeSsh(options: FakeSshOptions): Promise<FakeSshServ
           serveSftp(acceptSftp(), appDir, (r) => state.requests.push({ ...r, username }), {
             cut: apps.dropOnOpen?.includes(username) ? () => client.end() : undefined,
             cutRead: apps.dropOnRead?.includes(username) ? () => client.end() : undefined,
+            cutLstat: apps.dropOnLstat?.includes(username) ? () => client.end() : undefined,
             delayMs: apps.delayMs,
           });
         });

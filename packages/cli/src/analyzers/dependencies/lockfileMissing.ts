@@ -71,13 +71,6 @@ const REMEDIATIONS: Record<LockfileMissingCause, string> = {
     'that lockfile, use the audit command of the package manager (`yarn npm audit`, `pnpm audit`).',
 };
 
-/** A deployed app has no repository to commit to: the lockfile has to be pushed with it. */
-const REMEDIATION_DEPLOYED_NONE =
-  'Push the lockfile with the app: create it with `npm install --package-lock-only` next to ' +
-  'the `package.json` that is deployed, and check that neither `.cfignore` nor the build step ' +
-  'that assembles the app folder leaves it out. The buildpack then installs exactly the locked ' +
-  'versions, and they can be checked for known vulnerabilities and deprecation.';
-
 const REFERENCES = [
   'https://docs.npmjs.com/cli/v11/configuring-npm/package-lock-json',
   'https://docs.npmjs.com/cli/v11/commands/npm-ci',
@@ -144,6 +137,53 @@ function missingLockfile(lockfiles: readonly RawLockfile[]): Missing | undefined
     : { cause: 'unsupported', lockfile: foreign };
 }
 
+/*
+ * A deployed app is not a folder of a repository: nothing in a container is
+ * committed, the lockfile of the installed tree is written by the install
+ * and not by `npm install --package-lock-only`, and the app is read with
+ * `--cf`, not with `--path`. Where the advice for a folder could not be
+ * followed, the deployed app has a text of its own; where it can (a pushed
+ * lockfile that is not valid or too large, a yarn or pnpm lockfile), it gets
+ * the one above.
+ */
+const DEPLOYED_REMEDIATIONS: Partial<Record<LockfileMissingCause, string>> = {
+  none:
+    'Push the lockfile with the app: create it with `npm install --package-lock-only` next to ' +
+    'the `package.json` that is deployed, and check that neither `.cfignore` nor the build step ' +
+    'that assembles the app folder leaves it out. The buildpack then installs exactly the ' +
+    'locked versions, and they can be checked for known vulnerabilities and deprecation.',
+  'too-many-packages':
+    'The lockfiles of this scan pin more than 20,000 packages from the public npm registry, and ' +
+    'a lockfile is read as a whole or not at all. The apps of a project run share that limit, ' +
+    'so the apps that were read before this one may have used it up. Read this app alone with ' +
+    '`baip-lens project --cf --app <name>`: a run of one app has the whole limit.',
+};
+
+/** The lockfile npm wrote into `node_modules` of the container (`lockfileKind: hidden`). */
+const HIDDEN_REMEDIATIONS: Partial<Record<LockfileMissingCause, string>> = {
+  unreadable:
+    'The lockfile npm wrote for the installed packages of the app ' +
+    '(`node_modules/.package-lock.json`) exists but could not be used: it is not valid JSON, it ' +
+    'names no lockfile version npm knows, or it changed while it was read. The install itself ' +
+    'writes that file, not `npm install --package-lock-only`. Restage the app, so that the ' +
+    'buildpack installs again and npm writes it anew (when `node_modules` is pushed with the ' +
+    'app: install again before the push), then scan again. A valid `package-lock.json` in the ' +
+    'app folder also helps: it is read in place of a hidden lockfile that cannot be used.',
+  'too-large':
+    'The lockfile npm wrote for the installed packages of the app ' +
+    '(`node_modules/.package-lock.json`) is larger than BAIP Lens reads (32 MiB, or more keys ' +
+    'and values than a lockfile of about 200,000 packages holds). Check that it really is the ' +
+    'file npm wrote for this app. A `package-lock.json` in the app folder is read in its place ' +
+    'when it stays within those limits.',
+};
+
+/** The advice for the cause, for a folder or for a deployed app (see above). */
+function remediationFor(project: RawProject, { cause, lockfile }: Missing): string {
+  if (project.deployment === undefined) return REMEDIATIONS[cause];
+  const hidden = lockfile?.kind === 'hidden' ? HIDDEN_REMEDIATIONS[cause] : undefined;
+  return hidden ?? DEPLOYED_REMEDIATIONS[cause] ?? REMEDIATIONS[cause];
+}
+
 function findingFor(context: AnalyzerContext, project: RawProject): Finding | undefined {
   // null: a snapshot written before lockfiles were read says nothing about them.
   if (project.dependencies === null) return undefined;
@@ -166,10 +206,7 @@ function findingFor(context: AnalyzerContext, project: RawProject): Finding | un
     },
     // The hidden lockfile lies inside `node_modules`: a finding never points there.
     ...(lockfile?.kind === 'hidden' ? {} : { location: { file } }),
-    remediation:
-      cause === 'none' && project.deployment !== undefined
-        ? REMEDIATION_DEPLOYED_NONE
-        : REMEDIATIONS[cause],
+    remediation: remediationFor(project, missing),
     references: [...REFERENCES],
   });
 }

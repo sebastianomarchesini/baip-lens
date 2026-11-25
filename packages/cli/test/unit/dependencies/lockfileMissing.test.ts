@@ -168,9 +168,10 @@ describe('DEP_LOCKFILE_MISSING', () => {
       easeOfAttack: 'complex',
     });
     expect('location' in finding!).toBe(false);
-    // A lockfile was pushed: the advice is about that file, not about pushing one.
+    // A lockfile is there: the advice is about that file, not the one for an app without any.
     expect(finding!.remediation).toMatch(/32 MiB/);
     expect(finding!.remediation).not.toContain('Push the lockfile with the app');
+    expect(finding!.remediation).toContain('`node_modules/.package-lock.json`');
     expect(FindingSchema.safeParse(finding).success).toBe(true);
   });
 
@@ -397,7 +398,7 @@ describe('DEP_LOCKFILE_MISSING', () => {
     expect(remediations.size).toBe(causes.length);
   });
 
-  it('gives a deployed app the same remediation as a folder, except when it has no lockfile at all', () => {
+  it('gives a deployed app the remediation of a folder only where that advice can be followed there', () => {
     const cases: RawLockfile[][] = [
       [],
       [lockfile('package-lock.json', { status: 'unreadable' })],
@@ -415,7 +416,87 @@ describe('DEP_LOCKFILE_MISSING', () => {
       }
       return deployed.remediation !== folder.remediation;
     });
-    expect(changed).toEqual([true, false, false, false, false, false]);
+    // Its own text: no lockfile at all, a lockfile that did not fit, and the hidden lockfile.
+    expect(changed).toEqual([true, false, false, true, true, false]);
+  });
+
+  describe('on a deployed app', () => {
+    const HIDDEN = 'node_modules/.package-lock.json';
+    const hidden = (status: RawLockfile['status']): RawLockfile =>
+      lockfile(HIDDEN, { kind: 'hidden', status });
+    const advice = (lockfiles: RawLockfile[], overrides: Partial<RawProject> = {}): string =>
+      runRule(lockfileMissing, project(lockfiles, { deployment: DEPLOYED, ...overrides }))[0]!
+        .remediation;
+
+    it('says of a hidden lockfile that is not valid how the file is written anew: by an install, not by a commit', () => {
+      const text = advice([hidden('unreadable')]);
+      expect(text).toContain('`node_modules/.package-lock.json`');
+      expect(text).toContain('Restage the app');
+      // The lockfile that is pushed with the app is read in its place.
+      expect(text).toContain('A valid `package-lock.json` in the app folder also helps');
+      // Nothing in a container is committed, and `--package-lock-only` does not write this file.
+      expect(text).not.toMatch(/commit|Delete it|recreate it with/);
+      expect(text).toContain('not `npm install --package-lock-only`');
+      expect(text).not.toContain('--path');
+    });
+
+    it('says of a hidden lockfile that is too large which file is read in its place', () => {
+      const text = advice([hidden('too-large')]);
+      expect(text).toMatch(/32 MiB/);
+      expect(text).toContain('`node_modules/.package-lock.json`');
+      expect(text).toContain('A `package-lock.json` in the app folder is read in its place');
+      expect(text).not.toMatch(/commit|--path/);
+    });
+
+    it.each([
+      ['pushed', [lockfile('package-lock.json', { status: 'too-many-packages' })]],
+      [
+        'shrinkwrap',
+        [lockfile('npm-shrinkwrap.json', { kind: 'shrinkwrap', status: 'too-many-packages' })],
+      ],
+      ['hidden', [hidden('too-many-packages')]],
+    ] as [string, RawLockfile[]][])(
+      'names `--app`, not `--path`, when the %s lockfile did not fit into what the apps before it left',
+      (_which, lockfiles) => {
+        const text = advice(lockfiles);
+        expect(text).toMatch(/20,000 packages/);
+        expect(text).toContain('`baip-lens project --cf --app <name>`');
+        expect(text).toContain('The apps of a project run share that limit');
+        expect(text).not.toMatch(/commit|--path/);
+      },
+    );
+
+    it('keeps the texts of a folder for a pushed lockfile that is not valid or too large, and for yarn', () => {
+      const folder = (lockfiles: RawLockfile[]): string =>
+        runRule(lockfileMissing, project(lockfiles))[0]!.remediation;
+      for (const lockfiles of [
+        [lockfile('package-lock.json', { status: 'unreadable' })],
+        [lockfile('npm-shrinkwrap.json', { kind: 'shrinkwrap', status: 'too-large' })],
+        [lockfile('yarn.lock', { kind: 'yarn', status: 'unsupported' })],
+      ]) {
+        expect(advice(lockfiles)).toBe(folder(lockfiles));
+      }
+    });
+
+    it('gives the hidden lockfile of a record without a deployment, which no scan writes, the text of a folder', () => {
+      const crafted = runRule(lockfileMissing, project([hidden('unreadable')]))[0]!;
+      expect(crafted.remediation).toMatch(/unresolved merge conflict/);
+      expect('location' in crafted).toBe(false);
+    });
+
+    it('has one text per case, each of them a different one', () => {
+      const texts = [
+        advice([]),
+        advice([hidden('unreadable')]),
+        advice([hidden('too-large')]),
+        advice([hidden('too-many-packages')]),
+        advice([lockfile('package-lock.json', { status: 'unreadable' })]),
+        advice([lockfile('package-lock.json', { status: 'too-large' })]),
+        advice([lockfile('yarn.lock', { kind: 'yarn', status: 'unsupported' })]),
+      ];
+      expect(new Set(texts).size).toBe(texts.length);
+      for (const text of texts) expect(text).toMatch(/\.$/);
+    });
   });
 
   it('says in the remediation for no lockfile that a workspace member has its lockfile in the workspace root', () => {

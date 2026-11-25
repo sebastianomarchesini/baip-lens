@@ -52,7 +52,11 @@ const REMEDIATION =
   '`--dependency-exclude`. `invalid`: a name or version that is not a plain npm one; look at ' +
   'the lockfile entry itself. `lockfilesNotRead`: lockfiles that were found but not read (more ' +
   'than 50 lockfiles or 64 MiB of them in one project, a lockfile that is not valid or too ' +
-  'large, or more packages than one scan keeps); scan their folders on their own with `--path`.';
+  'large, or more packages than one scan keeps); scan their folders on their own with ' +
+  '`--path`. A deployed app is not read with `--path`: read it alone with ' +
+  '`baip-lens project --cf --app <name>`, where it does not share the packages one scan keeps ' +
+  'with the other apps of a project run, and restage it when the lockfile npm wrote for its ' +
+  'installed packages is the one that is not valid.';
 
 const REFERENCES = [
   'https://docs.npmjs.com/cli/v11/configuring-npm/package-lock-json',

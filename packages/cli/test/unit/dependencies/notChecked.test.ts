@@ -325,6 +325,34 @@ describe('DEP_NOT_CHECKED', () => {
     ]);
   });
 
+  it('says what to do about lockfiles that were not read, for a folder and for a deployed app', () => {
+    const lockfiles = [
+      lockfile('node_modules/.package-lock.json', { kind: 'hidden', status: 'too-many-packages' }),
+      lockfile('package-lock.json', { kept: 2, notKept: { otherRegistry: 1 } }),
+    ];
+    const folder = runRule(notChecked, project(lockfiles))[0]!;
+    const deployed = runRule(
+      notChecked,
+      rawProject({
+        deployment: { app: 'acme-srv', mta: null },
+        dependencies: dependencies(lockfiles),
+      }),
+    )[0]!;
+    expect(deployed.evidence).toEqual(folder.evidence);
+    // One fixed text: the rule does not read the deployment, so a snapshot re-analyses the same.
+    expect(deployed.remediation).toBe(folder.remediation);
+    const text = deployed.remediation;
+    expect(text).toContain('scan their folders on their own with `--path`.');
+    // A deployed app is not read with `--path`: the text names what can be done there.
+    expect(text).toContain('A deployed app is not read with `--path`');
+    expect(text).toContain('read it alone with `baip-lens project --cf --app <name>`');
+    expect(text).toMatch(
+      /restage it when the lockfile npm wrote for its installed packages is the one that is not valid\.$/,
+    );
+    // No path under `node_modules` in a finding that has no location: the words say which file.
+    expect(text).not.toContain('node_modules');
+  });
+
   it('emits nothing and records dependency_skipped when the lockfiles were not collected', () => {
     const value = project([lockfile('package-lock.json', { notKept: { git: 1 } })]);
     const result = analyze(

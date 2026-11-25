@@ -470,6 +470,8 @@ interface Space {
   dropOnOpen?: string[];
   /** SSH users whose session is cut while the ranges of a large file are in flight. */
   dropOnRead?: string[];
+  /** SSH users whose session is cut at the look for the hidden lockfile. */
+  dropOnLstat?: string[];
   /** The name of the space (default: `dev`). */
   name?: string;
 }
@@ -498,6 +500,7 @@ async function startServer(options: RunOptions): Promise<FakeSshServer> {
       codes: space.accept ?? CODES,
       dropOnOpen: space.dropOnOpen,
       dropOnRead: space.dropOnRead,
+      dropOnLstat: space.dropOnLstat,
     });
   }
   return startFakeSsh({
@@ -2113,6 +2116,75 @@ describe('baip-lens project --cf and the npm lockfiles of a deployed app', () =>
       expect(JSON.stringify(await written(r.outDir))).not.toContain('baip-bulk-lost');
       await new Promise((resolve) => setImmediate(resolve));
       expect(unhandled).toEqual([]);
+    });
+  });
+
+  describe('when the session is lost at the look for the hidden lockfile', () => {
+    /** An app that declares dependencies and has no lockfile: the look is its last request. */
+    const unlockedApp = (): Promise<string> => appFolder({ 'package.json': LOCKED_MANIFEST });
+
+    /** The look was sent and never answered, and nothing was asked for after it. */
+    function expectLostAtTheLook(r: Run, user: string): void {
+      const requests = r.server.requests.filter((q) => q.username === user);
+      expect(requests.at(-1)).toMatchObject({ type: 'LSTAT', path: HIDDEN });
+      expect(requests.filter((q) => q.type === 'LSTAT' && q.path === HIDDEN)).toHaveLength(1);
+    }
+
+    it('ends a run of one app with exit code 2: no answer is not an app without a lockfile', async () => {
+      const space: Space = {
+        apps: [app(1, 'unlocked-srv', ready(1))],
+        folders: { [sshUser(1)]: await unlockedApp() },
+        dropOnLstat: [sshUser(1)],
+      };
+      const r = await run({ space, args: ['--app', 'unlocked-srv'], answers: null });
+      expect(r.code).toBe(EXIT.error);
+      expect(r.err).toContain(
+        'The connection to the app closed before the scan finished, so nothing was written. Run the command again.',
+      );
+      expectLostAtTheLook(r, sshUser(1));
+      expect(r.out).toBe('');
+      expect(await readdir(r.outDir)).toEqual([]);
+
+      // The same app with its session intact is read, and is reported as one without a lockfile.
+      const read = await run({
+        space: { ...space, dropOnLstat: [] },
+        args: ['--app', 'unlocked-srv'],
+        answers: null,
+      });
+      expect(read.code, read.err).toBe(EXIT.ok);
+      expect((await dependencyFindings(read.outDir)).map((f) => f.id)).toEqual([
+        'DEP_LOCKFILE_MISSING',
+      ]);
+    });
+
+    it('keeps nothing of that app in a project run: a skipped check, not a finding about its lockfile', async () => {
+      const space: Space = {
+        apps: [
+          app(1, 'acme-lost', { ...ready(1), metadata: deployed('acme', 'acme-lost') }),
+          app(2, 'acme-srv', { ...ready(2), metadata: deployed('acme', 'acme-srv') }),
+        ],
+        folders: { [sshUser(1)]: await unlockedApp(), [sshUser(2)]: await containerFixture() },
+        dropOnLstat: [sshUser(1)],
+      };
+      const r = await run({ space, args: ['--mta', 'acme'], answers: null });
+      expect(r.code, r.err).toBe(EXIT.ok);
+      expectLostAtTheLook(r, sshUser(1));
+      const report = await reportOf(r.outDir);
+      expect(skippedChecks(report)).toEqual([
+        {
+          id: 'collect.project.acme-lost',
+          title: 'Files of deployed app acme-lost',
+          roles: ['SpaceDeveloper'],
+          status: 'skipped',
+          reasonCode: 'error',
+          reason: 'the connection closed before the app was read',
+        },
+      ]);
+      const projects = await lockedProjects(r.outDir);
+      expect(projects.map((p) => p.id)).toEqual(['acme-srv']);
+      expect((await dependencyFindings(r.outDir)).map((f) => f.id)).not.toContain(
+        'DEP_LOCKFILE_MISSING',
+      );
     });
   });
 });

@@ -9,6 +9,7 @@ import {
   APP_ROOT,
   MAX_READ_BYTES,
   READS_IN_FLIGHT,
+  READ_AHEAD,
   SftpProjectTree,
 } from '../../../src/remote/sftpTree.js';
 import { type HeldRead, MemorySftp, appFiles, settle } from '../../support/memorySftp.js';
@@ -179,6 +180,19 @@ describe('the requests in flight for one file', () => {
     expect(sftp.maxInFlight).toBe(READS_IN_FLIGHT);
   });
 
+  it('decodes a character that lies across the head or across two ranges', async () => {
+    // A character of three bytes cut by the end of the head, one of four cut by the end of a range.
+    const text = `${'x'.repeat(NUL_SCAN_BYTES - 1)}€${'x'.repeat(MAX_READ_BYTES - 4)}\u{1F600}${'x'.repeat(100)}`;
+    const bytes = Buffer.byteLength(text);
+    expect(Buffer.from(text).subarray(0, NUL_SCAN_BYTES).toString()).toContain('�');
+    for (const maxAnswer of [Infinity, 3]) {
+      const { sftp, tree } = treeOver(text);
+      sftp.maxAnswer = maxAnswer;
+      // The ranges are decoded together, once all of them are in place.
+      expect(await tree.read(LOCATION, LARGE)).toEqual({ ok: true, text, bytes });
+    }
+  });
+
   it('keeps the files of a scan within their own limit: four requests each', async () => {
     const big = content(sizeOf(6));
     const sftp = new MemorySftp(
@@ -194,6 +208,48 @@ describe('the requests in flight for one file', () => {
     await answerAll(sftp);
     expect((await both).map((result) => result.ok)).toEqual([true, true]);
     expect(sftp.maxInFlight).toBe(2 * READS_IN_FLIGHT);
+  });
+});
+
+describe('the files read at the same time', () => {
+  it('are at most eight, fetched ahead or asked for, so at most 32 requests are in flight', async () => {
+    expect(READ_AHEAD).toBe(8);
+    // Twenty models that are fetched ahead, each with its head and six ranges, and one lockfile.
+    const text = content(sizeOf(6));
+    const models = Array.from(
+      { length: 20 },
+      (_, i) => `${APP_ROOT}/srv/m${String(i).padStart(2, '0')}.cds`,
+    );
+    const sftp = new MemorySftp({
+      [LOCATION]: text,
+      ...Object.fromEntries(models.map((model) => [model, text])),
+    });
+    sftp.maxAnswer = Infinity;
+    sftp.hold = true;
+    const tree = new SftpProjectTree(sftp, { rootName: 'acme' });
+    const opened = (): string[] => sftp.requests.filter((r) => r.startsWith('open '));
+
+    await tree.list(`${APP_ROOT}/srv`, 100);
+    await settle();
+    // Eight files are open and asked for their heads; the other twelve wait for a place.
+    expect(opened()).toEqual(models.slice(0, READ_AHEAD).map((model) => `open ${model}`));
+    expect(sftp.held.map((request) => [request.path, request.position])).toEqual(
+      models.slice(0, READ_AHEAD).map((model) => [model, 0]),
+    );
+
+    // A file the collector asks for itself waits for a place like the ones fetched ahead.
+    const lockfile = tree.read(LOCATION, LARGE);
+    await settle();
+    expect(opened()).toHaveLength(READ_AHEAD);
+
+    await answerAll(sftp);
+    expect(await lockfile).toEqual({ ok: true, text, bytes: text.length });
+    const fetched = await Promise.all(models.map((model) => tree.read(model)));
+    expect(fetched.every((result) => result.ok)).toBe(true);
+    expect(opened()).toHaveLength(models.length + 1);
+    // Eight files with four requests each, and never one more.
+    expect(sftp.maxInFlight).toBe(READ_AHEAD * READS_IN_FLIGHT);
+    expect(sftp.inFlight).toBe(0);
   });
 });
 
@@ -394,6 +450,18 @@ describe('a file that is probed by its path', () => {
     expect(sftp.reads).toHaveLength(1);
   });
 
+  it('is refused when only its size changed since the probe: the time counts whole seconds', async () => {
+    const files = appFiles({ 'package-lock.json': '{"lockfileVersion":3}' });
+    const sftp = new MemorySftp(files);
+    const tree = new SftpProjectTree(sftp, { rootName: 'acme' });
+    expect(await tree.isFile(LOCATION)).toBe(true);
+    // Replaced within the same second by a file of another size: the same modification time.
+    files[LOCATION] = '{"lockfileVersion":3,"packages":{}}';
+    expect(await tree.read(LOCATION)).toEqual({ ok: false, reason: 'unreadable' });
+    expect(sftp.reads).toEqual([]);
+    expect(sftp.requests.at(-1)).toBe(`close ${LOCATION}`);
+  });
+
   it('is not held to a probe that found no regular file there', async () => {
     const sftp = new MemorySftp(
       appFiles({ 'package.json': '{}', 'node_modules/.package-lock.json': { other: true } }),
@@ -404,6 +472,27 @@ describe('a file that is probed by its path', () => {
     expect(await tree.isFile(`${APP_ROOT}/node_modules`)).toBe(false);
     expect(await tree.isFile(`${APP_ROOT}/missing.json`)).toBe(false);
     expect(sftp.requests.filter((r) => r.startsWith('open '))).toEqual([]);
+  });
+});
+
+describe('a file that the listing showed', () => {
+  it('is refused when only its size changed since the listing', async () => {
+    const files = appFiles({ 'package-lock.json': '{"lockfileVersion":3}' });
+    const sftp = new MemorySftp(files);
+    const tree = new SftpProjectTree(sftp, { rootName: 'acme' });
+    // A lockfile is listed and not fetched ahead: it is opened when the collector asks for it.
+    expect(await tree.list(APP_ROOT, 100)).toEqual([
+      { name: 'package-lock.json', type: 'file', size: 21 },
+    ]);
+    await settle();
+    expect(sftp.requests).toEqual([`list ${APP_ROOT}`]);
+    files[LOCATION] = '{"lockfileVersion":3,"packages":{}}';
+    expect(await tree.read(LOCATION)).toEqual({ ok: false, reason: 'unreadable' });
+    expect(sftp.reads).toEqual([]);
+
+    // The same file, unchanged since it was listed, is read.
+    files[LOCATION] = '{"lockfileVersion":3}';
+    expect(await tree.read(LOCATION)).toMatchObject({ ok: true, bytes: 21 });
   });
 });
 
