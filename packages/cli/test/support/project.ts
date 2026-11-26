@@ -15,6 +15,7 @@ import type {
   RawAdvisory,
   RawData,
   RawDependency,
+  RawDeprecation,
   RawHtmlBootstrap,
   RawLockedPackage,
   RawLockfile,
@@ -84,6 +85,24 @@ export const OSV_COLLECTOR_SKIPPED: CheckResult = {
   status: 'skipped',
   reasonCode: 'unavailable',
   reason: 'api.osv.dev could not be reached',
+};
+
+/**
+ * The lookup on the npm registry a project scan records next to the one on
+ * OSV.dev; a rule that reads the deprecated versions requires it.
+ */
+export const NPM_DEPRECATIONS_COLLECTOR: CheckResult = {
+  id: 'collect.npm-deprecations',
+  title: 'Deprecated npm packages',
+  roles: [],
+  status: 'ran',
+};
+
+export const NPM_DEPRECATIONS_COLLECTOR_SKIPPED: CheckResult = {
+  ...NPM_DEPRECATIONS_COLLECTOR,
+  status: 'skipped',
+  reasonCode: 'unavailable',
+  reason: 'registry.npmjs.org could not be reached',
 };
 
 /**
@@ -539,6 +558,7 @@ export function rawData(...projects: RawProject[]): RawData {
     projects,
     advisories: [],
     vulnerablePackages: [],
+    deprecations: [],
   };
 }
 
@@ -561,6 +581,19 @@ export function vulnerablePackage(
     version,
     advisories: Object.entries(advisories).map(([id, fixed]) => ({ id, fixed })),
   };
+}
+
+/**
+ * A deprecated package version as the lookup on the npm registry stores it:
+ * without a message, and with a newer version that is fine, unless the
+ * options say so.
+ */
+export function deprecation(
+  name: string,
+  version: string,
+  opts: Partial<Omit<RawDeprecation, 'name' | 'version'>> = {},
+): RawDeprecation {
+  return { name, version, message: '', latest: '99.0.0', latestDeprecated: false, ...opts };
 }
 
 /** Runs one rule as a project scan would: the project files and the lockfiles were read, nothing else exists. */

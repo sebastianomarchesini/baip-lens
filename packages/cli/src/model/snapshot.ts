@@ -143,9 +143,10 @@ export const ScanOptionsSchema = z.object({
   previousScannedAt: Timestamp.nullable().default(null),
   /**
    * Whether a project scan was allowed to look its npm packages up on the
-   * network: on unless `--no-dependency-check`. Whether the lookup could be
-   * done is the status of `collect.osv`. False for a CF scan, which has no
-   * lockfiles, and in snapshots written before the option existed.
+   * network: on unless `--no-dependency-check`. Whether the lookups could be
+   * done is the status of `collect.osv` and of `collect.npm-deprecations`.
+   * False for a CF scan, which has no lockfiles, and in snapshots written
+   * before the option existed.
    */
   dependencyCheck: z.boolean().default(false),
 });

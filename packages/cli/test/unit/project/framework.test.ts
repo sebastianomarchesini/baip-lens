@@ -108,6 +108,7 @@ describe('analyze: which rules run', () => {
       projects: [],
       advisories: [],
       vulnerablePackages: [],
+      deprecations: [],
     };
     const result = analyze(raw, NOW, cfCollectors);
     expect(result.ruleChecks.map((c) => c.id)).toEqual(['rule.APP_NO_RECENT_DEPLOY']);

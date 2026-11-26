@@ -58,6 +58,25 @@ function nested(depth: number): unknown {
 const wide = (keys: number): Record<string, unknown> =>
   Object.fromEntries(Array.from({ length: keys }, (_, i) => [`k${i}`, 0]));
 
+/**
+ * The sample with `rows` deprecated versions in the table of the lookup on
+ * the npm registry, each with `message`.
+ */
+function withDeprecations(rows: number, message: string): Snapshot {
+  const snapshot = sample();
+  const deprecations = Array.from({ length: rows }, (_, i) => ({
+    name: `baip-bulk-${String(i).padStart(6, '0')}`,
+    version: '1.0.0',
+    message,
+    latest: '2.0.0',
+    latestDeprecated: i % 2 === 0,
+  }));
+  return { ...snapshot, raw: { ...snapshot.raw, deprecations } };
+}
+
+/** A message as long as a row of that table holds. */
+const LONGEST_MESSAGE = 'word '.repeat(40);
+
 const ADVICE = 'Do less at a time.';
 
 function refusal(snapshot: Snapshot): SnapshotTooLargeError {
@@ -127,6 +146,37 @@ describe('loadableSnapshotText', () => {
         'could not read it again. Nothing was written. Do less at a time.',
     );
   });
+
+  it('accepts the table of deprecated versions as large as the lookup hands it over, and it reads back', async () => {
+    // 20,000 rows with a message of 200 characters: the most rows, close to the 8 MiB of the table.
+    const snapshot = withDeprecations(20_000, LONGEST_MESSAGE);
+    const text = loadableSnapshotText(snapshot, ADVICE);
+    expect(snapshotExcess(text)).toBeUndefined();
+    const dir = await mkdtemp(join(tmpdir(), 'baip-lens-guard-'));
+    const path = await writeSnapshotText(text, snapshot.scannedAt, dir);
+    const again = await readSnapshot(path);
+    expect(again.raw.deprecations).toHaveLength(20_000);
+    expect(again.raw.deprecations).toEqual(snapshot.raw.deprecations);
+    expect(again).toEqual(snapshot);
+  });
+
+  it.each([
+    [
+      'more keys and values than a snapshot holds',
+      '',
+      'items',
+      'it holds more than 4,194,304 keys and values',
+    ],
+    ['more bytes than a snapshot may have', LONGEST_MESSAGE, 'bytes', 'it is larger than 128 MiB'],
+  ])(
+    'refuses a table of deprecated versions with %s, which no lookup hands over',
+    (_name, message, excess, reason) => {
+      // Twenty times the rows the lookup stores at most: only a mistake of the code gets here.
+      const error = refusal(withDeprecations(400_000, message));
+      expect(error.excess).toBe(excess);
+      expect(error.message).toContain(`cannot be written: ${reason}, and`);
+    },
+  );
 
   it('refuses a result too long to be one text at all, by its size', () => {
     const endless = {
@@ -228,6 +278,38 @@ describe('baip-lens project and a result larger than a snapshot may be', () => {
     const written = await readSnapshot(join(out, 'snapshot-20260929T000000Z.json'));
     expect(written).toEqual(sample());
   });
+
+  it.each(MODES)(
+    'with %s: writes nothing of a result whose table of deprecated versions is too large',
+    async (_name, mode, advice) => {
+      scans.result = withDeprecations(400_000, '');
+      const c = capture();
+      expect(await run(mode, c)).toBe(EXIT.error);
+      expect(c.err()).toBe(
+        'baip-lens: The result of this scan cannot be written: it holds more than 4,194,304 keys ' +
+          'and values, and `baip-lens report --from` could not read it again. Nothing was ' +
+          `written. ${advice}\n`,
+      );
+      expect(c.out()).toBe('');
+      await expect(readdir(out)).rejects.toMatchObject({ code: 'ENOENT' });
+    },
+  );
+
+  it.each(MODES)(
+    'with %s: writes a result with that table at its limit, and report --from reads it',
+    async (_name, mode) => {
+      scans.result = withDeprecations(20_000, LONGEST_MESSAGE);
+      const c = capture();
+      expect(await run(mode, c)).toBe(EXIT.ok);
+      const written = await readSnapshot(join(out, 'snapshot-20260929T000000Z.json'));
+      expect(written.raw.deprecations).toHaveLength(20_000);
+      const again = capture();
+      const args = ['report', '--from', join(out, 'snapshot-20260929T000000Z.json')];
+      expect(await main([...args, '--out', join(out, 'again'), '--format', 'json'], again.io)).toBe(
+        EXIT.ok,
+      );
+    },
+  );
 
   it.each(MODES)(
     'with %s: refuses a result that nests too deep or is too large',

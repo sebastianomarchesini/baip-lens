@@ -510,7 +510,8 @@
     ],
     "projects": [],
     "advisories": [],
-    "vulnerablePackages": []
+    "vulnerablePackages": [],
+    "deprecations": []
   },
   "apps": [
     {

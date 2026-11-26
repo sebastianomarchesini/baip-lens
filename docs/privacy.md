@@ -11,7 +11,7 @@ BAIP Lens runs on your machine and writes files to your disk. This page lists wh
 
 ## Where requests go
 
-**Used today: the first three rows by a Cloud Foundry scan, `api.osv.dev` by a project scan, and the last two with `project --cf`.** The other hosts are already in the allow-list for the rules of the next releases, so that adding a rule can never add a destination unnoticed, but nothing contacts them yet. In particular nothing is sent to `registry.npmjs.org`.
+**Used today: the first three rows by a Cloud Foundry scan, `api.osv.dev` by a project scan, and the last two with `project --cf`.** The other hosts are already in the allow-list for the rules of the next releases, so that adding a rule can never add a destination unnoticed, but nothing contacts them yet. **In progress.** A project scan now also asks `registry.npmjs.org` whether the public npm packages it kept are deprecated: one `GET /<package>/<version>` per package, then `GET /<package>/latest` for a package with a deprecated version, with no credential and nothing else of the project; of an answer only `version` and `deprecated` are read. `--no-dependency-check` turns that off too, and `--dependency-exclude` holds packages back from it as well. The answers are stored in the snapshot, but no rule reports them yet: the rule `DEP_DEPRECATED` and the full description on this page follow in the next change.
 
 | Host | Why | What is sent | Status |
 | --- | --- | --- | --- |
@@ -21,7 +21,7 @@ BAIP Lens runs on your machine and writes files to your disk. This page lists wh
 | `api.osv.dev` | known vulnerabilities of the npm packages of a project (`DEP_KNOWN_CVE`) | `POST /v1/querybatch` with the names and versions of the packages your lockfiles resolved from the public npm registry, then `GET /v1/vulns/<id>` for each advisory it lists; no credential, nothing else of the project | `baip-lens project` (both modes); `--no-dependency-check` turns it off, `--dependency-exclude` holds packages back. Never by `baip-lens scan` |
 | `endoflife.date` | runtime end-of-life dates | product names such as `nodejs` | planned |
 | `ui5.sap.com` | UI5 maintenance status | a request for `/versionoverview.json` | planned |
-| `registry.npmjs.org` | current `@sap/*` versions | four fixed package names | planned |
+| `registry.npmjs.org` | whether the npm packages of a project are deprecated (in progress: looked up and stored, not reported yet) | `GET /<package>/<version>` and `GET /<package>/latest` with the names and versions of the packages your lockfiles resolved from the public npm registry; no credential, nothing else of the project | `baip-lens project`; `--no-dependency-check` turns it off |
 | Your app routes | the UI5 version served | one unauthenticated `GET /resources/sap-ui-version.json` per app, with no redirects; `--no-probe-routes` will turn it off | planned; 0.1.0 makes no request to app routes |
 | Your UAA server (from the CF root) | the one-time SSH code, for `project --cf` only | `GET /oauth/authorize` with your token, as `cf ssh-code` does | `project --cf` |
 | Your app SSH proxy (`links.app_ssh` from the CF root) | the files of the app you picked, or of each app of the project you picked, for `project --cf` only | one new one-time code per app as SSH password; then SFTP listing and read requests only | `project --cf` |

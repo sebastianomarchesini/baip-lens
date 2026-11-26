@@ -60,6 +60,7 @@ function raw(ages: Record<string, number | null>): RawData {
     projects: [],
     advisories: [],
     vulnerablePackages: [],
+    deprecations: [],
   };
 }
 

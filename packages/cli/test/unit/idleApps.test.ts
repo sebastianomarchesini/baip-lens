@@ -102,6 +102,7 @@ function raw(
     projects: [],
     advisories: [],
     vulnerablePackages: [],
+    deprecations: [],
   };
 }
 

@@ -150,6 +150,15 @@ const advisoryWithInvalidAliases = JSON.stringify({
   label: null,
 }).replace('"\\u0000aliases"', repeated('"not an id"', 20));
 
+/** A row of the lookup on the npm registry whose latest version is no version. */
+const deprecationWithInvalidLatest = JSON.stringify({
+  name: 'baip-fixture-server',
+  version: '1.0.0',
+  message: 'm'.repeat(200),
+  latest: '../../up',
+  latestDeprecated: true,
+});
+
 const ARRAY: [string, string] = ['[', ']'];
 const OBJECT: [string, string] = ['{', '}'];
 
@@ -194,6 +203,14 @@ const CRAFTED: [string, Write][] = [
   [
     '6 MB of advisories with invalid aliases',
     text(project, ['raw', 'advisories'], () => repeated(advisoryWithInvalidAliases, 20_000)),
+  ],
+  [
+    '4 MB of {} in the deprecations of the lookup',
+    text(project, ['raw', 'deprecations'], () => repeated('{}', 1_400_000)),
+  ],
+  [
+    '6 MB of deprecations with an invalid latest version',
+    text(project, ['raw', 'deprecations'], () => repeated(deprecationWithInvalidLatest, 20_000)),
   ],
   ['4 MB of 0 in raw.apps', text(cf, ['raw', 'apps'], () => repeated('0', 2_000_000))],
   [

@@ -19,10 +19,17 @@ import {
   OSV_POISON,
   type OsvScript,
   QUERYBATCH,
+  REGISTRY_HOST,
+  REGISTRY_POISON,
+  type RegistryScript,
   askedAdvisories,
+  askedLatest,
   askedPackages,
+  askedVersions,
   osvCalls,
+  registryCalls,
   scriptOsv,
+  scriptRegistry,
 } from '../support/dependencyScript.js';
 import { FakeFetch, jsonResponse, noSleep } from '../support/fakeFetch.js';
 import {
@@ -49,9 +56,10 @@ vi.mock('../../src/reporters/html.js', async (importOriginal) => {
  * `baip-lens project --cf` end to end: the CF API and UAA are scripted
  * (FakeFetch), the app SSH proxy is a real SSH server on 127.0.0.1 that
  * serves a fixture folder per app as /home/vcap/app and records every login,
- * channel and SFTP request. OSV.dev is scripted as well: it knows no
- * advisory unless a test gives it some, so every run can look its packages
- * up. Nothing here reaches a real landscape, or any other real host.
+ * channel and SFTP request. OSV.dev and the npm registry are scripted as
+ * well: the one knows no advisory and the other no deprecated version unless
+ * a test gives them some, so every run can look its packages up. Nothing here
+ * reaches a real landscape, or any other real host.
  */
 
 const API = 'https://api.cf.example.org';
@@ -258,10 +266,14 @@ interface Landscape {
   spaceName?: string;
   /** What OSV.dev answers: the advisories it knows (default: none), or a script of its own. */
   osv?: OsvAnswers;
+  /** What the npm registry answers: the versions it marks as deprecated (default: none), or a script of its own. */
+  registry?: RegistryAnswers;
 }
 
 /** The advisories the scripted OSV.dev knows, or a function that scripts its answers itself. */
 type OsvAnswers = OsvScript | ((fake: FakeFetch) => void);
+/** The same for the scripted npm registry. */
+type RegistryAnswers = RegistryScript | ((fake: FakeFetch) => void);
 
 /** What Node's fetch throws when the connection is reset. */
 function connectionReset(): TypeError {
@@ -360,6 +372,8 @@ function landscape(options: Landscape): FakeFetch {
   }
   if (typeof options.osv === 'function') options.osv(fake);
   else scriptOsv(fake, options.osv);
+  if (typeof options.registry === 'function') options.registry(fake);
+  else scriptRegistry(fake, options.registry);
   return fake;
 }
 
@@ -517,6 +531,8 @@ interface RunOptions {
   env?: Record<string, string>;
   /** See `Landscape.osv`. */
   osv?: OsvAnswers;
+  /** See `Landscape.registry`. */
+  registry?: RegistryAnswers;
   /** Instead of the real SSH client: a test wraps it to see when a session is opened and closed. */
   sshConnect?: SshConnect;
 }
@@ -552,6 +568,7 @@ async function run(options: RunOptions = {}): Promise<Run> {
     uaaDownFrom: options.uaaDownFrom,
     spaceName: options.space?.name,
     osv: options.osv,
+    registry: options.registry,
     ...(options.space === undefined ? {} : { apps: options.space.apps, codes: CODES }),
   });
   const token = accessToken();
@@ -2274,11 +2291,13 @@ describe('baip-lens project --cf and the npm lockfiles of a deployed app', () =>
 });
 
 /*
- * The packages the lockfile step kept are looked up on OSV.dev, for one app
- * and for every app of a project run together: after the last SSH session is
- * closed, through an HTTP client of its own, which knows nothing of the CF
- * login. The scripted OSV.dev of these tests knows the advisories each of
- * them names; the ids are plainly fake.
+ * The packages the lockfile step kept are looked up on OSV.dev and on the npm
+ * registry, for one app and for every app of a project run together: after
+ * the last SSH session is closed, through an HTTP client of its own, which
+ * knows nothing of the CF login. The scripted OSV.dev of these tests knows
+ * the advisories each of them names; the ids are plainly fake. The scripted
+ * registry marks no version as deprecated, unless a test says otherwise (the
+ * tests about the registry itself follow in a describe of their own).
  */
 describe('baip-lens project --cf and the lookup of the installed packages on OSV.dev', () => {
   const A1 = 'GHSA-fake-0001-baip';
@@ -2315,13 +2334,20 @@ describe('baip-lens project --cf and the lookup of the installed packages on OSV
     roles: [],
   };
   const DISCLOSURE = (packages: number): string =>
-    `Looking up ${packages} public npm package(s) on api.osv.dev: only their names and versions ` +
-    'are sent (--no-dependency-check turns this off, --dependency-exclude holds packages back)\n';
+    `Looking up ${packages} public npm package(s) on api.osv.dev and registry.npmjs.org: only ` +
+    'their names and versions are sent (--no-dependency-check turns this off, ' +
+    '--dependency-exclude holds packages back)\n';
+  const REGISTRY_CHECK = {
+    id: 'collect.npm-deprecations',
+    title:
+      'Deprecated npm packages (npm registry: GET /<package>/<version>, GET /<package>/latest)',
+    roles: [],
+  };
 
   interface LookedUpJson {
     options: { dependencyCheck: boolean };
     checks: CheckJson[];
-    raw: { advisories: unknown[]; vulnerablePackages: unknown[] };
+    raw: { advisories: unknown[]; vulnerablePackages: unknown[]; deprecations: unknown[] };
   }
 
   /**
@@ -2452,10 +2478,16 @@ describe('baip-lens project --cf and the lookup of the installed packages on OSV
 
     const snapshot = await lookedUp(r.outDir);
     const ids = snapshot.checks.map((check) => check.id);
-    expect(ids.slice(0, 3)).toEqual(['collect.project', 'collect.dependencies', 'collect.osv']);
-    expect(ids.slice(3).every((id) => id.startsWith('rule.'))).toBe(true);
+    expect(ids.slice(0, 4)).toEqual([
+      'collect.project',
+      'collect.dependencies',
+      'collect.osv',
+      'collect.npm-deprecations',
+    ]);
+    expect(ids.slice(4).every((id) => id.startsWith('rule.'))).toBe(true);
     // A public source: no CF role, also for a deployed app.
     expect(snapshot.checks[2]).toEqual({ ...OSV_CHECK, status: 'ran' });
+    expect(snapshot.checks[3]).toEqual({ ...REGISTRY_CHECK, status: 'ran' });
     expect(snapshot.options.dependencyCheck).toBe(true);
     expect(snapshot.raw.advisories).toEqual([
       {
@@ -2649,6 +2681,7 @@ describe('baip-lens project --cf and the lookup of the installed packages on OSV
     expect(snapshot.raw.advisories).toEqual([]);
     expect(snapshot.raw.vulnerablePackages).toEqual([]);
     const report = await reportOf(r.outDir);
+    // Both sources: the switch is one, and each has its check.
     expect(skippedLookups(report)).toEqual([
       {
         ...OSV_CHECK,
@@ -2656,7 +2689,17 @@ describe('baip-lens project --cf and the lookup of the installed packages on OSV
         reasonCode: 'disabled',
         reason: 'turned off with --no-dependency-check',
       },
+      {
+        ...REGISTRY_CHECK,
+        status: 'skipped',
+        reasonCode: 'disabled',
+        reason: 'turned off with --no-dependency-check',
+      },
     ]);
+    expect(registryCalls(r.fake)).toEqual([]);
+    expect(r.err).toContain(
+      'skipped collect.npm-deprecations: turned off with --no-dependency-check\n',
+    );
     // The lockfile is still read, and what it says without a lookup is still reported.
     expect((await dependencyFindings(r.outDir)).map((f) => f.id)).toEqual(['DEP_NOT_CHECKED']);
     expectOnlyReads(r);
@@ -2798,10 +2841,15 @@ describe('baip-lens project --cf and the lookup of the installed packages on OSV
       const r = await run({ osv: (fake) => fake.on('POST', QUERYBATCH, response) });
       expect(r.code, r.err).toBe(EXIT.ok);
       expect(osvCalls(r.fake)).toHaveLength(calls);
-      // Nothing but OSV.dev was asked about a package, whatever it answered.
+      // Nothing but the two public sources was asked about a package, whatever OSV.dev answered:
+      // a redirect is not followed.
       expect(
-        r.fake.calls.every((call) => [API_HOST, UAA_HOST, OSV_HOST].includes(call.url.host)),
+        r.fake.calls.every((call) =>
+          [API_HOST, UAA_HOST, OSV_HOST, REGISTRY_HOST].includes(call.url.host),
+        ),
       ).toBe(true);
+      // The registry was asked all the same, and answered.
+      expect(askedVersions(r.fake)).toEqual(INSTALLED_ASKED);
       const report = await reportOf(r.outDir);
       expect(skippedLookups(report)).toEqual([
         { ...OSV_CHECK, status: 'skipped', reasonCode: 'error', reason },
@@ -2820,9 +2868,388 @@ describe('baip-lens project --cf and the lookup of the installed packages on OSV
     const r = await runOneApp(await approuterFixture());
     expect(r.code, r.err).toBe(EXIT.ok);
     expect(osvCalls(r.fake)).toEqual([]);
+    expect(registryCalls(r.fake)).toEqual([]);
     expect(r.err).not.toContain('Looking up');
     const snapshot = await lookedUp(r.outDir);
     expect(snapshot.checks[2]).toEqual({ ...OSV_CHECK, status: 'ran' });
+    expect(snapshot.checks[3]).toEqual({ ...REGISTRY_CHECK, status: 'ran' });
+  });
+
+  /*
+   * The second source: the npm registry is asked about the same packages,
+   * after OSV.dev, and what it marks as deprecated is stored. Each document
+   * of the scripted registry names people and their addresses, as the real
+   * ones do; the messages are invented.
+   */
+  describe('and on the npm registry', () => {
+    const GONE =
+      '@baip-fixture/odata 3.x is no longer supported\u001b[31m, ask registry.poison@example.com ' +
+      'or see https://ci:POISON_registry_pw@deprecations.example.org/odata\u202e for 4.x';
+    /** A deprecated version with a newer one that is fine, and a version the registry does not know. */
+    const DEPRECATED_ODATA: RegistryScript = {
+      versions: {
+        '@baip-fixture/odata@3.1.0': { deprecated: GONE },
+        'baip-fixture-watcher@2.3.3': { status: 404 },
+      },
+      latest: { '@baip-fixture/odata': { version: '4.0.2' } },
+    };
+    const ODATA_ROW = {
+      name: '@baip-fixture/odata',
+      version: '3.1.0',
+      message:
+        '@baip-fixture/odata 3.x is no longer supported, ask [e-mail] or see ' +
+        'https://deprecations.example.org/odata for 4.x',
+      latest: '4.0.2',
+      latestDeprecated: false,
+    };
+
+    /** The registry as scripted, with a note in `events` for the first request it gets. */
+    const watchedRegistry =
+      (events: string[], script: RegistryScript = {}) =>
+      (fake: FakeFetch): void => {
+        fake.on(
+          'GET',
+          (url) => {
+            if (url.host === REGISTRY_HOST && !events.includes('registry asked')) {
+              events.push('registry asked');
+            }
+            return false;
+          },
+          jsonResponse({}),
+        );
+        scriptRegistry(fake, script);
+      };
+
+    const registryDown = (fake: FakeFetch): void => {
+      fake.on(
+        'GET',
+        (url) => url.host === REGISTRY_HOST,
+        () => {
+          throw connectionReset();
+        },
+      );
+    };
+
+    /** The skipped checks of the scan itself: a rule that reads the answers of one is skipped with it. */
+    const skippedSources = (report: ReportJson): CheckJson[] =>
+      skippedChecks(report).filter((check) => check.id.startsWith('collect.'));
+
+    /** Everything a request to the registry carried, as one text. */
+    const sentToRegistry = (r: Run): string =>
+      registryCalls(r.fake)
+        .map((call) => `${call.url.href}\n${JSON.stringify(call.headers)}\n${call.body ?? ''}`)
+        .join('\n');
+
+    /**
+     * Every request to the registry is a GET of two path segments with
+     * nothing but the two headers every request has: no credential of the CF
+     * login, no cookie, no body, no query; and nothing of the app, the space
+     * or the private packages of its lockfile is in one.
+     */
+    function expectOnlyPublicPackagesAsked(r: Run, kept: string[]): void {
+      expect(askedVersions(r.fake)).toEqual(kept);
+      for (const call of registryCalls(r.fake)) {
+        expect(call.url.origin).toBe('https://registry.npmjs.org');
+        expect(call.method).toBe('GET');
+        expect(call.body).toBeUndefined();
+        expect(call.url.search).toBe('');
+        expect(call.url.pathname.split('/')).toHaveLength(3);
+        expect(Object.keys(call.headers).sort()).toEqual(['accept', 'user-agent']);
+        expect(call.redirect).toBe('manual');
+      }
+      const sent = sentToRegistry(r);
+      for (const never of [r.token, ...CODES, ONE_TIME_CODE, 'authorization', 'bearer', 'cookie']) {
+        expect(sent.toLowerCase(), never).not.toContain(never.toLowerCase());
+      }
+      for (const never of [
+        ...POISON,
+        'poison',
+        'incidents-srv',
+        'acme',
+        'locked-srv',
+        'node_modules',
+        'package-lock',
+        '/home/vcap',
+        '@sap',
+        '.tgz',
+      ]) {
+        expect(sent, never).not.toContain(never);
+      }
+      // The CF token went to the CF API and UAA, and to no other host.
+      const withToken = r.fake.calls.filter((call) => 'authorization' in call.headers);
+      expect(withToken.length).toBeGreaterThan(3);
+      for (const call of withToken) expect([API_HOST, UAA_HOST]).toContain(call.url.host);
+    }
+
+    it('asks about the installed packages of one app after its session is closed, and stores the deprecated ones', async () => {
+      const events: string[] = [];
+      const r = await run({
+        osv: watchedOsv(events, VULNERABLE_MERGE),
+        registry: watchedRegistry(events, DEPRECATED_ODATA),
+        sshConnect: watchedSsh(events),
+      });
+      expect(r.code, r.err).toBe(EXIT.ok);
+
+      // The four public packages of the installed tree, each once; then the latest version of
+      // the one that has a deprecated version. A scoped name is one segment, its slash encoded.
+      expect(
+        registryCalls(r.fake).map((call) => `${call.method} ${call.url.host}${call.url.pathname}`),
+      ).toEqual([
+        `GET ${REGISTRY_HOST}/@baip-fixture%2fodata/3.1.0`,
+        `GET ${REGISTRY_HOST}/baip-fixture-merge/4.17.20`,
+        `GET ${REGISTRY_HOST}/baip-fixture-server/2.4.1`,
+        `GET ${REGISTRY_HOST}/baip-fixture-watcher/2.3.3`,
+        `GET ${REGISTRY_HOST}/@baip-fixture%2fodata/latest`,
+      ]);
+      expectOnlyPublicPackagesAsked(r, INSTALLED_ASKED);
+      expect(askedLatest(r.fake)).toEqual(['@baip-fixture/odata']);
+      // The SSH session of the app was closed before anything was asked, and OSV.dev came first.
+      expect(events).toEqual(['ssh opened', 'ssh closed', 'osv asked', 'registry asked']);
+      const hosts = r.fake.calls.map((call) => call.url.host);
+      expect(hosts.lastIndexOf(OSV_HOST)).toBeLessThan(hosts.indexOf(REGISTRY_HOST));
+      expectOnlyReads(r);
+
+      // Said before the first request, and summed up after the answers of each source.
+      const lines = r.err.split('\n');
+      const disclosed = lines.indexOf(DISCLOSURE(4).trimEnd());
+      expect(disclosed).toBeGreaterThan(-1);
+      expect(lines.slice(disclosed + 1, disclosed + 3)).toEqual([
+        'api.osv.dev: 1 of 4 package(s) have a known vulnerability (1 advisories)',
+        'registry.npmjs.org: 1 of 4 package(s) are deprecated, 1 unknown to the registry',
+      ]);
+      expect(r.err.match(/Looking up/g)).toHaveLength(1);
+
+      const snapshot = await lookedUp(r.outDir);
+      expect(snapshot.checks.slice(2, 4)).toEqual([
+        { ...OSV_CHECK, status: 'ran' },
+        // A public source: no CF role, also for a deployed app.
+        { ...REGISTRY_CHECK, status: 'ran' },
+      ]);
+      expect(snapshot.options.dependencyCheck).toBe(true);
+      // The message cleaned; the version the registry does not know is not in the table.
+      expect(snapshot.raw.deprecations).toEqual([ODATA_ROW]);
+      expect(snapshot.raw.vulnerablePackages).toHaveLength(1);
+      expect(skippedChecks(await reportOf(r.outDir))).toEqual([]);
+
+      // Nothing of a document but the row reaches a file or the terminal.
+      const never = [...POISON, r.token, ...REGISTRY_POISON, ...OSV_POISON];
+      expectNoLeaks({ stdout: r.out }, never);
+      expectNoLeaks({ stderr: r.err, ...(await written(r.outDir)) }, never, [ABSOLUTE_PATH]);
+      // The table and the check load again, without a network.
+      await expectSameOffline(r);
+      expect((await reportOf(r.outDir)).checks).toContainEqual({
+        ...REGISTRY_CHECK,
+        status: 'ran',
+      });
+    });
+
+    it('asks about the packages of every app of a project run together: once each, after the last session', async () => {
+      const events: string[] = [];
+      const r = await run({
+        space: await lockedPair(),
+        ...mtaAcme,
+        osv: watchedOsv(events),
+        registry: watchedRegistry(events, {
+          versions: { 'baip-fixture-server@2.4.1': { deprecated: true } },
+          latest: { 'baip-fixture-server': { version: '2.4.1', deprecated: true } },
+        }),
+        sshConnect: watchedSsh(events),
+      });
+      expect(r.code, r.err).toBe(EXIT.ok);
+
+      // Both sessions were opened and closed before the first request; the package both apps
+      // have installed is asked about once.
+      expect(events).toEqual([
+        'ssh opened',
+        'ssh closed',
+        'ssh opened',
+        'ssh closed',
+        'osv asked',
+        'registry asked',
+      ]);
+      expectOnlyPublicPackagesAsked(r, [
+        '@baip-fixture/odata@3.1.0',
+        'baip-fixture-merge@4.17.20',
+        'baip-fixture-router@1.0.0',
+        'baip-fixture-server@2.4.1',
+        'baip-fixture-watcher@2.3.3',
+      ]);
+      expect(askedLatest(r.fake)).toEqual(['baip-fixture-server']);
+      expectOnlyReads(r);
+      expect(r.err).toContain('registry.npmjs.org: 1 of 5 package(s) are deprecated\n');
+
+      // One table for the scan: the package is in it once, whichever apps have it installed.
+      const snapshot = await lookedUp(r.outDir);
+      expect(snapshot.raw.deprecations).toEqual([
+        {
+          name: 'baip-fixture-server',
+          version: '2.4.1',
+          message: '',
+          latest: '2.4.1',
+          latestDeprecated: true,
+        },
+      ]);
+      expect(snapshot.checks.map((check) => check.id).slice(0, 4)).toEqual([
+        'collect.project',
+        'collect.dependencies',
+        'collect.osv',
+        'collect.npm-deprecations',
+      ]);
+      await expectSameOffline(r);
+      await expectNothingLeaked(r);
+    }, 20_000);
+
+    it('records the lookup after the apps that were not read and the one on OSV.dev', async () => {
+      const space = await lockedPair();
+      space.folders[sshUser(1)] = await javaFixture();
+      const r = await run({ space, ...mtaAcme, registry: DEPRECATED_ODATA });
+      expect(r.code, r.err).toBe(EXIT.ok);
+      const snapshot = await lookedUp(r.outDir);
+      expect(snapshot.checks.slice(0, 5).map((check) => [check.id, check.status])).toEqual([
+        ['collect.project', 'ran'],
+        ['collect.dependencies', 'ran'],
+        ['collect.project.acme-router', 'skipped'],
+        ['collect.osv', 'ran'],
+        ['collect.npm-deprecations', 'ran'],
+      ]);
+      expect(askedVersions(r.fake)).toEqual(INSTALLED_ASKED);
+      expect(snapshot.raw.deprecations).toEqual([ODATA_ROW]);
+    }, 20_000);
+
+    it('holds the packages of --dependency-exclude back from the registry as well', async () => {
+      const r = await run({
+        args: ['--dependency-exclude', '@baip-fixture/*, baip-fixture-MERGE'],
+        registry: DEPRECATED_ODATA,
+      });
+      expect(r.code, r.err).toBe(EXIT.ok);
+      expectOnlyPublicPackagesAsked(r, ['baip-fixture-server@2.4.1', 'baip-fixture-watcher@2.3.3']);
+      // The deprecated package was held back: nothing is asked about it, and nothing stored.
+      expect(askedLatest(r.fake)).toEqual([]);
+      expect(sentToRegistry(r)).not.toContain('odata');
+      expect(sentToRegistry(r)).not.toContain('merge');
+      expect((await lookedUp(r.outDir)).raw.deprecations).toEqual([]);
+      expect(r.err).toContain(
+        'registry.npmjs.org: 0 of 2 package(s) are deprecated, 1 unknown to the registry\n',
+      );
+    });
+
+    it('holds them back from the registry for every app of a project run', async () => {
+      const r = await run({
+        space: await lockedPair(),
+        args: ['--mta', 'acme', '--dependency-exclude', 'baip-fixture-server'],
+        answers: null,
+      });
+      expect(r.code, r.err).toBe(EXIT.ok);
+      expectOnlyPublicPackagesAsked(r, [
+        '@baip-fixture/odata@3.1.0',
+        'baip-fixture-merge@4.17.20',
+        'baip-fixture-router@1.0.0',
+        'baip-fixture-watcher@2.3.3',
+      ]);
+    }, 20_000);
+
+    it('still reports the app when the registry cannot be reached: that lookup is a skipped check', async () => {
+      const r = await run({ osv: VULNERABLE_MERGE, registry: registryDown });
+      expect(r.code, r.err).toBe(EXIT.ok);
+      // One request, tried three times; nothing after it.
+      expect(registryCalls(r.fake).map((call) => `${call.method} ${call.url.pathname}`)).toEqual([
+        'GET /@baip-fixture%2fodata/3.1.0',
+        'GET /@baip-fixture%2fodata/3.1.0',
+        'GET /@baip-fixture%2fodata/3.1.0',
+      ]);
+      const report = await reportOf(r.outDir);
+      expect(skippedSources(report)).toEqual([
+        {
+          ...REGISTRY_CHECK,
+          status: 'skipped',
+          reasonCode: 'unavailable',
+          reason: 'registry.npmjs.org could not be reached',
+        },
+      ]);
+      expect(r.err).toContain(
+        'skipped collect.npm-deprecations: registry.npmjs.org could not be reached\n',
+      );
+      expect(r.err).not.toContain('ECONNRESET');
+      expect(r.err).not.toContain('are deprecated');
+      expect(r.out).toContain(
+        '  skipped collect.npm-deprecations: registry.npmjs.org could not be reached\n',
+      );
+      expect(r.out).toMatch(/, \d+ check\(s\) skipped\.\n/);
+      // The files were read and judged all the same, and so were the answers of OSV.dev.
+      const ids = report.findings.map((f) => f.id);
+      expect(ids).toContain('CAP_MOCKED_AUTH_IN_PROD');
+      expect(ids).toContain('DEP_KNOWN_CVE');
+      expect(ids).toContain('DEP_NOT_CHECKED');
+      const snapshot = await lookedUp(r.outDir);
+      // It was allowed to ask; that it could not is what the check says.
+      expect(snapshot.options.dependencyCheck).toBe(true);
+      expect(snapshot.raw.deprecations).toEqual([]);
+      expect(snapshot.raw.vulnerablePackages).toHaveLength(1);
+      expect(snapshot.checks[2]).toEqual({ ...OSV_CHECK, status: 'ran' });
+      await expectSameOffline(r);
+    });
+
+    it('records both lookups as skipped when neither source can be reached, and still reports the app', async () => {
+      const r = await run({
+        osv: (fake) =>
+          fake.on(
+            'POST',
+            (url) => url.host === OSV_HOST,
+            () => {
+              throw connectionReset();
+            },
+          ),
+        registry: registryDown,
+      });
+      expect(r.code, r.err).toBe(EXIT.ok);
+      expect(osvCalls(r.fake)).toHaveLength(3);
+      expect(registryCalls(r.fake)).toHaveLength(3);
+      const report = await reportOf(r.outDir);
+      expect(skippedSources(report).map((check) => [check.id, check.reasonCode])).toEqual([
+        ['collect.osv', 'unavailable'],
+        ['collect.npm-deprecations', 'unavailable'],
+      ]);
+      expect(report.findings.map((f) => f.id)).toContain('CAP_MOCKED_AUTH_IN_PROD');
+    });
+
+    it.each([
+      ['an error', { status: 500 }, 'registry.npmjs.org answered HTTP 500', 3],
+      ['a refusal', { status: 401 }, 'registry.npmjs.org answered HTTP 401', 1],
+      ['a redirect', { status: 302 }, 'registry.npmjs.org answered HTTP 302', 1],
+      [
+        'the document of another version',
+        { extra: { version: '3.1.1' } },
+        'registry.npmjs.org sent an unexpected answer',
+        1,
+      ],
+    ])(
+      'records %s of the registry with a fixed reason, and keeps nothing of it',
+      async (_name, answer, reason, calls) => {
+        const r = await run({
+          registry: { versions: { '@baip-fixture/odata@3.1.0': answer } },
+        });
+        expect(r.code, r.err).toBe(EXIT.ok);
+        expect(registryCalls(r.fake)).toHaveLength(calls);
+        // Nothing but the two public sources was asked about a package, whatever it answered.
+        expect(
+          r.fake.calls.every((call) =>
+            [API_HOST, UAA_HOST, OSV_HOST, REGISTRY_HOST].includes(call.url.host),
+          ),
+        ).toBe(true);
+        const report = await reportOf(r.outDir);
+        expect(skippedSources(report)).toEqual([
+          { ...REGISTRY_CHECK, status: 'skipped', reasonCode: 'error', reason },
+        ]);
+        // The other source answered, and the rule that reads its answers ran.
+        expect(report.checks.find((check) => check.id === 'rule.DEP_KNOWN_CVE')?.status).toBe(
+          'ran',
+        );
+        expect((await lookedUp(r.outDir)).raw.deprecations).toEqual([]);
+        expectNoLeaks({ stdout: r.out, stderr: r.err, ...(await written(r.outDir)) }, [
+          ...REGISTRY_POISON,
+        ]);
+      },
+    );
   });
 });
 

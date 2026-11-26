@@ -118,7 +118,13 @@ describe('project scan has no way out of the file system', () => {
       .filter((name) => name.endsWith('.ts'))
       .map((name) => name.replaceAll('\\', '/'));
     // The modules that ask a public source about a package exist, outside the guarded files.
-    const requesters = ['dependencyCheck.ts', 'collectors/osv.ts', 'http/osvClient.ts'];
+    const requesters = [
+      'dependencyCheck.ts',
+      'collectors/osv.ts',
+      'http/osvClient.ts',
+      'collectors/deprecations.ts',
+      'http/npmRegistryClient.ts',
+    ];
     for (const requester of requesters) expect(sources, requester).toContain(requester);
     const guarded = (await Promise.all(GUARDED.map(sourceFiles))).flat();
     for (const requester of requesters)
@@ -136,6 +142,17 @@ describe('project scan has no way out of the file system', () => {
     expect(await importers('dependencyCheck')).toEqual(['main.ts']);
     expect(await importers('osv')).toEqual(['dependencyCheck.ts']);
     expect(await importers('osvClient')).toEqual(['collectors/osv.ts', 'dependencyCheck.ts']);
+    // The same for the second source, the npm registry.
+    expect(await importers('deprecations')).toEqual(['dependencyCheck.ts']);
+    expect(await importers('npmRegistryClient')).toEqual([
+      'collectors/deprecations.ts',
+      'dependencyCheck.ts',
+    ]);
+    // What the two lookups share makes no request, and only they use it.
+    expect(await importers('packageLookup')).toEqual([
+      'collectors/deprecations.ts',
+      'collectors/osv.ts',
+    ]);
   });
 
   it('recognises an import of a module that makes requests, however it is written', () => {

@@ -40,6 +40,12 @@
       "status": "ran"
     },
     {
+      "id": "collect.npm-deprecations",
+      "title": "Deprecated npm packages (npm registry: GET /<package>/<version>, GET /<package>/latest)",
+      "roles": [],
+      "status": "ran"
+    },
+    {
       "id": "rule.CAP_MOCKED_AUTH_IN_PROD",
       "title": "Mocked authentication is configured for production",
       "roles": [],

@@ -3,13 +3,14 @@ import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 import { afterAll, describe, expect, it } from 'vitest';
 import { reanalyze } from '../../src/analyzers/index.js';
+import { MAX_DEPRECATION_TABLE_BYTES } from '../../src/collectors/deprecations.js';
 import { MAX_TABLE_BYTES } from '../../src/collectors/osv.js';
 import { PackageTable } from '../../src/collectors/project/dependencies.js';
 import type { LockedPackage } from '../../src/collectors/project/lockfile.js';
 import { type JsonShapeLimits, jsonShapeExcess } from '../../src/io/jsonShape.js';
 import { rawListBytes } from '../../src/io/jsonSize.js';
 import { MAX_RELATIVE_PATH_LENGTH } from '../../src/model/paths.js';
-import type { RawAdvisory, RawVulnerablePackage } from '../../src/model/raw.js';
+import type { RawAdvisory, RawDeprecation, RawVulnerablePackage } from '../../src/model/raw.js';
 import { SnapshotSchema } from '../../src/model/snapshot.js';
 import {
   MAX_SNAPSHOT_BYTES,
@@ -226,9 +227,11 @@ describe('the largest project record the collector can write', () => {
  * The lookup on OSV.dev stores at most 20,000 advisories and 20,000
  * vulnerable packages, and both tables together only as far as they take 16
  * MiB of the file (`MAX_TABLE_BYTES`, measured as the collector measures
- * it). A project scan at those limits, on top of the 20,000 packages its
- * lockfiles may keep, must load again. The findings a rule raises from the
- * tables come on top; the scan checks the whole result before it writes it
+ * it). The lookup on the npm registry stores at most 20,000 deprecated
+ * versions, as far as they take 8 MiB (`MAX_DEPRECATION_TABLE_BYTES`). A
+ * project scan at those limits, on top of the 20,000 packages its lockfiles
+ * may keep, must load again. The findings a rule raises from the tables come
+ * on top; the scan checks the whole result before it writes it
  * (`loadableSnapshotText`).
  */
 describe('a project snapshot with the tables of the lookup at their limits', () => {
@@ -239,11 +242,28 @@ describe('a project snapshot with the tables of the lookup at their limits', () 
   interface Tables {
     advisories: RawAdvisory[];
     vulnerablePackages: RawVulnerablePackage[];
+    deprecations: RawDeprecation[];
+  }
+
+  /**
+   * Every package deprecated, each with a message as long as a row holds and
+   * a latest version: as many rows as the table can have, near the bytes it
+   * may take.
+   */
+  function deprecations(): RawDeprecation[] {
+    return Array.from({ length: PACKAGES }, (_, i) => ({
+      name: name(i),
+      version: '1.0.0',
+      message: 'word '.repeat(40),
+      latest: '2.0.0',
+      latestDeprecated: i % 2 === 0,
+    }));
   }
 
   /** Each package with `perPackage` advisories that name no fix: the most rows for their bytes. */
   function tables(perPackage: number): Tables {
     return {
+      deprecations: deprecations(),
       advisories: Array.from({ length: PACKAGES }, (_, i) => ({
         id: id(i),
         aliases: [],
@@ -270,6 +290,7 @@ describe('a project snapshot with the tables of the lookup at their limits', () 
   function tablesOfLargeFindings(advisories: number): Tables {
     const ids = Array.from({ length: advisories }, (_, i) => id(i));
     return {
+      deprecations: deprecations(),
       advisories: ids.map((advisoryId, i) => ({
         id: advisoryId,
         aliases: Array.from({ length: 20 }, (_, k) =>
@@ -309,6 +330,7 @@ describe('a project snapshot with the tables of the lookup at their limits', () 
     };
     raw.advisories = found.advisories;
     raw.vulnerablePackages = found.vulnerablePackages;
+    raw.deprecations = found.deprecations;
     return sample;
   }
 
@@ -317,6 +339,17 @@ describe('a project snapshot with the tables of the lookup at their limits', () 
     expect(tableBytes(tables(6))).toBeGreaterThan(0.9 * MAX_TABLE_BYTES);
     // One more each and the collector stores nothing.
     expect(tableBytes(tables(7))).toBeGreaterThan(MAX_TABLE_BYTES);
+  });
+
+  it('holds a deprecation with a message of 200 characters for each of 20,000 packages in 8 MiB', () => {
+    const rows = deprecations();
+    expect(rows[0]?.message).toHaveLength(200);
+    expect(rawListBytes(rows)).toBeLessThanOrEqual(MAX_DEPRECATION_TABLE_BYTES);
+    expect(rawListBytes(rows)).toBeGreaterThan(0.85 * MAX_DEPRECATION_TABLE_BYTES);
+    // With characters of three bytes each not every package fits: the collector then stores nothing.
+    const widest = rows.map((row) => ({ ...row, message: '\u20ac'.repeat(200) }));
+    expect(rawListBytes(widest)).toBeGreaterThan(MAX_DEPRECATION_TABLE_BYTES);
+    expect(rawListBytes(widest.slice(0, 10_900))).toBeLessThanOrEqual(MAX_DEPRECATION_TABLE_BYTES);
   });
 
   it('loads again, written as a scan writes it, with room to spare', async () => {
@@ -336,6 +369,8 @@ describe('a project snapshot with the tables of the lookup at their limits', () 
     expect(snapshot.raw.advisories).toHaveLength(PACKAGES);
     expect(snapshot.raw.vulnerablePackages).toHaveLength(PACKAGES);
     expect(snapshot.raw.vulnerablePackages.at(-1)?.advisories).toHaveLength(6);
+    expect(snapshot.raw.deprecations).toHaveLength(PACKAGES);
+    expect(snapshot.raw.deprecations.at(-1)?.message).toHaveLength(200);
   }, 60_000);
 
   /**
@@ -361,6 +396,8 @@ describe('a project snapshot with the tables of the lookup at their limits', () 
     expect(vulnerable).toHaveLength(PACKAGES);
     expect(vulnerable.at(-1)?.evidence).toMatchObject({ advisoryCount: 6, lockfileCount: 1 });
     expect(snapshot.raw.vulnerablePackages).toHaveLength(PACKAGES);
+    // The table of the registry at its limit is in the same file.
+    expect(snapshot.raw.deprecations).toHaveLength(PACKAGES);
     // The findings are the larger part: with them the file takes about half of what it may.
     expect(bytes).toBeGreaterThan(MAX_SNAPSHOT_BYTES / 4);
     expect(bytes).toBeLessThan(0.6 * MAX_SNAPSHOT_BYTES);
@@ -375,8 +412,9 @@ describe('a project snapshot with the tables of the lookup at their limits', () 
     expect(tableBytes(found)).toBeLessThanOrEqual(MAX_TABLE_BYTES);
     expect(tableBytes(tablesOfLargeFindings(9))).toBeGreaterThan(MAX_TABLE_BYTES);
 
-    const { bytes, vulnerable } = await writtenAndReadBack(found);
+    const { bytes, snapshot, vulnerable } = await writtenAndReadBack(found);
     expect(vulnerable).toHaveLength(PACKAGES);
+    expect(snapshot.raw.deprecations).toHaveLength(PACKAGES);
     expect(vulnerable.at(-1)?.evidence).toMatchObject({
       advisoryCount: 8,
       fixedIn: null,

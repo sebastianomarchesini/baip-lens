@@ -3,7 +3,13 @@ import { analyze } from './analyzers/index.js';
 import { type CheckDefinition, CheckRecorder, COLLECTOR_CHECKS } from './checks.js';
 import { collectProject } from './collectors/project/index.js';
 import type { SkipReasonCode } from './model/check.js';
-import type { RawAdvisory, RawData, RawProject, RawVulnerablePackage } from './model/raw.js';
+import type {
+  RawAdvisory,
+  RawData,
+  RawDeprecation,
+  RawProject,
+  RawVulnerablePackage,
+} from './model/raw.js';
 import {
   DEFAULT_SNAPSHOT_OPTIONS,
   SNAPSHOT_SCHEMA_VERSION,
@@ -25,10 +31,16 @@ export interface ScanProjectOptions {
   lookup?: DependencyLookup;
 }
 
-/** What a lookup of the lockfile packages found, as the snapshot stores it. */
+/**
+ * What a lookup of the lockfile packages found, as the snapshot stores it:
+ * the two tables of the known vulnerabilities, and the table of the
+ * deprecated versions. Each source fills its tables in full or leaves them
+ * empty.
+ */
 export interface DependencyTables {
   advisories: RawAdvisory[];
   vulnerablePackages: RawVulnerablePackage[];
+  deprecations: RawDeprecation[];
 }
 
 /**
@@ -109,7 +121,11 @@ function assertDistinctIds(own: CheckDefinition[], collection: ProjectCollection
   }
 }
 
-const NOTHING_LOOKED_UP: DependencyTables = { advisories: [], vulnerablePackages: [] };
+const NOTHING_LOOKED_UP: DependencyTables = {
+  advisories: [],
+  vulnerablePackages: [],
+  deprecations: [],
+};
 
 /**
  * The npm lockfiles of one project in a line, or undefined when it has none
@@ -190,6 +206,7 @@ export async function projectSnapshot(
     projects,
     advisories: found.advisories,
     vulnerablePackages: found.vulnerablePackages,
+    deprecations: found.deprecations,
   };
   const collectorChecks = recorder.list();
   const analysis = analyze(raw, scannedAt, collectorChecks);

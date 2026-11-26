@@ -318,7 +318,7 @@ function buildProgram(io: CliIo, setExit: (code: number) => void): Command {
   program
     .command('project')
     .description(
-      'scan a CAP or MTA project: a local folder (--path: file reads only) or a deployed app or project (--cf: read-only over SSH); the names and versions of its public npm packages are looked up on OSV.dev',
+      'scan a CAP or MTA project: a local folder (--path: file reads only) or a deployed app or project (--cf: read-only over SSH); the names and versions of its public npm packages are looked up on OSV.dev and the npm registry',
     )
     .option('--path <dir>', 'project directory (contains package.json, mta.yaml or .cdsrc.json)')
     .option(
@@ -338,7 +338,7 @@ function buildProgram(io: CliIo, setExit: (code: number) => void): Command {
     .option('--api <url>', 'with --cf: CF API endpoint or region (default: the cf CLI target)')
     .option('--org <name>', 'with --cf: org (default: the cf CLI target)')
     .option('--space <name>', 'with --cf: space (default: the cf CLI target)')
-    .option('--no-dependency-check', 'do not look up npm packages on OSV.dev')
+    .option('--no-dependency-check', 'do not look up npm packages on OSV.dev and the npm registry')
     .option(
       '--dependency-exclude <list>',
       'comma-separated package names or patterns such as @acme/* that are never looked up and never kept from a lockfile',

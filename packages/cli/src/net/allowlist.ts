@@ -32,6 +32,22 @@ export function credentialKind(headerValue: string | undefined): CredentialKind 
   return 'unknown';
 }
 
+/** Headers besides Authorization that carry a credential. No client sets one, and no host may receive one. */
+const CREDENTIAL_HEADERS = ['cookie', 'proxy-authorization'];
+
+/**
+ * What the headers of a request carry as a credential, without keeping it:
+ * the kind of their Authorization header, or `unknown`, which no host may
+ * receive, when a cookie or a proxy credential is among them. Header names
+ * are expected in lower case.
+ */
+export function requestCredential(
+  headers: Readonly<Record<string, string>>,
+): CredentialKind | undefined {
+  if (CREDENTIAL_HEADERS.some((name) => headers[name] !== undefined)) return 'unknown';
+  return credentialKind(headers.authorization);
+}
+
 export interface EgressRule {
   host: string;
   /** Explicit port, when the rule's base URL had one. */
@@ -44,11 +60,35 @@ export interface EgressRule {
    * credentials, so that no future collector can reach them by accident.
    */
   deny?: RegExp;
+  /**
+   * False: a request to this host carries no query string. `allow` tests the
+   * path alone, so a source that is asked by its path and nothing else says
+   * so here, and nothing can travel next to the path.
+   */
+  query?: boolean;
   /** The credentials this host may receive in an Authorization header; empty: none. */
   credentials: readonly Exclude<CredentialKind, 'unknown'>[];
   /** Why the host is allowed; shown in errors and docs. */
   purpose: string;
 }
+
+/*
+ * The one path shape of the npm registry rule (docs/data-sources.md §7, D10):
+ * `/<package>/<version>` or `/<package>/latest`, two segments and nothing
+ * else. The package is a plain name, or a scoped one written with its slash
+ * encoded (`@scope%2fname`), in the alphabet of names read from a lockfile
+ * (`LOCKED_PACKAGE_NAME_PATTERN`, at most 214 characters): no part of it can
+ * begin with a dot, so none is a step in the path, and `%` stands nowhere but
+ * in that one escape. The version is an exact one (`PACKAGE_VERSION_PATTERN`,
+ * at most 64 characters) without build metadata, which the client cuts off.
+ * No query string goes along (`query: false`). The patterns are repeated here
+ * on purpose: this file decides alone, and a pattern that is loosened
+ * elsewhere must not loosen what may be asked for.
+ */
+const NPM_NAME = '[A-Za-z0-9~-][A-Za-z0-9._~-]*';
+const NPM_PACKAGE = `(?:(?=[^/]{1,216}/)@${NPM_NAME}%2[fF]${NPM_NAME}|(?=[^/]{1,214}/)${NPM_NAME})`;
+const NPM_VERSION = '(?=[^/]{1,64}$)\\d+\\.\\d+\\.\\d+(?:-[0-9A-Za-z.-]*)?';
+const NPM_REGISTRY_PATH = new RegExp(`^/${NPM_PACKAGE}/(?:latest|${NPM_VERSION})$`);
 
 /** Fixed public data sources. No customer data is ever sent to them. */
 export const STATIC_EGRESS_RULES: readonly EgressRule[] = [
@@ -72,9 +112,10 @@ export const STATIC_EGRESS_RULES: readonly EgressRule[] = [
   },
   {
     host: 'registry.npmjs.org',
-    allow: { GET: /^\/@sap(?:\/|%2[fF])(?:cds|approuter|xssec|xsenv)$/ },
+    allow: { GET: NPM_REGISTRY_PATH },
+    query: false,
     credentials: [],
-    purpose: 'Current major versions of @sap/* packages (SAP_PKG_OUTDATED)',
+    purpose: 'Deprecation of public npm packages from lockfiles (DEP_DEPRECATED)',
   },
 ];
 
@@ -206,6 +247,12 @@ export function logCacheRule(logCacheUrl: URL): EgressRule {
   });
 }
 
+/** Whether the request line would carry a `?`: a query, or the bare mark of an empty one. */
+function hasQuery(url: URL): boolean {
+  const sent = url.hash === '' ? url.href : url.href.slice(0, url.href.indexOf('#'));
+  return url.search !== '' || sent.includes('?');
+}
+
 /** The path as sent plus its percent-decoded form, so encoding cannot bypass `deny`. */
 function pathVariants(pathname: string): string[] {
   try {
@@ -233,11 +280,12 @@ export class EgressPolicy {
 
   /**
    * Returns the matching rule, or throws EgressDeniedError. Checks, in order:
-   * https only, no userinfo, known host and port, allowed method and path,
-   * and no credentials unless the rule allows that kind. `authorization` is
-   * the kind of Authorization header the request carries (see `credentialKind`),
-   * `undefined` for none. It is required so that no caller can forget it and
-   * send a credential the host may not receive.
+   * https only, no userinfo, known host and port, allowed method and path, no
+   * query string where the rule allows none, and no credentials unless the
+   * rule allows that kind. `authorization` is the kind of credential the
+   * request carries in its headers (see `requestCredential`), `undefined` for
+   * none. It is required so that no caller can forget it and send a
+   * credential the host may not receive.
    */
   authorize(url: URL, method: string, authorization: CredentialKind | undefined): EgressRule {
     const deny = (reason: string): never => {
@@ -263,6 +311,8 @@ export class EgressPolicy {
         if (match.deny.test(path)) deny('endpoint returns credentials and is never read');
       }
     }
+
+    if (match.query === false && hasQuery(url)) deny('a query string is not allowed for this host');
 
     if (authorization !== undefined) {
       const allowed: readonly CredentialKind[] = match.credentials;

@@ -1,4 +1,4 @@
-import { type EgressPolicy, type HttpMethod, credentialKind } from '../net/allowlist.js';
+import { type EgressPolicy, type HttpMethod, requestCredential } from '../net/allowlist.js';
 import { HttpBodyTooLargeError, HttpNetworkError } from './errors.js';
 import { Semaphore } from './semaphore.js';
 
@@ -144,7 +144,7 @@ export class HttpClient implements ReadOnlyHttp {
     const headers = lowerCaseKeys(req.headers);
     // Throws before anything is sent when the request is not allowed, including
     // when it carries a kind of credential its host may not receive.
-    this.policy.authorize(req.url, method, credentialKind(headers.authorization));
+    this.policy.authorize(req.url, method, requestCredential(headers));
     return this.semaphore.run(() => this.send(req, method, headers));
   }
 

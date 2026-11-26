@@ -103,9 +103,10 @@ describe('the snapshot schema', () => {
         'snapshot.raw.vulnerablePackages',
         'snapshot.raw.vulnerablePackages[].advisories',
         'snapshot.raw.vulnerablePackages[].advisories[].fixed',
+        'snapshot.raw.deprecations',
       ]),
     );
-    // Every list of the model: 26 outside the project record, 39 inside it.
-    expect(found.lists.length).toBeGreaterThanOrEqual(65);
+    // Every list of the model: 27 outside the project record, 39 inside it.
+    expect(found.lists.length).toBeGreaterThanOrEqual(66);
   });
 });

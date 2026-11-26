@@ -16,6 +16,14 @@ import {
   type RawVulnerablePackage,
   RawVulnerablePackageSchema,
 } from '../model/raw.js';
+import {
+  NEVER_STOPPED,
+  type PackageRef,
+  type Stopped,
+  compareText,
+  distinctPackages,
+  inPool,
+} from './packageLookup.js';
 import { cleanExternalText } from './sanitize.js';
 
 /*
@@ -39,11 +47,8 @@ import { cleanExternalText } from './sanitize.js';
  * the order in which answers arrive: packages and advisories are sorted.
  */
 
-/** A package version to look up: one the lockfile step kept, so one from the public npm registry. */
-export interface PackageRef {
-  name: string;
-  version: string;
-}
+/* The list of packages is the one both lookups ask about (`packageLookup.ts`). */
+export { type PackageRef, distinctPackages };
 
 /** What the lookup stores in the snapshot. */
 export interface OsvTables {
@@ -77,59 +82,6 @@ const TOO_MANY_FOR_ONE_PACKAGE = `more than ${count(LIMITS.packageAdvisories)} a
 const TOO_MANY_PACKAGES = `more than ${count(LIMITS.vulnerablePackages)} packages to look up`;
 const TOO_LARGE = `${OSV_HOST} sent more than a snapshot can hold`;
 const UNEXPECTED_ERROR = `the lookup on ${OSV_HOST} stopped with an unexpected error`;
-
-function compareText(a: string, b: string): number {
-  return a < b ? -1 : a > b ? 1 : 0;
-}
-
-/** The distinct package versions, sorted by name and then version, in code point order. */
-export function distinctPackages(packages: readonly PackageRef[]): PackageRef[] {
-  const seen = new Set<string>();
-  const distinct: PackageRef[] = [];
-  for (const { name, version } of packages) {
-    // A name holds no blank, so the key cannot stand for two packages.
-    const key = `${name} ${version}`;
-    if (seen.has(key)) continue;
-    seen.add(key);
-    distinct.push({ name, version });
-  }
-  return distinct.sort((a, b) => compareText(a.name, b.name) || compareText(a.version, b.version));
-}
-
-/** True once the lookup has failed: work that is under way starts no further request. */
-type Stopped = () => boolean;
-
-const NEVER_STOPPED: Stopped = () => false;
-
-/**
- * Runs `work` on every item, at most `size` at a time. After the first
- * failure no further item is started; the ones in flight are waited for, and
- * the first failure is thrown. Work that makes more than one request asks
- * `stopped` before each further one.
- */
-async function inPool<T>(
-  items: readonly T[],
-  size: number,
-  work: (item: T, stopped: Stopped) => Promise<void>,
-): Promise<void> {
-  let next = 0;
-  let failed = false;
-  let failure: unknown;
-  const stopped: Stopped = () => failed;
-  const worker = async (): Promise<void> => {
-    while (!failed && next < items.length) {
-      const item = items[next++] as T;
-      try {
-        await work(item, stopped);
-      } catch (error) {
-        if (!failed) failure = error;
-        failed = true;
-      }
-    }
-  };
-  await Promise.all(Array.from({ length: Math.min(size, items.length) }, worker));
-  if (failed) throw failure;
-}
 
 function batchesOf<T>(items: readonly T[], size: number): T[][] {
   const batches: T[][] = [];

@@ -98,6 +98,11 @@ export const SNAPSHOT_LIST_LIMITS = {
   packageAdvisories: 1_000,
   /** Fixed versions one advisory names for one package. */
   fixedVersions: 10,
+  /**
+   * Package versions the npm registry marks as deprecated: at most the 20,000
+   * packages a scan keeps from npm lockfiles.
+   */
+  deprecations: 20_000,
   findings: 1_000_000,
   checks: 1_000,
   /** Buildpacks of one app or droplet. */

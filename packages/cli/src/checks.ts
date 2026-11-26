@@ -90,6 +90,20 @@ export const COLLECTOR_CHECKS = {
     title: 'Known vulnerabilities of npm packages (OSV.dev: POST /v1/querybatch, GET /v1/vulns)',
     roles: [],
   },
+  /**
+   * The lookup of the same packages on the public npm registry
+   * (docs/data-sources.md §12.4): which of the installed versions are
+   * deprecated. A check of its own, recorded after `collect.osv`: the two
+   * sources fail independently, and each stores all of its answers or none.
+   * Skipped for the same reasons as the lookup on OSV.dev, and required by
+   * the rule that reads its table.
+   */
+  npmDeprecations: {
+    id: 'collect.npm-deprecations',
+    title:
+      'Deprecated npm packages (npm registry: GET /<package>/<version>, GET /<package>/latest)',
+    roles: [],
+  },
 } as const satisfies Record<string, CheckDefinition>;
 
 /** How much of an app name the title of a check repeats. */

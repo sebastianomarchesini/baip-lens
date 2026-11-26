@@ -619,6 +619,28 @@ export const RawVulnerablePackageSchema = z.object({
 });
 export type RawVulnerablePackage = z.infer<typeof RawVulnerablePackageSchema>;
 
+/**
+ * A package version of the lockfiles that the public npm registry marks as
+ * deprecated (`baip-lens project`, docs/data-sources.md §12.4); shared by
+ * the projects of a scan. Of the registry's answer nothing else is kept:
+ * never the people who maintain or published the package, nor an address of
+ * theirs. The message is text from outside: it is cleaned and cut before it
+ * is stored, and bounded here again. The table holds all of the registry's
+ * answers or nothing of them: when the lookup fails it stays empty and the
+ * check `collect.npm-deprecations` says so.
+ */
+export const RawDeprecationSchema = z.object({
+  name: PackageName,
+  version: PackageVersion,
+  /** One line of external text, cleaned and cut to 200 characters; empty when the registry gives no reason. */
+  message: z.string().max(200),
+  /** The version the registry calls `latest` for the package; null when it names none that is a plain version. */
+  latest: PackageVersion.nullable(),
+  /** That version is deprecated as well, or the registry names none: the package as a whole is given up. */
+  latestDeprecated: z.boolean(),
+});
+export type RawDeprecation = z.infer<typeof RawDeprecationSchema>;
+
 const MtaName = z.string().regex(MTA_NAME_PATTERN);
 
 /**
@@ -703,5 +725,11 @@ export const RawDataSchema = z.object({
   advisories: list(RawAdvisorySchema, LIMITS.advisories).default([]),
   /** The package versions that have at least one of them; empty in the same cases. */
   vulnerablePackages: list(RawVulnerablePackageSchema, LIMITS.vulnerablePackages).default([]),
+  /**
+   * The lockfile packages the npm registry marks as deprecated; empty when
+   * that lookup did not run (see the check `collect.npm-deprecations`), for a
+   * CF scan and in snapshots written before the lookup existed.
+   */
+  deprecations: list(RawDeprecationSchema, LIMITS.deprecations).default([]),
 });
 export type RawData = z.infer<typeof RawDataSchema>;

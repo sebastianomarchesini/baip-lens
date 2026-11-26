@@ -78,6 +78,14 @@ const VULNERABLE = {
   version: '4.17.20',
   advisories: [{ id: 'GHSA-fake-0001-baip', fixed: ['4.17.21'] }],
 };
+/** One deprecated package version, as the lookup on the npm registry stores it. */
+const DEPRECATION = {
+  name: 'baip-fixture-legacy-http',
+  version: '1.9.3',
+  message: 'baip-fixture-legacy-http is no longer maintained',
+  latest: '2.0.1',
+  latestDeprecated: true,
+};
 /** The project sample as a scan with a lookup writes it: with one row in each table. */
 const looked = {
   ...project,
@@ -85,11 +93,13 @@ const looked = {
     ...(project.raw as Record<string, never>),
     advisories: [ADVISORY],
     vulnerablePackages: [VULNERABLE],
+    deprecations: [DEPRECATION],
   },
 } as typeof project;
 const ADVISORIES: JsonPath = ['raw', 'advisories'];
 const VULNERABLE_PACKAGES: JsonPath = ['raw', 'vulnerablePackages'];
 const PACKAGE_ADVISORIES: JsonPath = [...VULNERABLE_PACKAGES, 0, 'advisories'];
+const DEPRECATIONS: JsonPath = ['raw', 'deprecations'];
 
 function issuesOf(text: string) {
   const result = SnapshotSchema.safeParse(JSON.parse(text));
@@ -116,6 +126,7 @@ const LISTS: [string, typeof cf, JsonPath, number][] = [
   ['raw.vulnerablePackages', looked, VULNERABLE_PACKAGES, 20_000],
   ['the advisories of a package', looked, PACKAGE_ADVISORIES, 1_000],
   ['the fixed versions of an advisory', looked, [...PACKAGE_ADVISORIES, 0, 'fixed'], 10],
+  ['raw.deprecations', looked, DEPRECATIONS, 20_000],
 ];
 
 describe('a snapshot list stops at its first invalid element', () => {
@@ -370,5 +381,91 @@ describe('the tables of the lookup on OSV.dev', () => {
     expect(parsed(ADVISORIES, 'null').success).toBe(false);
     expect(parsed(['options', 'dependencyCheck'], '"yes"').success).toBe(false);
     expect(parsed(['options', 'dependencyCheck'], 'true').data?.options.dependencyCheck).toBe(true);
+  });
+});
+
+describe('the table of the lookup on the npm registry', () => {
+  const parsed = (path: JsonPath, json: string) =>
+    SnapshotSchema.safeParse(JSON.parse(withJsonAt(looked, path, json)));
+  const rows = (items: unknown[]) => parsed(DEPRECATIONS, JSON.stringify(items));
+
+  it('loads as a scan wrote it', () => {
+    const result = SnapshotSchema.safeParse(looked);
+    expect(result.success).toBe(true);
+    expect(result.data?.raw.deprecations).toEqual([DEPRECATION]);
+    // Next to the tables of the other source, which it leaves as they are.
+    expect(result.data?.raw.advisories).toEqual([ADVISORY]);
+    expect(result.data?.raw.vulnerablePackages).toEqual([VULNERABLE]);
+  });
+
+  it('takes as many rows as a scan keeps packages, and is refused at once with one more', () => {
+    expect(parsed(DEPRECATIONS, repeated(JSON.stringify(DEPRECATION), 20_000)).success).toBe(true);
+    expect(issuesOf(withJsonAt(looked, DEPRECATIONS, repeated('0', 20_001)))).toMatchObject([
+      { code: 'too_big', maximum: 20_000, path: DEPRECATIONS },
+    ]);
+  });
+
+  it.each([
+    ['a name that could be read as a path', { name: '../x' }],
+    ['a name that starts with a dot', { name: '.npmrc' }],
+    ['a name with an encoded slash', { name: '@scope%2fname' }],
+    ['a name of 215 characters', { name: 'n'.repeat(215) }],
+    ['a range instead of a version', { version: '^1.9.0' }],
+    ['a version of 65 characters', { version: `1.0.0-${'9'.repeat(59)}` }],
+    ['a message of 201 characters', { message: 'm'.repeat(201) }],
+    ['a message that is not text', { message: ['x'] }],
+    ['a message that is null', { message: null }],
+    ['no message at all', { message: undefined }],
+    ['a latest version that is a tag', { latest: 'latest' }],
+    ['a latest version that is a range', { latest: '>=2.0.0' }],
+    ['a latest version that is an address', { latest: 'https://example.com/x.tgz' }],
+    ['a latest version of 65 characters', { latest: `2.0.0-${'9'.repeat(59)}` }],
+    ['no latest version at all', { latest: undefined }],
+    ['a flag that is not a boolean', { latestDeprecated: 'yes' }],
+    ['no flag at all', { latestDeprecated: undefined }],
+  ])('refuses a row with %s', (_name, change) => {
+    expect(rows([{ ...DEPRECATION, ...change }]).success).toBe(false);
+  });
+
+  it('takes a row without a message, and one for which the registry names no latest version', () => {
+    const bare = { ...DEPRECATION, message: '', latest: null };
+    expect(rows([bare]).data?.raw.deprecations).toEqual([bare]);
+    const longest = {
+      ...DEPRECATION,
+      message: '\u20ac'.repeat(200),
+      latest: '2.0.0-rc.1+build.7',
+      latestDeprecated: false,
+    };
+    expect(rows([longest]).data?.raw.deprecations).toEqual([longest]);
+  });
+
+  it('drops every key of a row it does not know, so nothing else of a registry answer can be stored', () => {
+    const result = rows([
+      {
+        ...DEPRECATION,
+        maintainers: [{ name: 'Planted Person', email: 'planted@example.com' }],
+        _npmUser: { name: 'Planted Person', email: 'planted@example.com' },
+        author: 'Planted Person',
+        description: 'planted text',
+        dist: { tarball: 'https://planted.example.com/x.tgz', integrity: 'sha512-planted' },
+        deprecated: 'planted message',
+      },
+    ]);
+    expect(result.success).toBe(true);
+    expect(result.data?.raw.deprecations).toEqual([DEPRECATION]);
+    expect(JSON.stringify(result.data)).not.toMatch(/planted/i);
+  });
+
+  it('is empty in a snapshot written without it', () => {
+    const before = structuredClone(looked) as { raw: Record<string, unknown> };
+    delete before.raw.deprecations;
+    const result = SnapshotSchema.safeParse(before);
+    expect(result.success).toBe(true);
+    expect(result.data?.raw.deprecations).toEqual([]);
+    // The tables of the other lookup are read as they were written.
+    expect(result.data?.raw.vulnerablePackages).toEqual([VULNERABLE]);
+    expect(parsed(DEPRECATIONS, 'null').success).toBe(false);
+    expect(parsed(DEPRECATIONS, '{}').success).toBe(false);
+    expect(parsed(DEPRECATIONS, '[]').data?.raw.deprecations).toEqual([]);
   });
 });

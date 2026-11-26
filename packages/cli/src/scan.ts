@@ -237,6 +237,7 @@ export async function scan(options: ScanOptions): Promise<Snapshot> {
     // A CF scan reads no lockfiles, so it has no packages to look up.
     advisories: [],
     vulnerablePackages: [],
+    deprecations: [],
   };
   log(`Collected ${raw.apps.length} app(s)`);
 

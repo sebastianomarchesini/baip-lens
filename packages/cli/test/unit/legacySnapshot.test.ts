@@ -23,6 +23,7 @@ describe('0.1.0 snapshot compatibility', () => {
     // Nothing was looked up when it was written, and nothing says it was.
     expect(snapshot.raw.advisories).toEqual([]);
     expect(snapshot.raw.vulnerablePackages).toEqual([]);
+    expect(snapshot.raw.deprecations).toEqual([]);
     expect(snapshot.options.dependencyCheck).toBe(false);
     expect(snapshot.apps.every((app) => app.kind === 'app')).toBe(true);
     expect(snapshot.scope.apiEndpoint).toBe('https://api.cf.example.org/');
@@ -71,8 +72,10 @@ describe('0.3.1 project snapshot compatibility', () => {
     // Its packages were never looked up either: no table, no check, and the option says so.
     expect(snapshot.raw.advisories).toEqual([]);
     expect(snapshot.raw.vulnerablePackages).toEqual([]);
+    expect(snapshot.raw.deprecations).toEqual([]);
     expect(snapshot.options.dependencyCheck).toBe(false);
     expect(snapshot.checks.some((check) => check.id === 'collect.osv')).toBe(false);
+    expect(snapshot.checks.some((check) => check.id === 'collect.npm-deprecations')).toBe(false);
   });
 
   it('re-analyzes to the same findings, and gains no dependency rule', () => {
@@ -87,6 +90,7 @@ describe('0.3.1 project snapshot compatibility', () => {
     expect(result.checks.some((check) => check.id.startsWith('rule.DEP_'))).toBe(false);
     expect(result.findings.some((finding) => finding.id.startsWith('DEP_'))).toBe(false);
     expect(result.checks.some((check) => check.id === 'collect.osv')).toBe(false);
+    expect(result.checks.some((check) => check.id === 'collect.npm-deprecations')).toBe(false);
   });
 
   it('produces valid report data that lists the dependency rules without having run them', () => {
